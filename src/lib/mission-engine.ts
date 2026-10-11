@@ -1,10 +1,10 @@
 export type MissionStatus = 'ACTIVE' | 'ARMED' | 'PAUSED' | 'SNOOZED' | 'CRISIS' | 'STOPPED';
-export type Mission = { id: string; title: string; kind: 'timer' | 'alarm'; duration: number; remaining: number; deadline: number; status: MissionStatus; time?: string };
+export type Mission = { id: string; title: string; kind: 'timer' | 'alarm'; duration: number; remaining: number; deadline: number; status: MissionStatus; time?: string | undefined };
 export type Preset = { title: string; minutes: number; pinned?: boolean };
 export const protocols: Preset[] = [{ title: 'Tactical Sprint', minutes: 25 }, { title: 'Interrogation', minutes: 15 }, { title: 'Satellite Pass', minutes: 45 }, { title: 'Field Stand-Down', minutes: 5 }];
 export function remainingMs(m: Mission, now: number) { return ['ACTIVE', 'ARMED', 'SNOOZED', 'CRISIS'].includes(m.status) ? Math.max(0, m.deadline - now) : m.remaining; }
 export function nextAlarm(time: string, now: number) {
-  const [hours, minutes] = time.split(':').map(Number);
+  const [hours = 0, minutes = 0] = time.split(':').map(Number);
   const d = new Date(now); d.setHours(hours, minutes, 0, 0);
   if (d.getTime() <= now) d.setDate(d.getDate() + 1);
   return d.getTime();

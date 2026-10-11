@@ -35,10 +35,9 @@ export function useMissions() {
     setMissions(items => items.map(m => {
       if (m.id !== id) return m;
       if (action === 'pause') return {...m, remaining:remainingMs(m,at),status:'PAUSED'};
-      if (action === 'start') return {...m,deadline:m.kind === 'alarm' && m.time ? nextAlarm(m.time,at) : at+(m.remaining || m.duration),status:m.kind==='alarm'?'ARMED':'ACTIVE'};
-      if (action === 'reset') return {...m,remaining:m.duration,deadline:at+m.duration,status:'PAUSED'};
+      if (action === 'start') return {...m,deadline:m.kind === 'alarm' && m.time && m.status !== 'PAUSED' ? nextAlarm(m.time,at) : at+(m.remaining || m.duration),status:m.kind==='alarm'?'ARMED':'ACTIVE'};
+      if (action === 'reset') { const duration = m.kind === 'alarm' && m.time ? nextAlarm(m.time,at)-at : m.duration; return {...m,remaining:duration,deadline:at+duration,status:'PAUSED'}; }
       if (action === 'snooze') return {...m,remaining:snoozeMinutes*60000,deadline:at+snoozeMinutes*60000,status:'SNOOZED'};
-      if (m.kind === 'alarm' && m.time) return {...m,deadline:nextAlarm(m.time,at),status:'ARMED'};
       return {...m,status:'STOPPED',remaining:m.duration};
     }));
     if (action === 'stop') setPin(p => p===id ? null : p);
