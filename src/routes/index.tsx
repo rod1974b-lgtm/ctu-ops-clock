@@ -1,24 +1,816 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useRef, useState } from "react";
+import {
+  Activity,
+  AudioLines,
+  Bell,
+  ChevronDown,
+  ChevronRight,
+  Crosshair,
+  Expand,
+  Eye,
+  Globe,
+  LockKeyhole,
+  Moon,
+  Pause,
+  Play,
+  Plus,
+  Radio,
+  RotateCcw,
+  Shield,
+  ShieldCheck,
+  Square,
+  Timer,
+  Trash2,
+  Volume2,
+  VolumeX,
+  X,
+  Zap,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { CTUDigits } from "@/components/ctu-digits";
+import { useMissions } from "@/hooks/use-missions";
+import { clockParts, protocols, remainingMs } from "@/lib/mission-engine";
+import { CTUAudio, defaultAudio, type AudioSettings } from "@/lib/ctu-audio";
+import surveillance from "@/assets/la-surveillance.jpg";
 
-// No head() here: the home route inherits title/description/og/twitter from
-// __root.tsx, and ships no og:image so serve-time hosting can inject the
-// project's social preview (explicit og:image or latest screenshot).
 export const Route = createFileRoute("/")({
+  head: () => ({
+    meta: [
+      { title: "CTU Terminal — Mission Clock & Operations" },
+      {
+        name: "description",
+        content:
+          "A 24-inspired CTU mission terminal with precision countdowns, daily alarms, and tactical audio alerts.",
+      },
+      { property: "og:title", content: "CTU Terminal — Mission Clock & Operations" },
+      {
+        property: "og:description",
+        content: "Monitor mission time, arm concurrent timers, and command your daily operations.",
+      },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
+    ],
+  }),
   component: Index,
 });
 
-// IMPORTANT: Replace this placeholder. See ./README.md for routing conventions.
 function Index() {
+  const engine = useMissions();
+  const {
+    now,
+    missions,
+    focus,
+    pin,
+    setPin,
+    arm,
+    act,
+    remove,
+    customPresets,
+    setCustomPresets,
+    loaded,
+  } = engine;
+  const [format24, setFormat24] = useState(true);
+  const [stealth, setStealth] = useState(false);
+  const [audio, setAudio] = useState<AudioSettings>(defaultAudio);
+  const [audioOpen, setAudioOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
+  const [kind, setKind] = useState<"timer" | "alarm">("timer");
+  const [title, setTitle] = useState("");
+  const [minutes, setMinutes] = useState("25");
+  const [seconds, setSeconds] = useState("0");
+  const [alarmTime, setAlarmTime] = useState("09:00");
+  const [savePreset, setSavePreset] = useState(false);
+  const [guard, setGuard] = useState(false);
+  const [notice, setNotice] = useState("");
+  const audioRef = useRef<CTUAudio | null>(null);
+  const lockRef = useRef<WakeLockSentinel | null>(null);
+  const lastBeat = useRef(-1);
+  const crisis = missions.some((m) => m.status === "CRISIS");
+  const active = missions.filter((m) =>
+    ["ACTIVE", "ARMED", "SNOOZED", "CRISIS"].includes(m.status),
+  );
+  const remaining = focus ? remainingMs(focus, now) : 0;
+  const heightened = active.some((m) => remainingMs(m, now) < 300000);
+  const urgent = active.some((m) => remainingMs(m, now) <= audio.window * 1000);
+  const tier = crisis ? 3 : urgent ? 2 : 1;
+  const date = now ? new Date(now) : null;
+  const local = date
+    ? date
+        .toLocaleTimeString("en-GB", {
+          hour12: !format24,
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        })
+        .replace(/\s?[ap]m/i, "")
+    : "00:00:00";
+  const zulu = date ? date.toISOString().slice(11, 19) : "00:00:00";
+  useEffect(() => {
+    audioRef.current = new CTUAudio();
+    try {
+      const saved = JSON.parse(localStorage.getItem("ctu-settings-v1") ?? "null");
+      if (saved) {
+        setAudio({ ...defaultAudio, ...saved.audio, enabled: false });
+        setFormat24(saved.format24 ?? true);
+        setStealth(saved.stealth ?? false);
+      }
+    } catch {}
+    return () => audioRef.current?.close();
+  }, []);
+  useEffect(() => {
+    if (loaded)
+      try {
+        localStorage.setItem("ctu-settings-v1", JSON.stringify({ audio, format24, stealth }));
+      } catch {}
+  }, [audio, format24, stealth, loaded]);
+  useEffect(() => {
+    const beat = Math.floor(now / 1000);
+    if (beat === lastBeat.current || !now) return;
+    lastBeat.current = beat;
+    if (active.length) audioRef.current?.tick(tier, audio, beat);
+  }, [now, tier, audio, active.length]);
+  useEffect(() => {
+    document.title = focus
+      ? `[${clockParts(remaining)}] ${crisis ? "CRISIS · " : ""}CTU Terminal`
+      : "CTU Terminal — Mission Clock & Operations";
+  }, [focus, remaining, crisis]);
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(""), 4000);
+    return () => clearTimeout(timer);
+  }, [notice]);
+  useEffect(() => {
+    return () => {
+      void lockRef.current?.release();
+    };
+  }, []);
+  const feedback = () => {
+    if (audio.enabled) {
+      void audioRef.current?.unlock();
+      audioRef.current?.chirp(0.4);
+    }
+  };
+  const control = (id: string, action: Parameters<typeof act>[1]) => {
+    act(id, action, audio.snooze);
+    feedback();
+  };
+  const toggleAudio = async () => {
+    if (audio.enabled) {
+      await audioRef.current?.mute();
+      setAudio((a) => ({ ...a, enabled: false }));
+    } else {
+      try {
+        await audioRef.current?.unlock();
+        setAudio((a) => ({ ...a, enabled: true }));
+        audioRef.current?.chirp(0.4);
+      } catch {
+        setNotice("Audio unavailable in this browser.");
+      }
+    }
+  };
+  const toggleGuard = async () => {
+    if (guard) {
+      await lockRef.current?.release();
+      setGuard(false);
+      return;
+    }
+    try {
+      if (!navigator.wakeLock) throw new Error();
+      const lock = await navigator.wakeLock.request("screen");
+      lockRef.current = lock;
+      setGuard(true);
+      lock.addEventListener("release", () => setGuard(false));
+    } catch {
+      setNotice("Terminal guard is unavailable or the screen is not visible.");
+    }
+  };
+  const fullscreen = () => {
+    if (document.fullscreenElement) void document.exitFullscreen();
+    else
+      void document.documentElement
+        .requestFullscreen()
+        .catch(() => setNotice("Full-screen mode is unavailable."));
+  };
+  const armPreset = (p: { title: string; minutes: number; pinned?: boolean }) => {
+    arm(p.title, p.minutes * 60000, "timer", undefined, p.pinned);
+    feedback();
+  };
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const duration = (Number(minutes) * 60 + Number(seconds)) * 1000;
+    if (kind === "timer" && (!Number.isFinite(duration) || duration <= 0)) return;
+    const missionTitle = title.trim() || (kind === "timer" ? "Custom Operation" : "Daily Briefing");
+    arm(missionTitle, duration, kind, alarmTime);
+    if (savePreset && kind === "timer")
+      setCustomPresets((items) => [...items, { title: missionTitle, minutes: duration / 60000 }]);
+    feedback();
+    setAddOpen(false);
+    setTitle("");
+    setSavePreset(false);
+  };
+  const progress =
+    focus && focus.duration
+      ? Math.min(100, Math.max(0, 100 - (remaining / focus.duration) * 100))
+      : 0;
   return (
-    <div
-      className="flex min-h-screen items-center justify-center"
-      style={{ backgroundColor: "#fcfbf8" }}
+    <main
+      className={`ctu-terminal ${stealth ? "night-ops" : ""} ${crisis ? "crisis-state" : heightened ? "heightened-state" : ""}`}
     >
-      <img
-        data-lovable-blank-page-placeholder="REMOVE_THIS"
-        src="https://cdn.gpteng.co/blank-app-v1.svg"
-        alt="Your app will live here!"
-      />
-    </div>
+      <header className="terminal-header">
+        <div className="brand">
+          <div className="ctu-mark">
+            <Shield size={27} />
+            <span>CTU</span>
+          </div>
+          <div>
+            <div className="brand-title">
+              CTU <span>TERMINAL</span>
+            </div>
+            <div className="micro muted">COUNTER TERRORIST UNIT · LOS ANGELES</div>
+          </div>
+        </div>
+        <div className="header-station">
+          <span className="status-dot" /> STATION 04 <span className="muted">/</span> ONLINE{" "}
+          <LockKeyhole size={12} />
+        </div>
+        <div className="header-right">
+          <div className="zulu">
+            <span className="micro muted">ZULU / UTC</span>
+            <span>
+              {zulu} <span className="muted">Z</span>
+            </span>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            title="Full-screen command center"
+            aria-label="Full-screen command center"
+            onClick={fullscreen}
+          >
+            <Expand />
+          </Button>
+        </div>
+      </header>
+      <div className="command-heading">
+        <div>
+          <div className="micro accent flex items-center gap-2">
+            <span className="tiny-square" /> LIVE OPERATIONS / SECTOR 07
+          </div>
+          <h1>Mission control</h1>
+        </div>
+        <div className="classified">
+          <ShieldCheck size={15} /> SECURE CONNECTION <span className="divider">|</span> LEVEL 5
+          CLEARANCE
+        </div>
+      </div>
+      <div className="operations-layout">
+        <div className="primary-column">
+          <section className="terminal-panel clock-panel">
+            <div className="panel-heading">
+              <span>
+                <Activity size={13} /> LOCAL MISSION TIME
+              </span>
+              <div className="segmented">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={format24 ? "selected" : ""}
+                  onClick={() => setFormat24(true)}
+                >
+                  24H
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={!format24 ? "selected" : ""}
+                  onClick={() => setFormat24(false)}
+                >
+                  12H
+                </Button>
+              </div>
+            </div>
+            <div className="clock-stage">
+              <CTUDigits value={local} blink className="mission-clock" />
+              {!format24 && date && (
+                <span className="am-pm">{date.getHours() >= 12 ? "PM" : "AM"}</span>
+              )}
+            </div>
+            <div className="clock-caption">
+              <span>
+                {date
+                  ? date
+                      .toLocaleDateString("en-US", {
+                        weekday: "long",
+                        month: "long",
+                        day: "2-digit",
+                        year: "numeric",
+                      })
+                      .toUpperCase()
+                  : "ESTABLISHING LOCAL TIME"}
+              </span>
+              <span className="accent">
+                <span className="status-dot" /> EVENTS OCCUR IN REAL TIME
+              </span>
+            </div>
+          </section>
+          <section className="terminal-panel focus-panel">
+            <div className="panel-heading">
+              <span>
+                <Crosshair size={13} /> PRIMARY OPERATION
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="focus-mode"
+                onClick={() => setPin(null)}
+                title="Return to closest-expiring operation"
+              >
+                <span className="tiny-square" />
+                {pin ? "MANUALLY PINNED" : "AUTO · CLOSEST TO ZERO"}
+                <ChevronDown size={12} />
+              </Button>
+            </div>
+            <div className="operation-title">
+              <div className="micro muted">
+                {focus
+                  ? `OP-${focus.id.slice(0, 4).toUpperCase()} / ${focus.kind === "timer" ? "COUNTDOWN PROTOCOL" : "DAILY ALARM"}`
+                  : "CTU / AWAITING ASSIGNMENT"}
+              </div>
+              <h2>{focus ? focus.title : "No active operation"}</h2>
+              <span className={`state-badge ${focus ? "" : "standby"}`}>
+                <span className="status-dot" />
+                {focus?.status ?? "STANDBY"}
+              </span>
+            </div>
+            <div className="focus-clock-wrap">
+              <CTUDigits
+                value={focus ? clockParts(remaining) : "00:00:00"}
+                className="focus-clock"
+              />
+              <div className="digit-labels">
+                <span>HOURS</span>
+                <span>MINUTES</span>
+                <span>SECONDS</span>
+              </div>
+            </div>
+            <div className="operation-progress">
+              <span>{focus ? "TIME TO ZERO" : "AWAITING MISSION"}</span>
+              <span>{focus ? `${Math.round(progress)}% ELAPSED` : "—"}</span>
+              <progress value={progress} max="100" />
+            </div>
+            <div className="mission-controls">
+              <Button
+                className="primary-control"
+                disabled={!focus || focus.status === "CRISIS"}
+                onClick={() => {
+                  if (focus)
+                    control(
+                      focus.id,
+                      ["PAUSED", "STOPPED"].includes(focus.status) ? "start" : "pause",
+                    );
+                }}
+              >
+                {focus && ["PAUSED", "STOPPED"].includes(focus.status) ? (
+                  <Play size={15} />
+                ) : (
+                  <Pause size={15} />
+                )}{" "}
+                {focus && ["PAUSED", "STOPPED"].includes(focus.status) ? "START" : "PAUSE"}
+              </Button>
+              <Button
+                variant="outline"
+                disabled={!focus}
+                onClick={() => focus && control(focus.id, "reset")}
+              >
+                <RotateCcw />
+                RESET
+              </Button>
+              <Button
+                variant={crisis ? "destructive" : "outline"}
+                disabled={!focus}
+                onClick={() => focus && control(focus.id, "stop")}
+              >
+                <Square />
+                DISARM
+              </Button>
+              <Button
+                variant="ghost"
+                disabled={!focus}
+                onClick={() => focus && control(focus.id, "snooze")}
+              >
+                <Bell />
+                SNOOZE <span className="muted">{audio.snooze}M</span>
+              </Button>
+            </div>
+            <div className="focus-footer">
+              <span>
+                <Radio size={12} />{" "}
+                {crisis ? "CRITICAL ZERO · INTERVENTION REQUIRED" : "TIMESTAMP SYNC ACTIVE"}
+              </span>
+              <span>
+                THREAT CON {crisis ? "1" : heightened ? "2" : "4"}{" "}
+                <span className="accent">
+                  / {crisis ? "CODE RED" : heightened ? "HEIGHTENED" : "WATCH"}
+                </span>
+              </span>
+            </div>
+          </section>
+          <section className="presets-section">
+            <div className="section-label">
+              <span>
+                <Zap size={14} /> QUICK-ARM PROTOCOLS
+              </span>
+              <span className="muted">{protocols.length + customPresets.length} AVAILABLE</span>
+            </div>
+            <div className="preset-grid">
+              {[...protocols, ...customPresets].map((p, i) => (
+                <Button
+                  key={`${p.title}-${i}`}
+                  variant="outline"
+                  className="preset"
+                  onClick={() => armPreset(p)}
+                >
+                  <div className="preset-top">
+                    <span>{String(i + 1).padStart(2, "0")}</span>
+                    <Plus size={14} />
+                  </div>
+                  <span className="preset-name">{p.title}</span>
+                  <span className="preset-duration">
+                    {Number(p.minutes.toFixed(2))} <small>MINUTES</small>
+                  </span>
+                </Button>
+              ))}
+            </div>
+          </section>
+        </div>
+        <aside className="secondary-column">
+          <section className="terminal-panel queue-panel">
+            <div className="panel-heading">
+              <span>
+                <Timer size={13} /> OPERATIONS QUEUE
+              </span>
+              <span className="queue-count">{String(active.length).padStart(2, "0")} ARMED</span>
+            </div>
+            <div className="queue-body">
+              {missions.length === 0 ? (
+                <div className="empty-queue">
+                  <Crosshair size={30} />
+                  <span>NO OPERATIONS ARMED</span>
+                  <p>Standing by for mission assignment.</p>
+                </div>
+              ) : (
+                missions.map((m) => (
+                  <div
+                    key={m.id}
+                    className={`queue-item ${focus?.id === m.id ? "is-focused" : ""}`}
+                  >
+                    <div className="queue-item-top">
+                      <span className="micro muted">
+                        {m.kind === "alarm" ? <Bell size={12} /> : <Timer size={12} />}{" "}
+                        {m.kind === "alarm"
+                          ? `DAILY / ${m.time}`
+                          : `OP-${m.id.slice(0, 4).toUpperCase()}`}
+                      </span>
+                      <div className="queue-tools">
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          aria-label={`Pin ${m.title}`}
+                          title={`Pin ${m.title}`}
+                          className={pin === m.id ? "accent" : ""}
+                          onClick={() => {
+                            setPin(pin === m.id ? null : m.id);
+                            feedback();
+                          }}
+                        >
+                          <Crosshair />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          aria-label={`Remove ${m.title}`}
+                          title="Remove operation"
+                          onClick={() => {
+                            remove(m.id);
+                            feedback();
+                          }}
+                        >
+                          <Trash2 />
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="queue-name">{m.title}</div>
+                    <div className="queue-item-bottom">
+                      <span className={`queue-status ${m.status === "CRISIS" ? "accent" : ""}`}>
+                        <span className="status-dot" />
+                        {m.status}
+                      </span>
+                      <span>{clockParts(remainingMs(m, now))}</span>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`${["PAUSED", "STOPPED"].includes(m.status) ? "Start" : "Pause"} ${m.title}`}
+                        disabled={m.status === "CRISIS"}
+                        onClick={() =>
+                          control(
+                            m.id,
+                            ["PAUSED", "STOPPED"].includes(m.status) ? "start" : "pause",
+                          )
+                        }
+                      >
+                        {["PAUSED", "STOPPED"].includes(m.status) ? <Play /> : <Pause />}
+                      </Button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="queue-add">
+              <Button variant="outline" className="w-full" onClick={() => setAddOpen(true)}>
+                <Plus /> ARM NEW OPERATION
+              </Button>
+            </div>
+          </section>
+          <section className="terminal-panel surveillance-panel">
+            <div className="panel-heading">
+              <span>
+                <Eye size={13} /> SURVEILLANCE FEED
+              </span>
+              <span className="accent micro">
+                <span className="status-dot" /> LIVE
+              </span>
+            </div>
+            <div className="surveillance-image">
+              <img
+                src={surveillance}
+                alt="Watercolor aerial surveillance of downtown Los Angeles"
+                width="1536"
+                height="1024"
+              />
+              <div className="feed-crosshair" />
+              <span className="feed-tag">CAM 07 / LOS ANGELES</span>
+              <span className="feed-coordinates">34°03′ N &nbsp; 118°15′ W</span>
+              <span className="feed-time">{zulu} Z</span>
+            </div>
+            <div className="feed-footer">
+              <span>
+                <Globe size={12} /> SECTOR 07 · DOWNTOWN
+              </span>
+              <span className="signal-bars">▂ ▄ ▆ █</span>
+            </div>
+          </section>
+        </aside>
+      </div>
+      <section className="telemetry-bar">
+        <div className="telemetry-status">
+          <ShieldCheck size={17} />
+          <div>
+            <span className="micro muted">TERMINAL STATUS</span>
+            <span>
+              ONLINE <span className="muted">/</span> SECURE
+            </span>
+          </div>
+        </div>
+        <div className="threat-status">
+          <span className="micro muted">THREAT CONDITION</span>
+          <span className="accent">
+            <span className="tiny-square" /> CON{" "}
+            {crisis ? "1 · CODE RED" : heightened ? "2 · HEIGHTENED" : "4 · WATCH"}
+          </span>
+        </div>
+        <div className="telemetry-actions">
+          <Button
+            variant="ghost"
+            className={guard ? "accent" : ""}
+            onClick={toggleGuard}
+            title="Keep the screen awake"
+          >
+            <Shield size={15} />
+            <span>TERMINAL GUARD</span>
+            <span className={`toggle-track ${guard ? "on" : ""}`} />
+          </Button>
+          <Button
+            variant="ghost"
+            className={stealth ? "accent" : ""}
+            onClick={() => setStealth((s) => !s)}
+          >
+            <Moon size={15} />
+            <span>NIGHT OPS</span>
+            <span className={`toggle-track ${stealth ? "on" : ""}`} />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={audio.enabled ? "Mute audio" : "Enable audio"}
+            title={audio.enabled ? "Mute audio" : "Enable audio"}
+            onClick={toggleAudio}
+          >
+            {audio.enabled ? <Volume2 /> : <VolumeX />}
+          </Button>
+          <Button
+            variant="ghost"
+            onClick={() => setAudioOpen((o) => !o)}
+            className={audioOpen ? "accent" : ""}
+          >
+            <AudioLines />
+            <span>AUDIO MATRIX</span>
+            <ChevronDown />
+          </Button>
+        </div>
+      </section>
+      {audioOpen && (
+        <section className="audio-matrix">
+          <div className="section-label">
+            <span>
+              <AudioLines size={14} /> CTU AUDIO MATRIX
+            </span>
+            <span className="muted">SYNTHESIZED SIGNALS</span>
+          </div>
+          <div className="audio-sliders">
+            {(["ambient", "countdown", "alarm", "media"] as const).map((bus, i) => (
+              <label key={bus}>
+                <span>
+                  {["AMBIENT WATCH", "URGENT COUNTDOWN", "CRISIS ALARM", "CINEMATIC STREAM"][i]}
+                  <strong>{audio[bus]}%</strong>
+                </span>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  aria-label={`${bus} volume`}
+                  value={audio[bus]}
+                  onChange={(e) => setAudio((a) => ({ ...a, [bus]: Number(e.target.value) }))}
+                />
+              </label>
+            ))}
+          </div>
+          <div className="audio-options">
+            <label>
+              URGENT WINDOW{" "}
+              <select
+                value={audio.window}
+                onChange={(e) => setAudio((a) => ({ ...a, window: Number(e.target.value) }))}
+              >
+                <option value="60">60 seconds</option>
+                <option value="30">30 seconds</option>
+                <option value="10">10 seconds</option>
+              </select>
+            </label>
+            <label>
+              SNOOZE{" "}
+              <select
+                value={audio.snooze}
+                onChange={(e) => setAudio((a) => ({ ...a, snooze: Number(e.target.value) }))}
+              >
+                {[5, 9, 10].map((n) => (
+                  <option key={n} value={n}>
+                    {n} minutes
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={audio.phone}
+                onChange={(e) => setAudio((a) => ({ ...a, phone: e.target.checked }))}
+              />{" "}
+              CTU PHONE ALERT
+            </label>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                await audioRef.current?.unlock();
+                audioRef.current?.tick(3, { ...audio, enabled: true }, 0);
+              }}
+            >
+              TEST ALERT <Volume2 />
+            </Button>
+          </div>
+        </section>
+      )}
+      <footer className="terminal-footer">
+        <span>CTU // DOMESTIC OPERATIONS DIVISION</span>
+        <span>
+          ENCRYPTION: AES-256 <span className="footer-divider">/</span> SYSTEM V.24.01{" "}
+          <span className="footer-divider">/</span>{" "}
+          <span className="accent">ALL CHANNELS SECURE</span>
+        </span>
+      </footer>
+      {notice && (
+        <div role="status" className="terminal-notice">
+          {notice}
+        </div>
+      )}
+      {addOpen && (
+        <div className="modal-backdrop" onClick={() => setAddOpen(false)}>
+          <section
+            className="arm-dialog terminal-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="arm-heading"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="panel-heading">
+              <span>
+                <Plus size={14} /> NEW OPERATION
+              </span>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Close new operation"
+                onClick={() => setAddOpen(false)}
+              >
+                <X />
+              </Button>
+            </div>
+            <form onSubmit={submit}>
+              <h2 id="arm-heading">Arm an operation</h2>
+              <div className="dialog-tabs">
+                <Button
+                  type="button"
+                  variant={kind === "timer" ? "default" : "outline"}
+                  onClick={() => setKind("timer")}
+                >
+                  <Timer />
+                  COUNTDOWN
+                </Button>
+                <Button
+                  type="button"
+                  variant={kind === "alarm" ? "default" : "outline"}
+                  onClick={() => setKind("alarm")}
+                >
+                  <Bell />
+                  DAILY ALARM
+                </Button>
+              </div>
+              <label>
+                MISSION TITLE
+                <input
+                  autoFocus
+                  maxLength={70}
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="Operation: Afternoon Sprint"
+                />
+              </label>
+              {kind === "timer" ? (
+                <div className="duration-inputs">
+                  <label>
+                    MINUTES
+                    <input
+                      type="number"
+                      min="0"
+                      max="10080"
+                      required
+                      value={minutes}
+                      onChange={(e) => setMinutes(e.target.value)}
+                    />
+                  </label>
+                  <label>
+                    SECONDS
+                    <input
+                      type="number"
+                      min="0"
+                      max="59"
+                      required
+                      value={seconds}
+                      onChange={(e) => setSeconds(e.target.value)}
+                    />
+                  </label>
+                </div>
+              ) : (
+                <label>
+                  DAILY ALARM · LOCAL TIME
+                  <input
+                    type="time"
+                    required
+                    value={alarmTime}
+                    onChange={(e) => setAlarmTime(e.target.value)}
+                  />
+                </label>
+              )}
+              {kind === "timer" && (
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={savePreset}
+                    onChange={(e) => setSavePreset(e.target.checked)}
+                  />{" "}
+                  SAVE AS QUICK-ARM PROTOCOL
+                </label>
+              )}
+              <Button type="submit" className="arm-submit">
+                <Plus />
+                ARM OPERATION
+                <ChevronRight />
+              </Button>
+            </form>
+          </section>
+        </div>
+      )}
+    </main>
   );
 }
