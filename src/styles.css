@@ -144,7 +144,7 @@
 }
 
 /* CTU operational palette: role-based tokens override the starter theme. */
-:root {
+:root, .dark {
   --radius: 0.25rem;
   --background: oklch(0 0 0);
   --foreground: oklch(0.86 0.007 95);
@@ -157,12 +157,12 @@
   --secondary: oklch(0.17 0.003 95);
   --secondary-foreground: var(--foreground);
   --muted: oklch(0.16 0.003 95);
-  --muted-foreground: oklch(0.55 0.007 95);
+  --muted-foreground: oklch(0.68 0.014 95);
   --accent: oklch(0.865 0.177 90.38);
   --accent-foreground: var(--primary-foreground);
   --destructive: oklch(0.64 0.248 28);
   --destructive-foreground: oklch(0.98 0 0);
-  --border: oklch(0.25 0.01 95);
+  --border: oklch(0.39 0.035 95);
   --input: oklch(0.29 0.012 95);
   --ring: var(--primary);
   --watch: oklch(0.865 0.177 90.38);
@@ -1354,4 +1354,164 @@ input[type="checkbox"] {
     animation: none !important;
     transition: none !important;
   }
+}
+
+/* 24 TITLE-SEQUENCE EDITION — replaces the dashboard choreography. */
+.ctu-terminal {
+  max-width: 1800px;
+  padding: 0 32px;
+  background-color: var(--background);
+  background-size: 120px 120px;
+  --shadow-led: 0 0 16px color-mix(in oklab, var(--signal) 26%, transparent);
+}
+.terminal-header { height: 104px; border-bottom: 2px solid var(--signal); }
+.brand::before {
+  content: '24';
+  font-family: var(--font-display);
+  font-size: 76px;
+  font-weight: 700;
+  font-style: italic;
+  line-height: 1;
+  color: var(--watch);
+  padding-right: 18px;
+  border-right: 1px solid var(--border);
+  text-shadow: var(--shadow-led);
+}
+.ctu-mark { display: none; }
+.brand-title { font-size: 29px; }
+.brand .micro { font-size: 10px; }
+.header-station { font-size: 11px; }
+.zulu { font-size: 22px; color: var(--signal); }
+.command-heading { padding: 22px 0; }
+.command-heading h1 { font-size: 32px; text-transform: uppercase; font-weight: 600; }
+.command-heading .micro { font-size: 11px; }
+.classified { font-size: 10px; }
+.operations-layout { grid-template-columns: minmax(0, 1fr) 350px; gap: 12px; }
+.primary-column { display: flex; flex-direction: column; gap: 12px; }
+.focus-panel { order: 0; margin-top: 0; border-top: 3px solid var(--signal); }
+.clock-panel { order: 1; }
+.presets-section { order: 2; margin-top: 12px; }
+.terminal-panel { background: var(--background); border-color: var(--border); }
+.panel-heading { background: var(--secondary); height: 42px; font-size: 11px; color: var(--foreground); }
+.panel-heading > span:first-child svg { color: var(--signal); }
+.focus-mode { font-size: 9px !important; }
+.operation-title { padding: 25px 28px 0; display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 12px; align-items: center; }
+.operation-title > .micro { grid-column: 1 / -1; font-size: 11px; }
+.operation-title h2 { margin: 0; font-size: 35px; text-transform: uppercase; overflow-wrap: anywhere; }
+.state-badge { position: static; font-size: 10px; align-self: center; }
+.focus-clock-wrap { padding: 32px 28px 0; }
+.focus-clock { height: 160px; max-width: 800px; width: 100%; }
+.segment-off { opacity: 0.025; }
+.digit-labels { max-width: 800px; font-size: 10px; margin-top: 18px; }
+.operation-progress { margin-top: 26px; font-size: 10px; }
+.operation-progress progress { height: 5px; }
+.mission-controls { padding: 25px 20px; gap: 12px; }
+.mission-controls button { height: 42px; font-size: 11px; border-radius: 0; }
+.mission-controls .primary-control { min-width: 134px; }
+.focus-footer { font-size: 10px; padding: 15px 18px; background: var(--card); }
+.clock-stage { padding: 22px 28px 16px; }
+.mission-clock { max-width: 430px; height: 75px; }
+.clock-caption { font-size: 10px; padding: 0 18px 18px; flex-wrap: wrap; }
+.clock-caption .accent { font-family: var(--font-display); font-size: 15px; text-transform: uppercase; }
+.queue-body { height: 302px; }
+.queue-count { font-size: 10px; }
+.queue-item { padding: 12px 15px; }
+.queue-item-top .micro { font-size: 10px; }
+.queue-name { font-size: 24px; }
+.queue-status { font-size: 10px; }
+.queue-item-bottom > span:nth-child(2) { font-family: var(--font-mono); font-size: 18px; }
+.queue-add button { height: 38px; font-size: 10px; border-style: solid; border-color: var(--signal); color: var(--signal); }
+.surveillance-panel { margin-top: 12px; }
+.surveillance-image { height: 245px; }
+.surveillance-image img { opacity: 1; }
+.feed-tag, .feed-time { font-size: 10px; }
+.feed-coordinates { font-size: 9px; }
+.feed-footer { font-size: 9px; }
+.section-label { font-size: 10px; }
+.preset-grid { gap: 8px; }
+.preset { height: 109px; border-radius: 0; border-top: 2px solid var(--border); }
+.preset:hover { border-top-color: var(--signal); }
+.preset-name { font-size: 20px; margin-top: 8px; }
+.preset-top { font-size: 9px; }
+.preset-duration { font-size: 18px; }
+.preset-duration small { font-size: 8px; }
+.telemetry-bar { margin-top: 22px; border-top: 2px solid var(--signal); min-height: 70px; }
+.telemetry-status > div, .threat-status { font-size: 11px; }
+.telemetry-status .micro, .threat-status .micro { font-size: 9px; }
+.telemetry-actions button { font-size: 9px; }
+.terminal-footer { font-size: 9px; line-height: 1.6; }
+.empty-queue > span { font-size: 11px; }
+.empty-queue p { font-size: 10px; }
+.crisis-state .focus-panel { border-color: var(--crisis); }
+.crisis-state .focus-panel .panel-heading { background: var(--crisis); color: var(--destructive-foreground); }
+.crisis-state .focus-panel .panel-heading svg, .crisis-state .focus-mode { color: var(--destructive-foreground); }
+.crisis-state .state-badge { background: var(--crisis); color: var(--destructive-foreground); }
+.night-ops:not(.heightened-state):not(.crisis-state) .led-display { color: var(--phosphor); }
+@media (min-width: 1400px) {
+  .operations-layout { grid-template-columns: minmax(0,1fr) 420px; }
+  .focus-clock { height: 185px; }
+  .queue-body { height: 327px; }
+  .surveillance-image { height: 270px; }
+}
+@media (max-width: 1100px) {
+  .ctu-terminal { padding: 0 22px; }
+  .operations-layout { grid-template-columns: minmax(0,1fr) 300px; }
+  .focus-clock { height: 122px; }
+  .operation-title { padding: 22px 20px 0; }
+  .operation-title h2 { font-size: 29px; }
+  .operation-title > .micro { font-size: 9px; }
+  .mission-controls { gap: 8px; }
+  .focus-footer { font-size: 8px; }
+  .queue-body { height: 300px; }
+  .surveillance-image { height: 212px; }
+  .preset-name { font-size: 17px; }
+}
+@media (max-width: 800px) {
+  .operations-layout { grid-template-columns: 1fr; }
+  .focus-clock { height: 142px; }
+  .secondary-column { gap: 12px; }
+  .surveillance-panel { margin-top: 0; }
+  .surveillance-image { height: 273px; }
+  .queue-body { height: 245px; }
+  .brand .micro { font-size: 8px; }
+  .header-station { display: none; }
+  .telemetry-actions button { font-size: 9px; }
+}
+@media (max-width: 500px) {
+  .ctu-terminal { padding: 0 12px; }
+  .terminal-header { height: 88px; }
+  .brand { gap: 9px; }
+  .brand::before { font-size: 55px; padding-right: 10px; }
+  .brand-title { font-size: 21px; }
+  .brand .micro { max-width: 135px; line-height: 1.6; font-size: 7px; }
+  .zulu { font-size: 12px; }
+  .zulu .micro { font-size: 8px; }
+  .command-heading { padding: 18px 0; }
+  .command-heading h1 { font-size: 29px; }
+  .command-heading .micro { font-size: 9px; }
+  .panel-heading { font-size: 9px; padding: 0 10px; }
+  .focus-mode { font-size: 7px !important; }
+  .operation-title { padding: 20px 15px 0; gap: 10px; }
+  .operation-title > .micro { font-size: 8px; }
+  .operation-title h2 { font-size: 26px; margin: 0; }
+  .state-badge { font-size: 8px; padding: 5px; }
+  .focus-clock-wrap { padding: 28px 13px 0; }
+  .focus-clock { height: 85px; }
+  .digit-labels { font-size: 8px; margin-top: 15px; }
+  .operation-progress { margin: 24px 15px 0; font-size: 8px; }
+  .mission-controls { padding: 20px 14px; }
+  .mission-controls button { font-size: 10px; }
+  .focus-footer { flex-wrap: wrap; font-size: 8px; gap: 8px; padding: 12px; }
+  .clock-stage { padding: 20px 18px 15px; }
+  .mission-clock { height: 65px; }
+  .clock-caption { font-size: 8px; padding: 0 14px 15px; gap: 12px; }
+  .clock-caption .accent { font-size: 14px; }
+  .preset-name { font-size: 20px; }
+  .secondary-column { grid-template-columns: 1fr; }
+  .surveillance-image { height: 245px; }
+  .queue-body { height: 245px; }
+  .telemetry-status > div, .threat-status { font-size: 10px; }
+  .telemetry-status .micro, .threat-status .micro { font-size: 8px; }
+  .telemetry-actions button { font-size: 8px; }
+  .terminal-footer { font-size: 8px; }
 }
