@@ -21,16 +21,19 @@ const segments = {
 };
 export function CTUDigits({
   value,
+  time,
   blink = false,
   className = "",
 }: {
-  value: string;
+  value?: string;
+  time?: string;
   blink?: boolean;
   className?: string;
 }) {
+  const text = value ?? time ?? "00:00:00";
   return (
-    <div className={`led-display ${className}`} role="img" aria-label={value}>
-      {value.split("").map((char, i) =>
+    <div className={`led-display ${className}`} role="img" aria-label={text}>
+      {text.split("").map((char, i) =>
         char === ":" ? (
           <svg
             key={i}
