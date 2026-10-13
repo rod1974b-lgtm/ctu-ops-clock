@@ -27,9 +27,9 @@ export function remainingMs(m: Mission, now: number) {
 }
 
 export function nextAlarm(time: string, now: number) {
-  const [hours = 0, minutes = 0, seconds = 0] = time.split(":").map(Number);
+  const [hours = 0, minutes = 0] = time.split(":").map(Number);
   const d = new Date(now);
-  d.setHours(hours, minutes, seconds, 0);
+  d.setHours(hours, minutes, 0, 0);
   if (d.getTime() <= now) d.setDate(d.getDate() + 1);
   return d.getTime();
 }
