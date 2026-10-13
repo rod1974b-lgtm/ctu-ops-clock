@@ -1,27 +1,25 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Activity,
   AudioLines,
   Bell,
+  Check,
   ChevronDown,
   ChevronRight,
-  Crosshair,
-  Expand,
   Eye,
   Globe,
-  LockKeyhole,
+  Maximize2,
+  Minimize2,
   Moon,
   Pause,
+  Pin,
   Play,
   Plus,
-  Radio,
   RotateCcw,
   Shield,
   ShieldCheck,
   Square,
   Timer,
-  Trash2,
   Volume2,
   VolumeX,
   X,
@@ -29,362 +27,312 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CTUDigits } from "@/components/ctu-digits";
+import {
+  SamsungTimePicker,
+  SamsungTimerValues,
+} from "@/components/samsung-time-picker";
 import { useMissions } from "@/hooks/use-missions";
-import { clockParts, protocols, remainingMs } from "@/lib/mission-engine";
-import { CTUAudio, defaultAudio, type AudioSettings } from "@/lib/ctu-audio";
+import {
+  Mission,
+  clockParts,
+  focusMission,
+  nextAlarm,
+  protocols,
+  remainingMs,
+} from "@/lib/mission-engine";
 import surveillance from "@/assets/la-surveillance.jpg";
 
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "CTU Terminal — Mission Clock & Operations" },
+      {
+        title: "CTU Operational Timer · Los Angeles Domestic Unit",
+      },
       {
         name: "description",
         content:
-          "A 24-inspired CTU mission terminal with precision countdowns, daily alarms, and tactical audio alerts.",
+          "24-themed tactical mission timer and multi-alarm terminal. Drift-free real-time background execution, Zulu synchronization, and threat condition matrix.",
       },
-      { property: "og:title", content: "CTU Terminal — Mission Clock & Operations" },
+      { property: "og:title", content: "CTU Operational Timer · 24 Terminal" },
       {
         property: "og:description",
-        content: "Monitor mission time, arm concurrent timers, and command your daily operations.",
+        content:
+          "Events occur in real time. Tactical countdown and daily alarm console with amber phosphor aesthetics.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
   }),
-  component: Index,
+  component: CTUTerminal,
 });
 
-function Index() {
-  const engine = useMissions();
+function CTUTerminal() {
   const {
-    now,
     missions,
-    focus,
-    pin,
-    setPin,
+    presets,
+    audio,
     arm,
-    act,
+    control,
+    snooze,
     remove,
-    customPresets,
-    setCustomPresets,
-    loaded,
-  } = engine;
-  const [format24, setFormat24] = useState(true);
-  const [stealth, setStealth] = useState(false);
-  const [audio, setAudio] = useState<AudioSettings>(defaultAudio);
+    togglePin,
+    saveCustomPreset,
+    setAudioVolume,
+    setAudioWindow,
+    setSnoozeDuration,
+    setPhoneAlerts,
+    toggleAudio,
+    testAlert,
+    now,
+  } = useMissions();
+
+  const [format24, setFormat24] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true;
+    try {
+      const saved = localStorage.getItem("ctu-settings-v1");
+      return saved ? JSON.parse(saved).format24 ?? true : true;
+    } catch {
+      return true;
+    }
+  });
+
+  const [stealth, setStealth] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      const saved = localStorage.getItem("ctu-settings-v1");
+      return saved ? JSON.parse(saved).stealth ?? false : false;
+    } catch {
+      return false;
+    }
+  });
+
+  const [fullscreen, setFullscreen] = useState(false);
   const [audioOpen, setAudioOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [kind, setKind] = useState<"timer" | "alarm">("timer");
   const [title, setTitle] = useState("");
-  const [minutes, setMinutes] = useState("25");
-  const [seconds, setSeconds] = useState("0");
-  const [alarmTime, setAlarmTime] = useState("09:00");
+
+  // Samsung Galaxy Timer State (Hours, Minutes, Seconds)
+  const [timerValues, setTimerValues] = useState<SamsungTimerValues>({
+    hours: 0,
+    minutes: 25,
+    seconds: 0,
+    totalSeconds: 1500,
+  });
+
+  // Samsung Galaxy Alarm State (HH:MM:SS)
+  const [alarmTime, setAlarmTime] = useState("09:00:00");
   const [savePreset, setSavePreset] = useState(false);
   const [guard, setGuard] = useState(false);
-  const [notice, setNotice] = useState("");
-  const audioRef = useRef<CTUAudio | null>(null);
-  const lockRef = useRef<WakeLockSentinel | null>(null);
-  const lastBeat = useRef(-1);
-
-  const crisis = missions.some((m) => m.status === "CRISIS");
-  const active = missions.filter((m) =>
-    ["ACTIVE", "ARMED", "SNOOZED", "CRISIS"].includes(m.status),
-  );
-  const remaining = focus ? remainingMs(focus, now) : 0;
-  const heightened = active.some((m) => remainingMs(m, now) < 300000);
-  const urgent = active.some((m) => remainingMs(m, now) <= audio.window * 1000);
-  const tier = crisis ? 3 : urgent ? 2 : 1;
-
-  const date = now ? new Date(now) : null;
-  const local = date
-    ? date
-        .toLocaleTimeString("en-GB", {
-          hour12: !format24,
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-        })
-        .replace(/\s?[ap]m/i, "")
-    : "00:00:00";
-  const zulu = date ? date.toISOString().slice(11, 19) : "00:00:00";
+  const [wakeLock, setWakeLock] = useState<WakeLockSentinel | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
-    audioRef.current = new CTUAudio();
     try {
-      const saved = JSON.parse(localStorage.getItem("ctu-settings-v1") ?? "null");
-      if (saved) {
-        setAudio({ ...defaultAudio, ...saved.audio, enabled: false });
-        setFormat24(saved.format24 ?? true);
-        setStealth(saved.stealth ?? false);
-      }
-    } catch {}
-    return () => audioRef.current?.close();
-  }, []);
-
-  useEffect(() => {
-    if (loaded)
-      try {
-        localStorage.setItem("ctu-settings-v1", JSON.stringify({ audio, format24, stealth }));
-      } catch {}
-  }, [audio, format24, stealth, loaded]);
-
-  useEffect(() => {
-    const beat = Math.floor(now / 1000);
-    if (beat === lastBeat.current || !now) return;
-    lastBeat.current = beat;
-    if (active.length) audioRef.current?.tick(tier, audio, beat);
-  }, [now, tier, audio, active.length]);
-
-  useEffect(() => {
-    document.title = focus
-      ? `[${clockParts(remaining)}] ${crisis ? "CRISIS · " : ""}CTU Terminal`
-      : "CTU Terminal — Mission Clock & Operations";
-  }, [focus, remaining, crisis]);
-
-  useEffect(() => {
-    if (!notice) return;
-    const timer = setTimeout(() => setNotice(""), 4000);
-    return () => clearTimeout(timer);
-  }, [notice]);
-
-  useEffect(() => {
-    return () => {
-      void lockRef.current?.release();
-    };
-  }, []);
-
-  const feedback = () => {
-    if (audio.enabled) {
-      void audioRef.current?.unlock();
-      audioRef.current?.chirp(0.4);
+      localStorage.setItem(
+        "ctu-settings-v1",
+        JSON.stringify({ format24, stealth })
+      );
+    } catch {
+      // ignore
     }
-  };
+  }, [format24, stealth]);
 
-  const control = (id: string, action: Parameters<typeof act>[1]) => {
-    act(id, action, audio.snooze);
-    feedback();
-  };
+  const toggleFullscreen = useCallback(async () => {
+    try {
+      if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen();
+        setFullscreen(true);
+      } else {
+        await document.exitFullscreen();
+        setFullscreen(false);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
 
-  const toggleAudio = async () => {
-    if (audio.enabled) {
-      await audioRef.current?.mute();
-      setAudio((a) => ({ ...a, enabled: false }));
-    } else {
+  const toggleGuard = useCallback(async () => {
+    if (guard && wakeLock) {
       try {
-        await audioRef.current?.unlock();
-        setAudio((a) => ({ ...a, enabled: true }));
-        audioRef.current?.chirp(0.4);
+        await wakeLock.release();
       } catch {
-        setNotice("Audio unavailable in this browser.");
+        // ignore
       }
-    }
-  };
-
-  const toggleGuard = async () => {
-    if (guard) {
-      await lockRef.current?.release();
+      setWakeLock(null);
       setGuard(false);
+      setNotice("TERMINAL GUARD DISENGAGED");
+      setTimeout(() => setNotice(null), 3000);
       return;
     }
-    try {
-      if (!navigator.wakeLock) throw new Error();
-      const lock = await navigator.wakeLock.request("screen");
-      lockRef.current = lock;
-      setGuard(true);
-      lock.addEventListener("release", () => setGuard(false));
-    } catch {
-      setNotice("Terminal guard is unavailable or the screen is not visible.");
+
+    if ("wakeLock" in navigator) {
+      try {
+        const lock = await navigator.wakeLock.request("screen");
+        setWakeLock(lock);
+        setGuard(true);
+        setNotice("TERMINAL GUARD ENGAGED · SCREEN KEPT AWAKE");
+        setTimeout(() => setNotice(null), 3500);
+        lock.addEventListener("release", () => {
+          setGuard(false);
+          setWakeLock(null);
+        });
+      } catch {
+        setNotice("TERMINAL GUARD UNAVAILABLE ON THIS DEVICE");
+        setTimeout(() => setNotice(null), 3000);
+      }
     }
-  };
+  }, [guard, wakeLock]);
 
-  const fullscreen = () => {
-    if (document.fullscreenElement) void document.exitFullscreen();
-    else
-      void document.documentElement
-        .requestFullscreen()
-        .catch(() => setNotice("Full-screen mode is unavailable."));
-  };
+  const activeFocus = useMemo(() => focusMission(missions), [missions]);
 
-  const armPreset = (p: { title: string; minutes: number; pinned?: boolean }) => {
-    arm(p.title, p.minutes * 60000, "timer", undefined, p.pinned);
-    feedback();
-  };
+  const crisis = useMemo(
+    () => missions.some((m) => m.status === "CRISIS"),
+    [missions]
+  );
+
+  const heightened = useMemo(() => {
+    if (crisis) return false;
+    return missions.some((m) => {
+      if (m.status !== "ACTIVE") return false;
+      return remainingMs(m, now) <= 5 * 60 * 1000;
+    });
+  }, [missions, crisis, now]);
+
+  const localClock = useMemo(() => {
+    const d = new Date(now);
+    let hours = d.getHours();
+    let period = "";
+    if (!format24) {
+      period = hours >= 12 ? " PM" : " AM";
+      hours = hours % 12 || 12;
+    }
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return {
+      digits: `${pad(hours)}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`,
+      period,
+    };
+  }, [now, format24]);
+
+  const zulu = useMemo(() => {
+    const d = new Date(now);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+  }, [now]);
+
+  const focusRemaining = activeFocus ? remainingMs(activeFocus, now) : 0;
+  const focusDigits = clockParts(focusRemaining);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    const duration = (Number(minutes) * 60 + Number(seconds)) * 1000;
-    if (kind === "timer" && (!Number.isFinite(duration) || duration <= 0)) return;
-    const missionTitle = title.trim() || (kind === "timer" ? "Custom Operation" : "Daily Briefing");
-    arm(missionTitle, duration, kind, alarmTime);
-    if (savePreset && kind === "timer")
-      setCustomPresets((items) => [...items, { title: missionTitle, minutes: duration / 60000 }]);
-    feedback();
-    setAddOpen(false);
+    if (kind === "timer") {
+      const totalSec = timerValues.totalSeconds;
+      if (totalSec <= 0) return;
+      const ms = totalSec * 1000;
+      const finalTitle =
+        title.trim() ||
+        `Operation: ${timerValues.hours > 0 ? `${timerValues.hours}h ` : ""}${timerValues.minutes}m ${timerValues.seconds}s`;
+      arm({
+        title: finalTitle,
+        kind: "timer",
+        durationMs: ms,
+      });
+      if (savePreset) {
+        saveCustomPreset({
+          name: finalTitle,
+          durationMs: ms,
+          description: `Custom ${timerValues.hours}h ${timerValues.minutes}m ${timerValues.seconds}s countdown`,
+        });
+      }
+    } else {
+      const target = nextAlarm(alarmTime, Date.now());
+      const ms = Math.max(0, target - Date.now());
+      arm({
+        title: title.trim() || `Daily Alarm · ${alarmTime}`,
+        kind: "alarm",
+        durationMs: ms,
+        alarmTime,
+      });
+    }
     setTitle("");
+    setTimerValues({ hours: 0, minutes: 25, seconds: 0, totalSeconds: 1500 });
     setSavePreset(false);
+    setAddOpen(false);
   };
 
-  const progress =
-    focus && focus.duration
-      ? Math.min(100, Math.max(0, 100 - (remaining / focus.duration) * 100))
-      : 0;
+  const threatClass = crisis
+    ? "crisis-state"
+    : heightened
+      ? "heightened-state"
+      : "watch-state";
+  const stealthClass = stealth ? "night-ops" : "";
 
   return (
-    <main
-      className={`ctu-terminal ${stealth ? "night-ops" : ""} ${crisis ? "crisis-state" : heightened ? "heightened-state" : ""}`}
-    >
+    <main className={`ctu-terminal ${threatClass} ${stealthClass}`}>
       <header className="terminal-header">
-        <div className="brand">
-          <div className="ctu-mark">
-            <Shield size={27} />
-            <span>CTU</span>
-          </div>
+        <div className="terminal-brand">
+          <span className="brand-badge">24</span>
           <div>
-            <div className="brand-title">
-              CTU <span>TERMINAL</span>
-            </div>
-            <div className="micro muted">COUNTER TERRORIST UNIT · LOS ANGELES</div>
-          </div>
-        </div>
-        <div className="header-station">
-          <span className="status-dot" /> STATION 04 <span className="muted">/</span> ONLINE{" "}
-          <LockKeyhole size={12} />
-        </div>
-        <div className="header-right">
-          <div className="zulu">
-            <span className="micro muted">ZULU / UTC</span>
-            <span>
-              {zulu} <span className="muted">Z</span>
+            <span className="brand-title">CTU TERMINAL</span>
+            <span className="brand-sub">
+              LOS ANGELES DOMESTIC FIELD UNIT · SECTOR 4
             </span>
           </div>
+        </div>
+
+        <div className="terminal-clock-block">
+          <div className="zulu-pill">
+            <span className="micro muted">ZULU / UTC</span>
+            <span className="zulu-clock">{zulu} Z</span>
+          </div>
+
           <Button
             variant="ghost"
             size="icon"
-            title="Full-screen command center"
-            aria-label="Full-screen command center"
-            onClick={fullscreen}
+            onClick={toggleFullscreen}
+            aria-label={fullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+            title="Toggle terminal fullscreen"
           >
-            <Expand />
+            {fullscreen ? <Minimize2 /> : <Maximize2 />}
           </Button>
         </div>
       </header>
 
-      <div className="command-heading">
-        <div>
-          <div className="micro accent flex items-center gap-2">
-            <span className="tiny-square" /> LIVE OPERATIONS / SECTOR 07
-          </div>
-          <h1>Mission control</h1>
-        </div>
-        <div className="classified">
-          <ShieldCheck size={15} /> SECURE CONNECTION <span className="divider">|</span> LEVEL 5
-          CLEARANCE
-        </div>
-      </div>
-
       <div className="operations-layout">
-        <div className="primary-column">
-          <section className="terminal-panel focus-panel">
+        <section className="primary-column">
+          <div className="terminal-panel focus-panel">
             <div className="panel-heading">
-              <span>
-                <Crosshair size={13} /> PRIMARY OPERATIONS &amp; MISSION TIME
-              </span>
               <div className="flex items-center gap-2">
-                <div className="segmented">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className={format24 ? "selected" : ""}
-                    onClick={() => setFormat24(true)}
-                  >
-                    24H
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className={!format24 ? "selected" : ""}
-                    onClick={() => setFormat24(false)}
-                  >
-                    12H
-                  </Button>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="focus-mode"
-                  onClick={() => setPin(null)}
-                  title="Return to closest-expiring operation"
+                <span className="live-dot" />
+                <span>UNIFIED COMMAND DECK</span>
+              </div>
+              <div className="deck-toggles flex items-center gap-2">
+                <button
+                  type="button"
+                  className="time-mode-btn"
+                  onClick={() => setFormat24((f) => !f)}
+                  title="Toggle 24-hour / 12-hour local display"
                 >
-                  <span className="tiny-square" />
-                  {pin ? "MANUALLY PINNED" : "AUTO · CLOSEST TO ZERO"}
-                </Button>
+                  {format24 ? "24H FORMAT" : "12H FORMAT"}
+                </button>
+                <span className="micro text-muted-foreground uppercase">
+                  {activeFocus?.pinned ? "MANUALLY PINNED" : "AUTO-SELECT PRIORITY"}
+                </span>
               </div>
             </div>
 
-            {/* Unified Stage Grid */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-signal/30 border-b border-signal/30">
-              {/* Sector 1: Local Real-Time Mission Clock */}
-              <div className="p-4 sm:p-6 flex flex-col justify-between bg-black/40">
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="micro muted">EVENTS OCCUR IN REAL TIME</span>
-                    <span className="state-badge">
-                      <span className="status-dot animate-pulse" />
-                      LIVE PACIFIC
-                    </span>
-                  </div>
-                  <h3 className="text-sm font-semibold tracking-wider uppercase text-signal">
-                    Local Mission Clock
-                  </h3>
+            <div className="unified-stage-grid">
+              <div className="stage-sector local-time-sector">
+                <div className="sector-header">
+                  <span className="sector-tag">LOCAL MISSION TIME</span>
+                  <span className="sector-format-indicator">
+                    {format24 ? "MILITARY (24H)" : `CIVILIAN${localClock.period}`}
+                  </span>
                 </div>
-
-                <div className="my-4 py-2 flex items-center justify-center">
-                  <CTUDigits value={local} blink className="mission-clock h-16 sm:h-20 lg:h-24" />
-                  {!format24 && date && (
-                    <span className="am-pm ml-2 text-xs font-mono text-signal">
-                      {date.getHours() >= 12 ? "PM" : "AM"}
-                    </span>
-                  )}
-                </div>
-
-                <div className="micro muted text-center tracking-widest uppercase border-t border-signal/20 pt-2">
-                  {date
-                    ? date
-                        .toLocaleDateString("en-US", {
-                          weekday: "short",
-                          month: "short",
-                          day: "2-digit",
-                          year: "numeric",
-                        })
-                        .toUpperCase()
-                    : "CALCULATING"}
-                </div>
-              </div>
-
-              {/* Sector 2: Primary Operation Countdown */}
-              <div className="p-4 sm:p-6 flex flex-col justify-between bg-black/20">
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="micro muted">
-                      {focus
-                        ? `OP-${focus.id.slice(0, 4).toUpperCase()} / ${focus.kind === "timer" ? "COUNTDOWN PROTOCOL" : "DAILY ALARM"}`
-                        : "CTU / AWAITING ASSIGNMENT"}
-                    </span>
-                    <span className={`state-badge ${focus ? "" : "standby"}`}>
-                      <span className="status-dot" />
-                      {focus?.status ?? "STANDBY"}
-                    </span>
-                  </div>
-                  <h2 className="text-xl sm:text-2xl font-bold tracking-wider uppercase text-foreground">
-                    {focus ? focus.title : "No active operation"}
-                  </h2>
-                </div>
-
-                <div className="focus-clock-wrap my-2">
+                <div className="stage-clock-display">
                   <CTUDigits
-                    value={focus ? clockParts(remaining) : "00:00:00"}
-                    className="focus-clock h-20 sm:h-24 lg:h-28"
+                    time={localClock.digits}
+                    className="mission-clock h-16 sm:h-20 lg:h-24"
                   />
                   <div className="digit-labels">
                     <span>HOURS</span>
@@ -392,158 +340,191 @@ function Index() {
                     <span>SECONDS</span>
                   </div>
                 </div>
-
-                <div className="operation-progress mt-2">
-                  <span>{focus ? "TIME TO ZERO" : "AWAITING MISSION"}</span>
-                  <span>{focus ? `${Math.round(progress)}% ELAPSED` : "—"}</span>
-                  <progress value={progress} max="100" />
+                <div className="realtime-banner">
+                  <span className="ticker-marker">■</span>
+                  <span>THE FOLLOWING EVENTS TAKE PLACE IN REAL TIME</span>
+                  <span className="ticker-marker">■</span>
                 </div>
+              </div>
+
+              <div className="stage-sector active-operation-sector">
+                <div className="sector-header">
+                  <span className="sector-tag">ACTIVE OPERATION TARGET</span>
+                  {activeFocus && (
+                    <span className="sector-protocol-pill">
+                      {activeFocus.kind.toUpperCase()} · {activeFocus.status}
+                    </span>
+                  )}
+                </div>
+
+                <div className="stage-clock-display">
+                  {activeFocus ? (
+                    <CTUDigits
+                      time={focusDigits}
+                      className="focus-clock h-20 sm:h-24 lg:h-28"
+                    />
+                  ) : (
+                    <div className="focus-standby">
+                      <div className="standby-digits">00:00:00</div>
+                      <span className="standby-tag">NO ACTIVE MISSIONS ARMED</span>
+                    </div>
+                  )}
+                  <div className="digit-labels">
+                    <span>HOURS</span>
+                    <span>MINUTES</span>
+                    <span>SECONDS</span>
+                  </div>
+                </div>
+
+                {activeFocus ? (
+                  <div className="focus-controls">
+                    {["PAUSED", "STOPPED"].includes(activeFocus.status) ? (
+                      <Button
+                        size="lg"
+                        className="control-btn primary-action"
+                        onClick={() => control(activeFocus.id, "start")}
+                      >
+                        <Play /> RESUME
+                      </Button>
+                    ) : (
+                      <Button
+                        size="lg"
+                        variant="outline"
+                        className="control-btn"
+                        disabled={activeFocus.status === "CRISIS"}
+                        onClick={() => control(activeFocus.id, "pause")}
+                      >
+                        <Pause /> PAUSE
+                      </Button>
+                    )}
+
+                    <Button
+                      size="lg"
+                      variant="outline"
+                      className="control-btn"
+                      onClick={() => control(activeFocus.id, "reset")}
+                    >
+                      <RotateCcw /> RESET
+                    </Button>
+
+                    <Button
+                      size="lg"
+                      variant="destructive"
+                      className="control-btn"
+                      onClick={() => control(activeFocus.id, "stop")}
+                    >
+                      <Square /> DISARM
+                    </Button>
+
+                    {activeFocus.status === "CRISIS" && (
+                      <Button
+                        size="lg"
+                        className="control-btn crisis-snooze"
+                        onClick={() => snooze(activeFocus.id)}
+                      >
+                        <Zap /> SNOOZE ({Math.floor(audio.snoozeMs / 60000)}M)
+                      </Button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="focus-controls">
+                    <Button
+                      size="lg"
+                      className="control-btn primary-action w-full"
+                      onClick={() => setAddOpen(true)}
+                    >
+                      <Plus /> ARM NEW OPERATION
+                    </Button>
+                  </div>
+                )}
               </div>
             </div>
 
-            {/* Mission Controls */}
-            <div className="mission-controls">
-              <Button
-                className="primary-control"
-                disabled={!focus || focus.status === "CRISIS"}
-                onClick={() => {
-                  if (focus)
-                    control(
-                      focus.id,
-                      ["PAUSED", "STOPPED"].includes(focus.status) ? "start" : "pause",
-                    );
-                }}
-              >
-                {focus && ["PAUSED", "STOPPED"].includes(focus.status) ? (
-                  <Play size={15} />
-                ) : (
-                  <Pause size={15} />
-                )}{" "}
-                {focus && ["PAUSED", "STOPPED"].includes(focus.status) ? "START" : "PAUSE"}
-              </Button>
-              <Button
-                variant="outline"
-                disabled={!focus}
-                onClick={() => focus && control(focus.id, "reset")}
-              >
-                <RotateCcw />
-                RESET
-              </Button>
-              <Button
-                variant={crisis ? "destructive" : "outline"}
-                disabled={!focus}
-                onClick={() => focus && control(focus.id, "stop")}
-              >
-                <Square />
-                DISARM
-              </Button>
-              <Button
-                variant="ghost"
-                disabled={!focus}
-                onClick={() => focus && control(focus.id, "snooze")}
-              >
-                <Bell />
-                SNOOZE <span className="muted">{audio.snooze}M</span>
-              </Button>
-            </div>
-
             <div className="focus-footer">
-              <span>
-                <Radio size={12} />{" "}
-                {crisis ? "CRITICAL ZERO · INTERVENTION REQUIRED" : "TIMESTAMP SYNC ACTIVE"}
-              </span>
-              <span>
-                THREAT CON {crisis ? "1" : heightened ? "2" : "4"}{" "}
-                <span className="accent">
-                  / {crisis ? "CODE RED" : heightened ? "HEIGHTENED" : "WATCH"}
+              <div className="threat-indicator-chip">
+                <span className="threat-square" />
+                <span>
+                  THREAT CON{" "}
+                  {crisis ? "1 · CODE RED" : heightened ? "2 · ORANGE" : "4 · AMBER"}
                 </span>
-              </span>
+              </div>
+              <div className="focus-active-title">
+                {activeFocus ? activeFocus.title : "COMMAND STANDBY"}
+              </div>
+              <div className="focus-target-time">
+                {activeFocus && activeFocus.endsAt > 0
+                  ? `TARGET: ${new Date(activeFocus.endsAt).toLocaleTimeString()}`
+                  : "STANDBY"}
+              </div>
             </div>
-          </section>
+          </div>
 
-          {/* Quick-Arm Presets elevated directly beneath the stage */}
-          <section className="presets-section">
-            <div className="section-label">
+          <div className="terminal-panel presets-panel mt-4">
+            <div className="panel-heading">
               <span>
                 <Zap size={14} /> QUICK-ARM PROTOCOLS
               </span>
-              <span className="muted">{protocols.length + customPresets.length} AVAILABLE</span>
+              <span className="micro text-muted-foreground">INSTANT ENGAGEMENT</span>
             </div>
             <div className="preset-grid">
-              {[...protocols, ...customPresets].map((p, i) => (
-                <Button
-                  key={`${p.title}-${i}`}
-                  variant="outline"
-                  className="preset"
-                  onClick={() => armPreset(p)}
+              {presets.map((preset) => (
+                <button
+                  type="button"
+                  key={preset.id}
+                  className="preset-btn"
+                  onClick={() =>
+                    arm({
+                      title: preset.name,
+                      kind: "timer",
+                      durationMs: preset.durationMs,
+                    })
+                  }
                 >
-                  <div className="preset-top">
-                    <span>{String(i + 1).padStart(2, "0")}</span>
-                    <Plus size={14} />
-                  </div>
-                  <span className="preset-name">{p.title}</span>
-                  <span className="preset-duration">
-                    {Number(p.minutes.toFixed(2))} <small>MINUTES</small>
+                  <span className="preset-name">{preset.name}</span>
+                  <span className="preset-dur">
+                    {Math.floor(preset.durationMs / 60000)} MIN
                   </span>
-                </Button>
+                  <span className="preset-desc">{preset.description}</span>
+                </button>
               ))}
             </div>
-          </section>
-        </div>
+          </div>
+        </section>
 
         <aside className="secondary-column">
           <section className="terminal-panel queue-panel">
             <div className="panel-heading">
-              <span>
-                <Timer size={13} /> OPERATIONS QUEUE
-              </span>
-              <span className="queue-count">{String(active.length).padStart(2, "0")} ARMED</span>
+              <span>ACTIVE ROSTER ({missions.length})</span>
+              <span className="micro text-muted-foreground">AUTO-FOCUS</span>
             </div>
             <div className="queue-body">
               {missions.length === 0 ? (
-                <div className="empty-queue">
-                  <Crosshair size={30} />
-                  <span>NO OPERATIONS ARMED</span>
-                  <p>Standing by for mission assignment.</p>
-                </div>
+                <div className="queue-empty">NO OPERATIONS IN ROSTER</div>
               ) : (
                 missions.map((m) => (
                   <div
                     key={m.id}
-                    className={`queue-item ${focus?.id === m.id ? "is-focused" : ""}`}
+                    className={`queue-item ${m.id === activeFocus?.id ? "active-queue-item" : ""}`}
                   >
                     <div className="queue-item-top">
-                      <span className="micro muted">
-                        {m.kind === "alarm" ? <Bell size={12} /> : <Timer size={12} />}{" "}
-                        {m.kind === "alarm"
-                          ? `DAILY / ${m.time}`
-                          : `OP-${m.id.slice(0, 4).toUpperCase()}`}
-                      </span>
-                      <div className="queue-tools">
+                      <span className="queue-kind">{m.kind.toUpperCase()}</span>
+                      <div className="queue-item-actions">
                         <Button
-                          size="icon"
                           variant="ghost"
-                          aria-label={`Pin ${m.title}`}
-                          title={`Pin ${m.title}`}
-                          className={pin === m.id ? "accent" : ""}
-                          onClick={() => {
-                            setPin(pin === m.id ? null : m.id);
-                            feedback();
-                          }}
+                          size="icon"
+                          aria-label={m.pinned ? "Unpin operation" : "Pin operation"}
+                          className={m.pinned ? "accent" : ""}
+                          onClick={() => togglePin(m.id)}
                         >
-                          <Crosshair />
+                          <Pin />
                         </Button>
                         <Button
-                          size="icon"
                           variant="ghost"
+                          size="icon"
                           aria-label={`Remove ${m.title}`}
-                          title="Remove operation"
-                          onClick={() => {
-                            remove(m.id);
-                            feedback();
-                          }}
+                          onClick={() => remove(m.id)}
                         >
-                          <Trash2 />
+                          <X />
                         </Button>
                       </div>
                     </div>
@@ -562,7 +543,7 @@ function Index() {
                         onClick={() =>
                           control(
                             m.id,
-                            ["PAUSED", "STOPPED"].includes(m.status) ? "start" : "pause",
+                            ["PAUSED", "STOPPED"].includes(m.status) ? "start" : "pause"
                           )
                         }
                       >
@@ -678,75 +659,79 @@ function Index() {
             <span className="muted">SYNTHESIZED SIGNALS</span>
           </div>
           <div className="audio-sliders">
-            {(["ambient", "countdown", "alarm", "media"] as const).map((bus, i) => (
-              <label key={bus}>
-                <span>
-                  {["AMBIENT WATCH", "URGENT COUNTDOWN", "CRISIS ALARM", "CINEMATIC STREAM"][i]}
-                  <strong>{audio[bus]}%</strong>
-                </span>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  aria-label={`${bus} volume`}
-                  value={audio[bus]}
-                  onChange={(e) => setAudio((a) => ({ ...a, [bus]: Number(e.target.value) }))}
-                />
-              </label>
-            ))}
+            <label>
+              <span>AMBIENT TICK ({Math.round(audio.ambientVolume * 100)}%)</span>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={audio.ambientVolume}
+                onChange={(e) => setAudioVolume("ambient", Number(e.target.value))}
+              />
+            </label>
+            <label>
+              <span>CRISIS THEME ({Math.round(audio.crisisVolume * 100)}%)</span>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={audio.crisisVolume}
+                onChange={(e) => setAudioVolume("crisis", Number(e.target.value))}
+              />
+            </label>
           </div>
-          <div className="audio-options">
-            <label>
-              URGENT WINDOW{" "}
-              <select
-                value={audio.window}
-                onChange={(e) => setAudio((a) => ({ ...a, window: Number(e.target.value) }))}
-              >
-                <option value="60">60 seconds</option>
-                <option value="30">30 seconds</option>
-                <option value="10">10 seconds</option>
-              </select>
-            </label>
-            <label>
-              SNOOZE{" "}
-              <select
-                value={audio.snooze}
-                onChange={(e) => setAudio((a) => ({ ...a, snooze: Number(e.target.value) }))}
-              >
-                {[5, 9, 10].map((n) => (
-                  <option key={n} value={n}>
-                    {n} minutes
-                  </option>
+          <div className="audio-toggles">
+            <div className="toggle-group">
+              <span className="micro muted">COUNTDOWN WINDOW</span>
+              <div className="pill-group">
+                {[60, 30, 10].map((sec) => (
+                  <button
+                    type="button"
+                    key={sec}
+                    className={`pill-btn ${audio.countdownWindow === sec ? "active" : ""}`}
+                    onClick={() => setAudioWindow(sec)}
+                  >
+                    {sec}S
+                  </button>
                 ))}
-              </select>
-            </label>
+              </div>
+            </div>
+            <div className="toggle-group">
+              <span className="micro muted">SNOOZE DURATION</span>
+              <div className="pill-group">
+                {[5, 9, 10].map((m) => (
+                  <button
+                    type="button"
+                    key={m}
+                    className={`pill-btn ${audio.snoozeMs === m * 60000 ? "active" : ""}`}
+                    onClick={() => setSnoozeDuration(m)}
+                  >
+                    {m}M
+                  </button>
+                ))}
+              </div>
+            </div>
             <label className="checkbox-label">
               <input
                 type="checkbox"
-                checked={audio.phone}
-                onChange={(e) => setAudio((a) => ({ ...a, phone: e.target.checked }))}
+                checked={audio.phoneAlerts}
+                onChange={(e) => setPhoneAlerts(e.target.checked)}
               />{" "}
-              CTU PHONE ALERT
+              PHONE ALERT SOUND (FALLBACK)
             </label>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={async () => {
-                await audioRef.current?.unlock();
-                audioRef.current?.tick(3, { ...audio, enabled: true }, 0);
-              }}
-            >
-              TEST ALERT <Volume2 />
+            <Button variant="outline" size="sm" onClick={testAlert}>
+              <Zap /> TEST 3S ALERT SIGNAL
             </Button>
           </div>
         </section>
       )}
 
       <footer className="terminal-footer">
-        <span>CTU // DOMESTIC OPERATIONS DIVISION</span>
+        <span>CTU LOS ANGELES · OPERATIONAL DATA SYSTEM V4.18</span>
         <span>
-          ENCRYPTION: AES-256 <span className="footer-divider">/</span> SYSTEM V.24.01{" "}
-          <span className="footer-divider">/</span>{" "}
+          CIPHER: <span className="accent">AES-256-GCM</span> · STATUS:{" "}
           <span className="accent">ALL CHANNELS SECURE</span>
         </span>
       </footer>
@@ -780,7 +765,7 @@ function Index() {
               </Button>
             </div>
             <form onSubmit={submit}>
-              <h2 id="arm-heading">Arm an operation</h2>
+              <h2 id="arm-heading">ARM AN OPERATION</h2>
               <div className="dialog-tabs">
                 <Button
                   type="button"
@@ -799,52 +784,30 @@ function Index() {
                   DAILY ALARM
                 </Button>
               </div>
-              <label>
-                MISSION TITLE
+
+              <label className="field-group">
+                <span className="input-header-label">MISSION TITLE</span>
                 <input
                   autoFocus
                   maxLength={70}
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                   placeholder="Operation: Afternoon Sprint"
+                  className="terminal-text-input"
                 />
               </label>
-              {kind === "timer" ? (
-                <div className="duration-inputs">
-                  <label>
-                    MINUTES
-                    <input
-                      type="number"
-                      min="0"
-                      max="10080"
-                      required
-                      value={minutes}
-                      onChange={(e) => setMinutes(e.target.value)}
-                    />
-                  </label>
-                  <label>
-                    SECONDS
-                    <input
-                      type="number"
-                      min="0"
-                      max="59"
-                      required
-                      value={seconds}
-                      onChange={(e) => setSeconds(e.target.value)}
-                    />
-                  </label>
-                </div>
-              ) : (
-                <label>
-                  DAILY ALARM · LOCAL TIME
-                  <input
-                    type="time"
-                    required
-                    value={alarmTime}
-                    onChange={(e) => setAlarmTime(e.target.value)}
-                  />
-                </label>
-              )}
+
+              {/* Samsung Galaxy One UI Drum Picker */}
+              <div className="time-picker-section">
+                <SamsungTimePicker
+                  mode={kind}
+                  timerValues={timerValues}
+                  onTimerChange={setTimerValues}
+                  alarmTime={alarmTime}
+                  onAlarmChange={setAlarmTime}
+                />
+              </div>
+
               {kind === "timer" && (
                 <label className="checkbox-label">
                   <input
@@ -855,6 +818,7 @@ function Index() {
                   SAVE AS QUICK-ARM PROTOCOL
                 </label>
               )}
+
               <Button type="submit" className="arm-submit">
                 <Plus />
                 ARM OPERATION
