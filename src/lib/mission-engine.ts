@@ -1,52 +1,96 @@
-export type MissionStatus = "ACTIVE" | "ARMED" | "PAUSED" | "SNOOZED" | "CRISIS" | "STOPPED";
+export type MissionStatus = "ACTIVE" | "PAUSED" | "STOPPED" | "CRISIS";
 
-export type Mission = {
+export interface Mission {
   id: string;
   title: string;
   kind: "timer" | "alarm";
-  duration: number;
-  remaining: number;
-  deadline: number;
+  durationMs: number;
+  remainingMs: number;
+  endsAt: number;
   status: MissionStatus;
-  time?: string | undefined;
-};
+  pinned?: boolean;
+  alarmTime?: string; // HH:MM:SS or HH:MM
+}
 
-export type Preset = { title: string; minutes: number; pinned?: boolean };
+export interface Preset {
+  id: string;
+  name: string;
+  durationMs: number;
+  description: string;
+}
 
 export const protocols: Preset[] = [
-  { title: "Tactical Sprint", minutes: 25 },
-  { title: "Interrogation", minutes: 15 },
-  { title: "Satellite Pass", minutes: 45 },
-  { title: "Field Stand-Down", minutes: 5 },
+  {
+    id: "p-sprint",
+    name: "Tactical Sprint",
+    durationMs: 25 * 60 * 1000,
+    description: "25m deep-focus high-tempo sprint",
+  },
+  {
+    id: "p-interrogation",
+    name: "Interrogation",
+    durationMs: 15 * 60 * 1000,
+    description: "15m rapid debriefing or standup",
+  },
+  {
+    id: "p-satellite",
+    name: "Satellite Pass",
+    durationMs: 45 * 60 * 1000,
+    description: "45m orbit monitoring window",
+  },
+  {
+    id: "p-standdown",
+    name: "Field Stand-Down",
+    durationMs: 5 * 60 * 1000,
+    description: "5m tactical breath & reload",
+  },
 ];
 
-export function remainingMs(m: Mission, now: number) {
-  return ["ACTIVE", "ARMED", "SNOOZED", "CRISIS"].includes(m.status)
-    ? Math.max(0, m.deadline - now)
-    : m.remaining;
+export function remainingMs(mission: Mission, now = Date.now()): number {
+  if (mission.status === "PAUSED" || mission.status === "STOPPED") {
+    return mission.remainingMs;
+  }
+  return Math.max(0, mission.endsAt - now);
 }
 
-export function nextAlarm(time: string, now: number) {
-  const [hours = 0, minutes = 0] = time.split(":").map(Number);
-  const d = new Date(now);
-  d.setHours(hours, minutes, 0, 0);
-  if (d.getTime() <= now) d.setDate(d.getDate() + 1);
-  return d.getTime();
+export function nextAlarm(alarmTime: string, now = Date.now()): number {
+  const parts = alarmTime.split(":").map(Number);
+  const hours = parts[0] ?? 0;
+  const minutes = parts[1] ?? 0;
+  const seconds = parts[2] ?? 0;
+
+  const target = new Date(now);
+  target.setHours(hours, minutes, seconds, 0);
+
+  if (target.getTime() <= now) {
+    target.setDate(target.getDate() + 1);
+  }
+  return target.getTime();
 }
 
-export function focusMission(missions: Mission[], pin: string | null, now: number) {
-  return (
-    missions.find((m) => m.id === pin) ??
-    [...missions]
-      .filter((m) => ["ACTIVE", "ARMED", "SNOOZED", "CRISIS"].includes(m.status))
-      .sort((a, b) => remainingMs(a, now) - remainingMs(b, now))[0] ??
-    missions.find((m) => m.status === "PAUSED")
-  );
+export function focusMission(missions: Mission[]): Mission | null {
+  if (!missions.length) return null;
+  const pinned = missions.find((m) => m.pinned);
+  if (pinned) return pinned;
+
+  const active = missions
+    .filter((m) => m.status === "ACTIVE" || m.status === "CRISIS")
+    .sort((a, b) => a.endsAt - b.endsAt);
+  if (active.length) return active[0];
+
+  const paused = missions
+    .filter((m) => m.status === "PAUSED")
+    .sort((a, b) => a.remainingMs - b.remainingMs);
+  if (paused.length) return paused[0];
+
+  return missions[0];
 }
 
-export function clockParts(ms: number) {
-  const seconds = Math.max(0, Math.ceil(ms / 1000));
-  return [Math.floor(seconds / 3600), Math.floor(seconds / 60) % 60, seconds % 60]
-    .map((n) => String(n).padStart(2, "0"))
-    .join(":");
+export function clockParts(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(h)}:${pad(m)}:${pad(s)}`;
 }
