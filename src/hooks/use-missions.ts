@@ -168,7 +168,7 @@ export function useMissions() {
         remainingMs: endsAt - at,
         endsAt,
         status: "ACTIVE",
-        alarmTime: opts.alarmTime,
+        ...(opts.alarmTime ? { alarmTime: opts.alarmTime } : {}),
       };
       setMissions((items) => [...items, mission]);
       return mission.id;

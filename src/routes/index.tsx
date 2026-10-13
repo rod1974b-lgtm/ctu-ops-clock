@@ -800,7 +800,7 @@ function CTUTerminal() {
               {/* Samsung Galaxy One UI Drum Picker */}
               <div className="time-picker-section">
                 <SamsungTimePicker
-                  mode={kind}
+                  mode={kind === "timer" ? "countdown" : "alarm"}
                   timerValues={timerValues}
                   onTimerChange={setTimerValues}
                   alarmTime={alarmTime}
