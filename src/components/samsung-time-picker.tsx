@@ -14,8 +14,8 @@ interface DrumColumnProps {
 function DrumColumn({ label, value, max, min = 0, step = 1, pad = 2, onChange }: DrumColumnProps) {
   const rangeSize = max - min + 1;
 
-  const prevVal = (value - step < min ? max - ((min - (value - step) - 1) % rangeSize) : value - step);
-  const nextVal = (value + step > max ? min + ((value + step - max - 1) % rangeSize) : value + step);
+  const prevVal = value - step < min ? max - ((min - (value - step) - 1) % rangeSize) : value - step;
+  const nextVal = value + step > max ? min + ((value + step - max - 1) % rangeSize) : value + step;
 
   const handleWheel = useCallback(
     (e: React.WheelEvent) => {
@@ -268,67 +268,77 @@ export function SamsungTimePicker({
     );
   }
 
-  // Daily Alarm Mode (Both 24H and 12H formats, no quick-add chips)
+  // Daily Alarm Mode
+  // Calculate relative time until alarm sounds
+  const now = new Date();
+  const target = new Date(now);
+  target.setHours(alarmH, alarmM, alarmS, 0);
+  if (target.getTime() <= now.getTime()) {
+    target.setDate(target.getDate() + 1);
+  }
+  const diffSec = Math.floor((target.getTime() - now.getTime()) / 1000);
+  const diffH = Math.floor(diffSec / 3600);
+  const diffM = Math.floor((diffSec % 3600) / 60);
+  const diffS = diffSec % 60;
+
   return (
     <div className="samsung-picker-container">
-      {/* 12H / 24H Selector for Alarm */}
-      <div className="alarm-format-toggle-bar">
-        <span className="toggle-label">TIME PROTOCOL:</span>
-        <div className="alarm-format-pills">
+      {/* 12H vs 24H Toggle */}
+      <div className="samsung-format-bar">
+        <div className="format-toggle-group">
           <button
             type="button"
-            className={`alarm-pill ${!use12Hour ? "active" : ""}`}
+            className={`format-btn ${!use12Hour ? "active" : ""}`}
             onClick={() => setUse12Hour(false)}
           >
-            24-HOUR MILITARY
+            24-HOUR
           </button>
           <button
             type="button"
-            className={`alarm-pill ${use12Hour ? "active" : ""}`}
+            className={`format-btn ${use12Hour ? "active" : ""}`}
             onClick={() => setUse12Hour(true)}
           >
-            12-HOUR CIVILIAN
+            12-HOUR
           </button>
         </div>
+
+        {use12Hour && (
+          <div className="ampm-toggle-group">
+            <button
+              type="button"
+              className={`ampm-btn ${alarmPeriod === "AM" ? "active" : ""}`}
+              onClick={() => togglePeriod("AM")}
+            >
+              AM
+            </button>
+            <button
+              type="button"
+              className={`ampm-btn ${alarmPeriod === "PM" ? "active" : ""}`}
+              onClick={() => togglePeriod("PM")}
+            >
+              PM
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="samsung-picker-drums">
         {use12Hour ? (
-          <>
-            <div className="ampm-column">
-              <span className="drum-column-label">PERIOD</span>
-              <div className="ampm-barrel">
-                <button
-                  type="button"
-                  className={`ampm-btn ${alarmPeriod === "AM" ? "active" : ""}`}
-                  onClick={() => togglePeriod("AM")}
-                >
-                  AM
-                </button>
-                <button
-                  type="button"
-                  className={`ampm-btn ${alarmPeriod === "PM" ? "active" : ""}`}
-                  onClick={() => togglePeriod("PM")}
-                >
-                  PM
-                </button>
-              </div>
-            </div>
-
-            <DrumColumn
-              label="HOURS"
-              value={display12H}
-              max={12}
-              min={1}
-              onChange={handle12HourChange}
-            />
-          </>
+          <DrumColumn
+            label="HOURS"
+            value={display12H}
+            max={12}
+            min={1}
+            pad={2}
+            onChange={handle12HourChange}
+          />
         ) : (
           <DrumColumn
             label="HOURS"
             value={alarmH}
             max={23}
             min={0}
+            pad={2}
             onChange={(h) => {
               setAlarmH(h);
               emitAlarm(h, alarmM, alarmS);
@@ -343,6 +353,7 @@ export function SamsungTimePicker({
           value={alarmM}
           max={59}
           min={0}
+          pad={2}
           onChange={(m) => {
             setAlarmM(m);
             emitAlarm(alarmH, m, alarmS);
@@ -356,11 +367,25 @@ export function SamsungTimePicker({
           value={alarmS}
           max={59}
           min={0}
+          pad={2}
           onChange={(s) => {
             setAlarmS(s);
             emitAlarm(alarmH, alarmM, s);
           }}
         />
+      </div>
+
+      {/* Samsung Dynamic Telemetry Readout */}
+      <div className="samsung-alarm-telemetry">
+        <span className="telemetry-icon">🔔</span>
+        <span>
+          Alarm sounds in{" "}
+          <strong>
+            {diffH > 0 && `${diffH} hr `}
+            {diffM > 0 && `${diffM} min `}
+            {diffS} sec
+          </strong>
+        </span>
       </div>
     </div>
   );
