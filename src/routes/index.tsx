@@ -86,6 +86,7 @@ function Index() {
   const audioRef = useRef<CTUAudio | null>(null);
   const lockRef = useRef<WakeLockSentinel | null>(null);
   const lastBeat = useRef(-1);
+
   const crisis = missions.some((m) => m.status === "CRISIS");
   const active = missions.filter((m) =>
     ["ACTIVE", "ARMED", "SNOOZED", "CRISIS"].includes(m.status),
@@ -94,6 +95,7 @@ function Index() {
   const heightened = active.some((m) => remainingMs(m, now) < 300000);
   const urgent = active.some((m) => remainingMs(m, now) <= audio.window * 1000);
   const tier = crisis ? 3 : urgent ? 2 : 1;
+
   const date = now ? new Date(now) : null;
   const local = date
     ? date
@@ -106,6 +108,7 @@ function Index() {
         .replace(/\s?[ap]m/i, "")
     : "00:00:00";
   const zulu = date ? date.toISOString().slice(11, 19) : "00:00:00";
+
   useEffect(() => {
     audioRef.current = new CTUAudio();
     try {
@@ -118,43 +121,51 @@ function Index() {
     } catch {}
     return () => audioRef.current?.close();
   }, []);
+
   useEffect(() => {
     if (loaded)
       try {
         localStorage.setItem("ctu-settings-v1", JSON.stringify({ audio, format24, stealth }));
       } catch {}
   }, [audio, format24, stealth, loaded]);
+
   useEffect(() => {
     const beat = Math.floor(now / 1000);
     if (beat === lastBeat.current || !now) return;
     lastBeat.current = beat;
     if (active.length) audioRef.current?.tick(tier, audio, beat);
   }, [now, tier, audio, active.length]);
+
   useEffect(() => {
     document.title = focus
       ? `[${clockParts(remaining)}] ${crisis ? "CRISIS · " : ""}CTU Terminal`
       : "CTU Terminal — Mission Clock & Operations";
   }, [focus, remaining, crisis]);
+
   useEffect(() => {
     if (!notice) return;
     const timer = setTimeout(() => setNotice(""), 4000);
     return () => clearTimeout(timer);
   }, [notice]);
+
   useEffect(() => {
     return () => {
       void lockRef.current?.release();
     };
   }, []);
+
   const feedback = () => {
     if (audio.enabled) {
       void audioRef.current?.unlock();
       audioRef.current?.chirp(0.4);
     }
   };
+
   const control = (id: string, action: Parameters<typeof act>[1]) => {
     act(id, action, audio.snooze);
     feedback();
   };
+
   const toggleAudio = async () => {
     if (audio.enabled) {
       await audioRef.current?.mute();
@@ -169,6 +180,7 @@ function Index() {
       }
     }
   };
+
   const toggleGuard = async () => {
     if (guard) {
       await lockRef.current?.release();
@@ -185,6 +197,7 @@ function Index() {
       setNotice("Terminal guard is unavailable or the screen is not visible.");
     }
   };
+
   const fullscreen = () => {
     if (document.fullscreenElement) void document.exitFullscreen();
     else
@@ -192,10 +205,12 @@ function Index() {
         .requestFullscreen()
         .catch(() => setNotice("Full-screen mode is unavailable."));
   };
+
   const armPreset = (p: { title: string; minutes: number; pinned?: boolean }) => {
     arm(p.title, p.minutes * 60000, "timer", undefined, p.pinned);
     feedback();
   };
+
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     const duration = (Number(minutes) * 60 + Number(seconds)) * 1000;
@@ -209,10 +224,12 @@ function Index() {
     setTitle("");
     setSavePreset(false);
   };
+
   const progress =
     focus && focus.duration
       ? Math.min(100, Math.max(0, 100 - (remaining / focus.duration) * 100))
       : 0;
+
   return (
     <main
       className={`ctu-terminal ${stealth ? "night-ops" : ""} ${crisis ? "crisis-state" : heightened ? "heightened-state" : ""}`}
@@ -252,6 +269,7 @@ function Index() {
           </Button>
         </div>
       </header>
+
       <div className="command-heading">
         <div>
           <div className="micro accent flex items-center gap-2">
@@ -264,53 +282,128 @@ function Index() {
           CLEARANCE
         </div>
       </div>
+
       <div className="operations-layout">
         <div className="primary-column">
           <section className="terminal-panel focus-panel">
             <div className="panel-heading">
               <span>
-                <Crosshair size={13} /> PRIMARY OPERATION
+                <Crosshair size={13} /> PRIMARY OPERATIONS &amp; MISSION TIME
               </span>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="focus-mode"
-                onClick={() => setPin(null)}
-                title="Return to closest-expiring operation"
-              >
-                <span className="tiny-square" />
-                {pin ? "MANUALLY PINNED" : "AUTO · CLOSEST TO ZERO"}
-                <ChevronDown size={12} />
-              </Button>
-            </div>
-            <div className="operation-title">
-              <div className="micro muted">
-                {focus
-                  ? `OP-${focus.id.slice(0, 4).toUpperCase()} / ${focus.kind === "timer" ? "COUNTDOWN PROTOCOL" : "DAILY ALARM"}`
-                  : "CTU / AWAITING ASSIGNMENT"}
-              </div>
-              <h2>{focus ? focus.title : "No active operation"}</h2>
-              <span className={`state-badge ${focus ? "" : "standby"}`}>
-                <span className="status-dot" />
-                {focus?.status ?? "STANDBY"}
-              </span>
-            </div>
-            <div className="focus-clock-wrap">
-              <CTUDigits
-                value={focus ? clockParts(remaining) : "00:00:00"}
-                className="focus-clock"
-              />
-              <div className="digit-labels">
-                <span>HOURS</span>
-                <span>MINUTES</span>
-                <span>SECONDS</span>
+              <div className="flex items-center gap-2">
+                <div className="segmented">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className={format24 ? "selected" : ""}
+                    onClick={() => setFormat24(true)}
+                  >
+                    24H
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className={!format24 ? "selected" : ""}
+                    onClick={() => setFormat24(false)}
+                  >
+                    12H
+                  </Button>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="focus-mode"
+                  onClick={() => setPin(null)}
+                  title="Return to closest-expiring operation"
+                >
+                  <span className="tiny-square" />
+                  {pin ? "MANUALLY PINNED" : "AUTO · CLOSEST TO ZERO"}
+                  <ChevronDown size={12} />
+                </Button>
               </div>
             </div>
-            <div className="operation-progress">
-              <span>{focus ? "TIME TO ZERO" : "AWAITING MISSION"}</span>
-              <span>{focus ? `${Math.round(progress)}% ELAPSED` : "—"}</span>
-              <progress value={progress} max="100" />
+
+            {/* Integrated Dual Stage: Local Mission Time + Active Operation */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-signal/40 border-b border-signal/30">
+              {/* Sector 1: Local Mission Time */}
+              <div className="p-4 sm:p-6 flex flex-col justify-between bg-black/40">
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="micro muted flex items-center gap-1.5">
+                      <Activity size={12} className="text-signal" /> REAL-TIME TELEMETRY
+                    </span>
+                    <span className="accent micro flex items-center gap-1">
+                      <span className="status-dot" /> EVENTS OCCUR IN REAL TIME
+                    </span>
+                  </div>
+                  <h3 className="text-lg font-bold tracking-wider text-muted-foreground uppercase">
+                    Local Mission Clock
+                  </h3>
+                </div>
+
+                <div className="my-4 py-2 flex items-center justify-center">
+                  <CTUDigits value={local} blink className="mission-clock h-16 sm:h-20 lg:h-24" />
+                  {!format24 && date && (
+                    <span className="am-pm ml-2 text-xs font-mono text-signal">
+                      {date.getHours() >= 12 ? "PM" : "AM"}
+                    </span>
+                  )}
+                </div>
+
+                <div className="micro muted text-center tracking-widest uppercase border-t border-signal/20 pt-2">
+                  {date
+                    ? date
+                        .toLocaleDateString("en-US", {
+                          weekday: "short",
+                          month: "short",
+                          day: "2-digit",
+                          year: "numeric",
+                        })
+                        .toUpperCase()
+                    : "CALCULATING"}
+                </div>
+              </div>
+
+              {/* Sector 2: Primary Operation Countdown */}
+              <div className="p-4 sm:p-6 flex flex-col justify-between bg-black/20">
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="micro muted">
+                      {focus
+                        ? `OP-${focus.id.slice(0, 4).toUpperCase()} / ${focus.kind === "timer" ? "COUNTDOWN PROTOCOL" : "DAILY ALARM"}`
+                        : "CTU / AWAITING ASSIGNMENT"}
+                    </span>
+                    <span className={`state-badge ${focus ? "" : "standby"}`}>
+                      <span className="status-dot" />
+                      {focus?.status ?? "STANDBY"}
+                    </span>
+                  </div>
+                  <h2 className="text-xl sm:text-2xl font-bold tracking-wider uppercase text-foreground">
+                    {focus ? focus.title : "No active operation"}
+                  </h2>
+                </div>
+
+                <div className="focus-clock-wrap my-2">
+                  <CTUDigits
+                    value={focus ? clockParts(remaining) : "00:00:00"}
+                    className="focus-clock h-20 sm:h-24 lg:h-28"
+                  />
+                  <div className="digit-labels">
+                    <span>HOURS</span>
+                    <span>MINUTES</span>
+                    <span>SECONDS</span>
+                  </div>
+                </div>
+
+                <div className="operation-progress mt-2">
+                  <span>{focus ? "TIME TO ZERO" : "AWAITING MISSION"}</span>
+                  <span>{focus ? `${Math.round(progress)}% ELAPSED` : "—"}</span>
+                  <progress value={progress} max="100" />
+                </div>
+              </div>
             </div>
+
+            {/* Mission Controls */}
             <div className="mission-controls">
               <Button
                 className="primary-control"
@@ -355,6 +448,7 @@ function Index() {
                 SNOOZE <span className="muted">{audio.snooze}M</span>
               </Button>
             </div>
+
             <div className="focus-footer">
               <span>
                 <Radio size={12} />{" "}
@@ -368,54 +462,8 @@ function Index() {
               </span>
             </div>
           </section>
-          <section className="terminal-panel clock-panel">
-            <div className="panel-heading">
-              <span>
-                <Activity size={13} /> LOCAL MISSION TIME
-              </span>
-              <div className="segmented">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className={format24 ? "selected" : ""}
-                  onClick={() => setFormat24(true)}
-                >
-                  24H
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className={!format24 ? "selected" : ""}
-                  onClick={() => setFormat24(false)}
-                >
-                  12H
-                </Button>
-              </div>
-            </div>
-            <div className="clock-stage">
-              <CTUDigits value={local} blink className="mission-clock" />
-              {!format24 && date && (
-                <span className="am-pm">{date.getHours() >= 12 ? "PM" : "AM"}</span>
-              )}
-            </div>
-            <div className="clock-caption">
-              <span>
-                {date
-                  ? date
-                      .toLocaleDateString("en-US", {
-                        weekday: "long",
-                        month: "long",
-                        day: "2-digit",
-                        year: "numeric",
-                      })
-                      .toUpperCase()
-                  : "ESTABLISHING LOCAL TIME"}
-              </span>
-              <span className="accent">
-                <span className="status-dot" /> EVENTS OCCUR IN REAL TIME
-              </span>
-            </div>
-          </section>
+
+          {/* Quick-Arm Presets elevated directly beneath the stage */}
           <section className="presets-section">
             <div className="section-label">
               <span>
@@ -444,6 +492,7 @@ function Index() {
             </div>
           </section>
         </div>
+
         <aside className="secondary-column">
           <section className="terminal-panel queue-panel">
             <div className="panel-heading">
@@ -532,6 +581,7 @@ function Index() {
               </Button>
             </div>
           </section>
+
           <section className="terminal-panel surveillance-panel">
             <div className="panel-heading">
               <span>
@@ -562,6 +612,7 @@ function Index() {
           </section>
         </aside>
       </div>
+
       <section className="telemetry-bar">
         <div className="telemetry-status">
           <ShieldCheck size={17} />
@@ -619,6 +670,7 @@ function Index() {
           </Button>
         </div>
       </section>
+
       {audioOpen && (
         <section className="audio-matrix">
           <div className="section-label">
@@ -691,6 +743,7 @@ function Index() {
           </div>
         </section>
       )}
+
       <footer className="terminal-footer">
         <span>CTU // DOMESTIC OPERATIONS DIVISION</span>
         <span>
@@ -699,11 +752,13 @@ function Index() {
           <span className="accent">ALL CHANNELS SECURE</span>
         </span>
       </footer>
+
       {notice && (
         <div role="status" className="terminal-notice">
           {notice}
         </div>
       )}
+
       {addOpen && (
         <div className="modal-backdrop" onClick={() => setAddOpen(false)}>
           <section
