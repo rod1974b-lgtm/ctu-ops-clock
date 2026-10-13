@@ -266,54 +266,6 @@ function Index() {
       </div>
       <div className="operations-layout">
         <div className="primary-column">
-          <section className="terminal-panel clock-panel">
-            <div className="panel-heading">
-              <span>
-                <Activity size={13} /> LOCAL MISSION TIME
-              </span>
-              <div className="segmented">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className={format24 ? "selected" : ""}
-                  onClick={() => setFormat24(true)}
-                >
-                  24H
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className={!format24 ? "selected" : ""}
-                  onClick={() => setFormat24(false)}
-                >
-                  12H
-                </Button>
-              </div>
-            </div>
-            <div className="clock-stage">
-              <CTUDigits value={local} blink className="mission-clock" />
-              {!format24 && date && (
-                <span className="am-pm">{date.getHours() >= 12 ? "PM" : "AM"}</span>
-              )}
-            </div>
-            <div className="clock-caption">
-              <span>
-                {date
-                  ? date
-                      .toLocaleDateString("en-US", {
-                        weekday: "long",
-                        month: "long",
-                        day: "2-digit",
-                        year: "numeric",
-                      })
-                      .toUpperCase()
-                  : "ESTABLISHING LOCAL TIME"}
-              </span>
-              <span className="accent">
-                <span className="status-dot" /> EVENTS OCCUR IN REAL TIME
-              </span>
-            </div>
-          </section>
           <section className="terminal-panel focus-panel">
             <div className="panel-heading">
               <span>
@@ -413,6 +365,54 @@ function Index() {
                 <span className="accent">
                   / {crisis ? "CODE RED" : heightened ? "HEIGHTENED" : "WATCH"}
                 </span>
+              </span>
+            </div>
+          </section>
+          <section className="terminal-panel clock-panel">
+            <div className="panel-heading">
+              <span>
+                <Activity size={13} /> LOCAL MISSION TIME
+              </span>
+              <div className="segmented">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={format24 ? "selected" : ""}
+                  onClick={() => setFormat24(true)}
+                >
+                  24H
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={!format24 ? "selected" : ""}
+                  onClick={() => setFormat24(false)}
+                >
+                  12H
+                </Button>
+              </div>
+            </div>
+            <div className="clock-stage">
+              <CTUDigits value={local} blink className="mission-clock" />
+              {!format24 && date && (
+                <span className="am-pm">{date.getHours() >= 12 ? "PM" : "AM"}</span>
+              )}
+            </div>
+            <div className="clock-caption">
+              <span>
+                {date
+                  ? date
+                      .toLocaleDateString("en-US", {
+                        weekday: "long",
+                        month: "long",
+                        day: "2-digit",
+                        year: "numeric",
+                      })
+                      .toUpperCase()
+                  : "ESTABLISHING LOCAL TIME"}
+              </span>
+              <span className="accent">
+                <span className="status-dot" /> EVENTS OCCUR IN REAL TIME
               </span>
             </div>
           </section>
