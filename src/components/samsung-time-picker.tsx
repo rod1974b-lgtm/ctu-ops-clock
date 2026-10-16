@@ -14,16 +14,28 @@ interface DrumColumnProps {
 function DrumColumn({ label, value, max, min = 0, step = 1, pad = 2, onChange }: DrumColumnProps) {
   const rangeSize = max - min + 1;
 
+  // Invert logic: nextVal increments (+), prevVal decrements (-)
   const prevVal = value - step < min ? max - ((min - (value - step) - 1) % rangeSize) : value - step;
   const nextVal = value + step > max ? min + ((value + step - max - 1) % rangeSize) : value + step;
+
+  const [isFocused, setIsFocused] = useState(false);
+  const [inputValue, setInputValue] = useState(String(value).padStart(pad, "0"));
+
+  useEffect(() => {
+    if (!isFocused) {
+      setInputValue(String(value).padStart(pad, "0"));
+    }
+  }, [value, pad, isFocused]);
 
   const handleWheel = useCallback(
     (e: React.WheelEvent) => {
       e.preventDefault();
       if (e.deltaY < 0) {
-        onChange(prevVal);
-      } else if (e.deltaY > 0) {
+        // Wheel up = increment
         onChange(nextVal);
+      } else if (e.deltaY > 0) {
+        // Wheel down = decrement
+        onChange(prevVal);
       }
     },
     [prevVal, nextVal, onChange]
@@ -35,40 +47,103 @@ function DrumColumn({ label, value, max, min = 0, step = 1, pad = 2, onChange }:
       <button
         type="button"
         className="drum-step-btn"
-        onClick={() => onChange(prevVal)}
+        onClick={() => onChange(nextVal)}
         aria-label={`Increment ${label}`}
       >
         <ChevronUp className="h-4 w-4" />
       </button>
 
       <div className="drum-barrel">
-        <button
-          type="button"
-          tabIndex={-1}
-          className="drum-slot drum-slot-neighbor"
-          onClick={() => onChange(prevVal)}
-        >
-          {String(prevVal).padStart(pad, "0")}
-        </button>
-
-        <div className="drum-slot drum-slot-active">
-          <span>{String(value).padStart(pad, "0")}</span>
-        </div>
-
+        {/* Top slot: next higher value */}
         <button
           type="button"
           tabIndex={-1}
           className="drum-slot drum-slot-neighbor"
           onClick={() => onChange(nextVal)}
+          title={`Set ${label} to ${String(nextVal).padStart(pad, "0")}`}
         >
           {String(nextVal).padStart(pad, "0")}
+        </button>
+
+        {/* Center active slot: click to edit directly */}
+        <div className="drum-slot drum-slot-active">
+          <input
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            maxLength={Math.max(pad, String(max).length)}
+            value={inputValue}
+            onFocus={(e) => {
+              setIsFocused(true);
+              e.target.select();
+            }}
+            onBlur={() => {
+              setIsFocused(false);
+              const num = parseInt(inputValue, 10);
+              if (isNaN(num)) {
+                setInputValue(String(value).padStart(pad, "0"));
+              } else {
+                const clamped = Math.min(max, Math.max(min, num));
+                onChange(clamped);
+                setInputValue(String(clamped).padStart(pad, "0"));
+              }
+            }}
+            onChange={(e) => {
+              const cleaned = e.target.value.replace(/\D/g, "");
+              setInputValue(cleaned);
+              if (cleaned.length > 0) {
+                const num = parseInt(cleaned, 10);
+                if (!isNaN(num) && num <= max && num >= min) {
+                  onChange(num);
+                }
+              }
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                (e.target as HTMLInputElement).blur();
+              } else if (e.key === "ArrowUp") {
+                e.preventDefault();
+                onChange(nextVal);
+              } else if (e.key === "ArrowDown") {
+                e.preventDefault();
+                onChange(prevVal);
+              }
+            }}
+            style={{
+              background: isFocused ? "color-mix(in oklch, var(--primary) 12%, transparent)" : "transparent",
+              color: "var(--primary)",
+              border: isFocused ? "1px solid var(--primary)" : "1px solid transparent",
+              borderRadius: "4px",
+              outline: "none",
+              textAlign: "center",
+              width: "72px",
+              fontSize: "44px",
+              fontFamily: "var(--font-mono)",
+              lineHeight: "1.1",
+              fontVariantNumeric: "tabular-nums",
+              textShadow: "0 0 12px color-mix(in oklch, var(--primary) 50%, transparent)",
+              cursor: isFocused ? "text" : "pointer",
+            }}
+            aria-label={`${label} numeric entry`}
+          />
+        </div>
+
+        {/* Bottom slot: next lower value */}
+        <button
+          type="button"
+          tabIndex={-1}
+          className="drum-slot drum-slot-neighbor"
+          onClick={() => onChange(prevVal)}
+          title={`Set ${label} to ${String(prevVal).padStart(pad, "0")}`}
+        >
+          {String(prevVal).padStart(pad, "0")}
         </button>
       </div>
 
       <button
         type="button"
         className="drum-step-btn"
-        onClick={() => onChange(nextVal)}
+        onClick={() => onChange(prevVal)}
         aria-label={`Decrement ${label}`}
       >
         <ChevronDown className="h-4 w-4" />
