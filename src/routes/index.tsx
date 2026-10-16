@@ -3,7 +3,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AudioLines,
   Bell,
-  Check,
   ChevronDown,
   ChevronRight,
   Eye,
@@ -33,11 +32,9 @@ import {
 } from "@/components/samsung-time-picker";
 import { useMissions } from "@/hooks/use-missions";
 import {
-  Mission,
   clockParts,
   focusMission,
   nextAlarm,
-  protocols,
   remainingMs,
 } from "@/lib/mission-engine";
 import surveillance from "@/assets/la-surveillance.jpg";
@@ -46,7 +43,7 @@ export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
       {
-        title: "CTU Operational Timer · Los Angeles Domestic Unit",
+        title: "CTU Operational Timer · Tactical Mission Terminal",
       },
       {
         name: "description",
@@ -65,6 +62,25 @@ export const Route = createFileRoute("/")({
   }),
   component: CTUTerminal,
 });
+
+export const TIMEZONE_SECTORS = [
+  { id: "Asia/Bangkok", label: "BANGKOK · SECTOR 7 (UTC+7)" },
+  { id: "America/Los_Angeles", label: "LOS ANGELES · CTU HQ (UTC-7)" },
+  { id: "America/New_York", label: "WASHINGTON D.C. (UTC-4)" },
+  { id: "Europe/London", label: "LONDON · MI6 LINK (UTC+1)" },
+  { id: "Asia/Tokyo", label: "TOKYO · PACIFIC RIM (UTC+9)" },
+  { id: "UTC", label: "ZULU / PRIME MERIDIAN (UTC+0)" },
+] as const;
+
+function getTzOffsetMs(date: Date, tz: string): number {
+  try {
+    const utcDate = new Date(date.toLocaleString("en-US", { timeZone: "UTC" }));
+    const tzDate = new Date(date.toLocaleString("en-US", { timeZone: tz }));
+    return tzDate.getTime() - utcDate.getTime();
+  } catch {
+    return 0;
+  }
+}
 
 function CTUTerminal() {
   const {
@@ -106,6 +122,21 @@ function CTUTerminal() {
     }
   });
 
+  const [timeZone, setTimeZone] = useState<string>(() => {
+    if (typeof window === "undefined") return "Asia/Bangkok";
+    try {
+      const saved = localStorage.getItem("ctu-settings-v1");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.timeZone) return parsed.timeZone;
+      }
+      const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      return detected && detected !== "UTC" ? detected : "Asia/Bangkok";
+    } catch {
+      return "Asia/Bangkok";
+    }
+  });
+
   const [fullscreen, setFullscreen] = useState(false);
   const [audioOpen, setAudioOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
@@ -131,12 +162,12 @@ function CTUTerminal() {
     try {
       localStorage.setItem(
         "ctu-settings-v1",
-        JSON.stringify({ format24, stealth })
+        JSON.stringify({ format24, stealth, timeZone })
       );
     } catch {
       // ignore
     }
-  }, [format24, stealth]);
+  }, [format24, stealth, timeZone]);
 
   const toggleFullscreen = useCallback(async () => {
     try {
@@ -200,22 +231,43 @@ function CTUTerminal() {
   }, [missions, crisis, now]);
 
   const localClock = useMemo(() => {
-    const d = new Date(now);
-    let hours = d.getHours();
-    let period = "";
-    if (!format24) {
-      period = hours >= 12 ? " PM" : " AM";
-      hours = hours % 12 || 12;
+    const d = new Date(now || Date.now());
+    try {
+      const parts = new Intl.DateTimeFormat("en-US", {
+        timeZone,
+        hour: "numeric",
+        minute: "numeric",
+        second: "numeric",
+        hour12: !format24,
+      }).formatToParts(d);
+
+      const h = parts.find((p) => p.type === "hour")?.value ?? "00";
+      const m = parts.find((p) => p.type === "minute")?.value ?? "00";
+      const s = parts.find((p) => p.type === "second")?.value ?? "00";
+      const dayPeriod = parts.find((p) => p.type === "dayPeriod")?.value;
+
+      const pad = (str: string) => str.padStart(2, "0");
+      return {
+        digits: `${pad(h)}:${pad(m)}:${pad(s)}`,
+        period: dayPeriod ? ` ${dayPeriod.toUpperCase()}` : "",
+      };
+    } catch {
+      let hours = d.getHours();
+      let period = "";
+      if (!format24) {
+        period = hours >= 12 ? " PM" : " AM";
+        hours = hours % 12 || 12;
+      }
+      const pad = (n: number) => String(n).padStart(2, "0");
+      return {
+        digits: `${pad(hours)}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`,
+        period,
+      };
     }
-    const pad = (n: number) => String(n).padStart(2, "0");
-    return {
-      digits: `${pad(hours)}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`,
-      period,
-    };
-  }, [now, format24]);
+  }, [now, format24, timeZone]);
 
   const zulu = useMemo(() => {
-    const d = new Date(now);
+    const d = new Date(now || Date.now());
     const pad = (n: number) => String(n).padStart(2, "0");
     return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
   }, [now]);
@@ -245,8 +297,20 @@ function CTUTerminal() {
         });
       }
     } else {
-      const target = nextAlarm(alarmTime, Date.now());
-      const ms = Math.max(0, target - Date.now());
+      const offsetMs = getTzOffsetMs(new Date(now || Date.now()), timeZone);
+      const nowInTz = (now || Date.now()) + offsetMs;
+      const d = new Date(nowInTz);
+      const parts = alarmTime.split(":").map(Number);
+      const hours = parts[0] ?? 0;
+      const minutes = parts[1] ?? 0;
+      const seconds = parts[2] ?? 0;
+      d.setUTCHours(hours, minutes, seconds, 0);
+      let targetInTz = d.getTime();
+      if (targetInTz <= nowInTz) {
+        targetInTz += 24 * 3600 * 1000;
+      }
+      const targetUtc = targetInTz - offsetMs;
+      const ms = Math.max(0, targetUtc - (now || Date.now()));
       arm({
         title: title.trim() || `Daily Alarm · ${alarmTime}`,
         kind: "alarm",
@@ -275,7 +339,7 @@ function CTUTerminal() {
           <div>
             <span className="brand-title">CTU TERMINAL</span>
             <span className="brand-sub">
-              LOS ANGELES DOMESTIC FIELD UNIT · SECTOR 4
+              TACTICAL FIELD OPERATIONS · SECTOR 4
             </span>
           </div>
         </div>
@@ -323,8 +387,26 @@ function CTUTerminal() {
 
             <div className="unified-stage-grid">
               <div className="stage-sector local-time-sector">
-                <div className="sector-header">
-                  <span className="sector-tag">LOCAL MISSION TIME</span>
+                <div className="sector-header flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="sector-tag">LOCAL MISSION TIME</span>
+                    <select
+                      value={timeZone}
+                      onChange={(e) => setTimeZone(e.target.value)}
+                      className="time-mode-btn text-xs py-0.5 px-1.5 cursor-pointer bg-black/60 border border-[var(--border)] rounded text-[var(--signal)] uppercase"
+                      title="Select operational theater / timezone"
+                    >
+                      {TIMEZONE_SECTORS.map((s) => (
+                        <option
+                          key={s.id}
+                          value={s.id}
+                          className="bg-black text-[var(--signal)]"
+                        >
+                          {s.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                   <span className="sector-format-indicator">
                     {format24 ? "MILITARY (24H)" : `CIVILIAN${localClock.period}`}
                   </span>
@@ -453,7 +535,7 @@ function CTUTerminal() {
               </div>
               <div className="focus-target-time">
                 {activeFocus && activeFocus.endsAt > 0
-                  ? `TARGET: ${new Date(activeFocus.endsAt).toLocaleTimeString()}`
+                  ? `TARGET: ${new Date(activeFocus.endsAt).toLocaleTimeString("en-US", { timeZone })}`
                   : "STANDBY"}
               </div>
             </div>
