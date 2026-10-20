@@ -14,7 +14,10 @@ interface DrumColumnProps {
 function DrumColumn({ label, value, max, min = 0, step = 1, pad = 2, onChange }: DrumColumnProps) {
   const rangeSize = max - min + 1;
 
-  // Invert logic: nextVal increments (+), prevVal decrements (-)
+  // Natural vertical ordering:
+  // Top slot: previous number (value - step)
+  // Center slot: current number (value)
+  // Bottom slot: next number (value + step)
   const prevVal = value - step < min ? max - ((min - (value - step) - 1) % rangeSize) : value - step;
   const nextVal = value + step > max ? min + ((value + step - max - 1) % rangeSize) : value + step;
 
@@ -31,10 +34,10 @@ function DrumColumn({ label, value, max, min = 0, step = 1, pad = 2, onChange }:
     (e: React.WheelEvent) => {
       e.preventDefault();
       if (e.deltaY < 0) {
-        // Wheel up = increment
+        // Wheel up rolls up -> next number
         onChange(nextVal);
       } else if (e.deltaY > 0) {
-        // Wheel down = decrement
+        // Wheel down rolls down -> previous number
         onChange(prevVal);
       }
     },
@@ -47,25 +50,25 @@ function DrumColumn({ label, value, max, min = 0, step = 1, pad = 2, onChange }:
       <button
         type="button"
         className="drum-step-btn"
-        onClick={() => onChange(nextVal)}
-        aria-label={`Increment ${label}`}
+        onClick={() => onChange(prevVal)}
+        aria-label={`Previous ${label}`}
       >
         <ChevronUp className="h-4 w-4" />
       </button>
 
       <div className="drum-barrel">
-        {/* Top slot: next higher value */}
+        {/* Top slot (previous number) */}
         <button
           type="button"
           tabIndex={-1}
           className="drum-slot drum-slot-neighbor"
-          onClick={() => onChange(nextVal)}
-          title={`Set ${label} to ${String(nextVal).padStart(pad, "0")}`}
+          onClick={() => onChange(prevVal)}
+          title={`Set ${label} to ${String(prevVal).padStart(pad, "0")}`}
         >
-          {String(nextVal).padStart(pad, "0")}
+          {String(prevVal).padStart(pad, "0")}
         </button>
 
-        {/* Center active slot: click to edit directly */}
+        {/* Center active slot: direct numeric input */}
         <div className="drum-slot drum-slot-active">
           <input
             type="text"
@@ -103,10 +106,10 @@ function DrumColumn({ label, value, max, min = 0, step = 1, pad = 2, onChange }:
                 (e.target as HTMLInputElement).blur();
               } else if (e.key === "ArrowUp") {
                 e.preventDefault();
-                onChange(nextVal);
+                onChange(prevVal);
               } else if (e.key === "ArrowDown") {
                 e.preventDefault();
-                onChange(prevVal);
+                onChange(nextVal);
               }
             }}
             style={{
@@ -128,23 +131,23 @@ function DrumColumn({ label, value, max, min = 0, step = 1, pad = 2, onChange }:
           />
         </div>
 
-        {/* Bottom slot: next lower value */}
+        {/* Bottom slot (next number) */}
         <button
           type="button"
           tabIndex={-1}
           className="drum-slot drum-slot-neighbor"
-          onClick={() => onChange(prevVal)}
-          title={`Set ${label} to ${String(prevVal).padStart(pad, "0")}`}
+          onClick={() => onChange(nextVal)}
+          title={`Set ${label} to ${String(nextVal).padStart(pad, "0")}`}
         >
-          {String(prevVal).padStart(pad, "0")}
+          {String(nextVal).padStart(pad, "0")}
         </button>
       </div>
 
       <button
         type="button"
         className="drum-step-btn"
-        onClick={() => onChange(prevVal)}
-        aria-label={`Decrement ${label}`}
+        onClick={() => onChange(nextVal)}
+        aria-label={`Next ${label}`}
       >
         <ChevronDown className="h-4 w-4" />
       </button>
@@ -160,8 +163,8 @@ export interface SamsungTimerValues {
 }
 
 interface SamsungTimePickerProps {
-  mode: "countdown" | "alarm";
-  // Countdown props
+  mode: "countdown" | "timer" | "alarm";
+  // Countdown / Timer props
   timerValues?: SamsungTimerValues;
   onTimerChange?: (values: SamsungTimerValues) => void;
   // Alarm props
@@ -176,6 +179,8 @@ export function SamsungTimePicker({
   alarmTime = "09:00:00",
   onAlarmChange,
 }: SamsungTimePickerProps) {
+  const isCountdown = mode === "countdown" || mode === "timer";
+
   // Countdown local state
   const hours = timerValues?.hours ?? 0;
   const minutes = timerValues?.minutes ?? 25;
@@ -265,7 +270,7 @@ export function SamsungTimePicker({
     emitAlarm(military, alarmM, alarmS);
   };
 
-  if (mode === "countdown") {
+  if (isCountdown) {
     return (
       <div className="samsung-picker-container">
         <div className="samsung-picker-drums">
@@ -294,7 +299,7 @@ export function SamsungTimePicker({
           />
         </div>
 
-        {/* Quick-Add Chips — Timer Only */}
+        {/* Quick-Add Chips — Countdown Mode */}
         <div className="samsung-quick-chips">
           <button
             type="button"
@@ -344,7 +349,6 @@ export function SamsungTimePicker({
   }
 
   // Daily Alarm Mode
-  // Calculate relative time until alarm sounds
   const now = new Date();
   const target = new Date(now);
   target.setHours(alarmH, alarmM, alarmS, 0);
@@ -378,17 +382,17 @@ export function SamsungTimePicker({
         </div>
 
         {use12Hour && (
-          <div className="ampm-toggle-group">
+          <div className="period-toggle-group">
             <button
               type="button"
-              className={`ampm-btn ${alarmPeriod === "AM" ? "active" : ""}`}
+              className={`period-btn ${alarmPeriod === "AM" ? "active" : ""}`}
               onClick={() => togglePeriod("AM")}
             >
               AM
             </button>
             <button
               type="button"
-              className={`ampm-btn ${alarmPeriod === "PM" ? "active" : ""}`}
+              className={`period-btn ${alarmPeriod === "PM" ? "active" : ""}`}
               onClick={() => togglePeriod("PM")}
             >
               PM
@@ -400,7 +404,7 @@ export function SamsungTimePicker({
       <div className="samsung-picker-drums">
         {use12Hour ? (
           <DrumColumn
-            label="HOURS"
+            label="HOURS (1-12)"
             value={display12H}
             max={12}
             min={1}
@@ -409,7 +413,7 @@ export function SamsungTimePicker({
           />
         ) : (
           <DrumColumn
-            label="HOURS"
+            label="HOURS (00-23)"
             value={alarmH}
             max={23}
             min={0}
@@ -420,9 +424,7 @@ export function SamsungTimePicker({
             }}
           />
         )}
-
         <span className="samsung-drum-colon">:</span>
-
         <DrumColumn
           label="MINUTES"
           value={alarmM}
@@ -434,9 +436,7 @@ export function SamsungTimePicker({
             emitAlarm(alarmH, m, alarmS);
           }}
         />
-
         <span className="samsung-drum-colon">:</span>
-
         <DrumColumn
           label="SECONDS"
           value={alarmS}
@@ -450,15 +450,13 @@ export function SamsungTimePicker({
         />
       </div>
 
-      {/* Samsung Dynamic Telemetry Readout */}
-      <div className="samsung-alarm-telemetry">
-        <span className="telemetry-icon">🔔</span>
+      <div className="samsung-alarm-summary">
+        <span className="summary-icon">⏱</span>
         <span>
           Alarm sounds in{" "}
           <strong>
             {diffH > 0 && `${diffH} hr `}
-            {diffM > 0 && `${diffM} min `}
-            {diffS} sec
+            {diffM} min {diffS} sec
           </strong>
         </span>
       </div>
