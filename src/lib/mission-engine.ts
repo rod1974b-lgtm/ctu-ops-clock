@@ -4,9 +4,12 @@ export interface Mission {
   id: string;
   title: string;
   kind: "timer" | "alarm";
-  durationMs: number;
-  remainingMs: number;
-  endsAt: number;
+  durationMs?: number;
+  duration?: number;
+  remainingMs?: number;
+  remaining?: number;
+  endsAt?: number;
+  deadline?: number;
   status: MissionStatus;
   pinned?: boolean;
   alarmTime?: string; // HH:MM:SS or HH:MM
@@ -48,9 +51,10 @@ export const protocols: Preset[] = [
 
 export function remainingMs(mission: Mission, now = Date.now()): number {
   if (mission.status === "PAUSED" || mission.status === "STOPPED") {
-    return mission.remainingMs;
+    return mission.remainingMs ?? mission.remaining ?? 0;
   }
-  return Math.max(0, mission.endsAt - now);
+  const target = mission.endsAt ?? mission.deadline ?? now;
+  return Math.max(0, target - now);
 }
 
 export function nextAlarm(alarmTime: string, now = Date.now()): number {
@@ -68,26 +72,36 @@ export function nextAlarm(alarmTime: string, now = Date.now()): number {
   return target.getTime();
 }
 
-export function focusMission(missions: Mission[]): Mission | null {
+export function focusMission(
+  missions: Mission[],
+  pinnedId: string | null = null,
+  now = Date.now(),
+): Mission | null {
   if (!missions.length) return null;
+
+  if (pinnedId) {
+    const explicitlyPinned = missions.find((m) => m.id === pinnedId);
+    if (explicitlyPinned) return explicitlyPinned;
+  }
+
   const pinned = missions.find((m) => m.pinned);
   if (pinned) return pinned;
 
   const active = missions
     .filter((m) => m.status === "ACTIVE" || m.status === "CRISIS")
-    .sort((a, b) => a.endsAt - b.endsAt);
+    .sort((a, b) => remainingMs(a, now) - remainingMs(b, now));
   if (active.length) return active[0];
 
   const paused = missions
     .filter((m) => m.status === "PAUSED")
-    .sort((a, b) => a.remainingMs - b.remainingMs);
+    .sort((a, b) => remainingMs(a, now) - remainingMs(b, now));
   if (paused.length) return paused[0];
 
   return missions[0];
 }
 
 export function clockParts(ms: number): string {
-  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
   const h = Math.floor(totalSeconds / 3600);
   const m = Math.floor((totalSeconds % 3600) / 60);
   const s = totalSeconds % 60;
