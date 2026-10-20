@@ -136,6 +136,7 @@ function CTUTerminal() {
   const [guard, setGuard] = useState(false);
   const [wakeLock, setWakeLock] = useState<WakeLockSentinel | null>(null);
   const [audioOpen, setAudioOpen] = useState(false);
+  const [forceCountdownFeed, setForceCountdownFeed] = useState(false);
 
   // Arm modal state
   const [addOpen, setAddOpen] = useState(false);
@@ -148,9 +149,37 @@ function CTUTerminal() {
     totalSeconds: 1500,
   });
   const [alarmTime, setAlarmTime] = useState<string>("09:00:00");
-  const [savePreset, setSavePreset] = useState(false);
 
-  // Sync settings
+  const [savingPreset, setSavingPreset] = useState(false);
+  const [presetName, setPresetName] = useState("");
+  const [presetDesc, setPresetDesc] = useState("");
+
+  const activeFocus = useMemo(() => focusMission(missions, now), [missions, now]);
+  const crisis = useMemo(() => missions.some((m) => m.status === "CRISIS"), [missions]);
+
+  const activeMissions = useMemo(
+    () => missions.filter((m) => m.status === "ACTIVE"),
+    [missions],
+  );
+
+  const closestRemaining = useMemo(() => {
+    if (!activeMissions.length) return Infinity;
+    return Math.min(...activeMissions.map((m) => remainingMs(m, now)));
+  }, [activeMissions, now]);
+
+  const heightened = useMemo(
+    () => closestRemaining <= 5 * 60 * 1000 && closestRemaining > 0,
+    [closestRemaining],
+  );
+
+  const inCountdownWindow = useMemo(
+    () => closestRemaining <= audio.countdownWindow * 1000 && closestRemaining > 0,
+    [closestRemaining, audio.countdownWindow],
+  );
+
+  const missionCount = missions.length;
+  const activeCount = activeMissions.length;
+
   useEffect(() => {
     try {
       localStorage.setItem(
@@ -162,722 +191,683 @@ function CTUTerminal() {
     }
   }, [format24, stealth, timeZone]);
 
-  const activeFocus = useMemo(() => focusMission(missions, now), [missions, now]);
-  const crisis = useMemo(() => missions.some((m) => m.status === "CRISIS"), [missions]);
-  const heightened = useMemo(() => {
-    const active = missions.filter((m) => m.status === "ACTIVE");
-    return active.some((m) => remainingMs(m, now) < 5 * 60 * 1000);
-  }, [missions, now]);
-
-  const toggleFullscreen = useCallback(async () => {
-    try {
-      if (!document.fullscreenElement) {
-        await document.documentElement.requestFullscreen();
-        setFullscreen(true);
-      } else {
-        await document.exitFullscreen();
-        setFullscreen(false);
-      }
-    } catch {
-      /* fullscreen blocked */
-    }
-  }, []);
-
-  const toggleGuard = useCallback(async () => {
-    if ("wakeLock" in navigator) {
-      try {
-        if (!guard) {
-          const wl = await navigator.wakeLock.request("screen");
-          setWakeLock(wl);
-          setGuard(true);
-          wl.addEventListener("release", () => setGuard(false));
-        } else if (wakeLock) {
-          await wakeLock.release();
-          setWakeLock(null);
-          setGuard(false);
-        }
-      } catch {
-        setGuard(false);
-      }
-    }
-  }, [guard, wakeLock]);
-
-  // Operational theater local time
   const localClock = useMemo(() => {
-    const ts = now || Date.now();
-    const d = new Date(ts);
+    if (!now) return { h: "00", m: "00", s: "00", p: "" };
     try {
+      const date = new Date(now);
       const parts = new Intl.DateTimeFormat("en-US", {
         timeZone,
-        hour: "numeric",
-        minute: "numeric",
-        second: "numeric",
         hour12: !format24,
-      }).formatToParts(d);
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      }).formatToParts(date);
 
-      let h = 0;
-      let m = 0;
-      let s = 0;
-      let dayPeriod = "";
-
-      for (const p of parts) {
-        if (p.type === "hour") h = parseInt(p.value, 10);
-        else if (p.type === "minute") m = parseInt(p.value, 10);
-        else if (p.type === "second") s = parseInt(p.value, 10);
-        else if (p.type === "dayPeriod") dayPeriod = p.value;
-      }
-
-      const pad = (n: number) => String(n).padStart(2, "0");
-      return {
-        digits: `${pad(h)}:${pad(m)}:${pad(s)}`,
-        period: dayPeriod ? ` ${dayPeriod.toUpperCase()}` : "",
-      };
+      const h = parts.find((p) => p.type === "hour")?.value || "00";
+      const m = parts.find((p) => p.type === "minute")?.value || "00";
+      const s = parts.find((p) => p.type === "second")?.value || "00";
+      const p = parts.find((p) => p.type === "dayPeriod")?.value || "";
+      return { h, m, s, p: format24 ? "" : p };
     } catch {
-      let hours = d.getHours();
-      let period = "";
-      if (!format24) {
-        period = hours >= 12 ? " PM" : " AM";
-        hours = hours % 12 || 12;
-      }
-      const pad = (n: number) => String(n).padStart(2, "0");
-      return {
-        digits: `${pad(hours)}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`,
-        period,
-      };
+      return clockParts(now, format24);
     }
   }, [now, format24, timeZone]);
 
-  const zulu = useMemo(() => {
-    const d = new Date(now || Date.now());
-    const pad = (n: number) => String(n).padStart(2, "0");
-    return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+  const zuluClock = useMemo(() => {
+    if (!now) return "00:00:00Z";
+    const d = new Date(now);
+    const h = String(d.getUTCHours()).padStart(2, "0");
+    const m = String(d.getUTCMinutes()).padStart(2, "0");
+    const s = String(d.getUTCSeconds()).padStart(2, "0");
+    return `${h}:${m}:${s}Z`;
   }, [now]);
 
-  const focusRemaining = activeFocus ? remainingMs(activeFocus, now) : 0;
-  const focusDigits = clockParts(focusRemaining);
+  const focusParts = useMemo(() => {
+    if (!activeFocus) return { h: "00", m: "00", s: "00" };
+    const rem = remainingMs(activeFocus, now);
+    const totalSec = Math.max(0, Math.floor(rem / 1000));
+    const h = String(Math.floor(totalSec / 3600)).padStart(2, "0");
+    const m = String(Math.floor((totalSec % 3600) / 60)).padStart(2, "0");
+    const s = String(totalSec % 60).padStart(2, "0");
+    return { h, m, s };
+  }, [activeFocus, now]);
 
-  const submit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (kind === "timer") {
-      const totalSec = timerValues.totalSeconds;
-      if (totalSec <= 0) return;
-      const ms = totalSec * 1000;
-      const finalTitle =
-        title.trim() ||
-        `Operation: ${timerValues.hours > 0 ? `${timerValues.hours}h ` : ""}${timerValues.minutes}m ${timerValues.seconds}s`;
-      arm({
-        title: finalTitle,
-        kind: "timer",
-        durationMs: ms,
-      });
-      if (savePreset) {
-        saveCustomPreset({
-          name: finalTitle,
-          durationMs: ms,
-          description: `Custom ${timerValues.hours}h ${timerValues.minutes}m ${timerValues.seconds}s countdown`,
+  const focusProgress = useMemo(() => {
+    if (!activeFocus || activeFocus.durationMs <= 0) return 0;
+    const rem = remainingMs(activeFocus, now);
+    return Math.max(0, Math.min(100, 100 - (rem / activeFocus.durationMs) * 100));
+  }, [activeFocus, now]);
+
+  const handleArmSubmit = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      const finalTitle = title.trim() || (kind === "timer" ? "Tactical Operation" : "Daily Checkpoint");
+
+      if (kind === "timer") {
+        const durationMs = timerValues.totalSeconds * 1000;
+        if (durationMs <= 0) return;
+        arm({
+          title: finalTitle,
+          kind: "timer",
+          durationMs,
+        });
+      } else {
+        const at = Date.now();
+        const tzOffset = getTzOffsetMs(new Date(at), timeZone);
+        const localNow = at + tzOffset;
+        const targetLocal = nextAlarm(alarmTime, localNow);
+        const durationMs = Math.max(1000, targetLocal - localNow);
+
+        arm({
+          title: finalTitle,
+          kind: "alarm",
+          durationMs,
+          alarmTime,
         });
       }
+
+      setTitle("");
+      setAddOpen(false);
+    },
+    [title, kind, timerValues, alarmTime, arm, timeZone],
+  );
+
+  const handleFullscreen = async () => {
+    if (!document.fullscreenElement) {
+      await document.documentElement.requestFullscreen().catch(() => {});
+      setFullscreen(true);
     } else {
-      const offsetMs = getTzOffsetMs(new Date(now || Date.now()), timeZone);
-      const nowInTz = (now || Date.now()) + offsetMs;
-      const d = new Date(nowInTz);
-      const parts = alarmTime.split(":").map(Number);
-      const hours = parts[0] ?? 0;
-      const minutes = parts[1] ?? 0;
-      const seconds = parts[2] ?? 0;
-      d.setUTCHours(hours, minutes, seconds, 0);
-      let targetInTz = d.getTime();
-      if (targetInTz <= nowInTz) {
-        targetInTz += 24 * 3600 * 1000;
-      }
-      const targetUtc = targetInTz - offsetMs;
-      const ms = Math.max(0, targetUtc - (now || Date.now()));
-      arm({
-        title: title.trim() || `Daily Alarm · ${alarmTime}`,
-        kind: "alarm",
-        durationMs: ms,
-        alarmTime,
-      });
+      await document.exitFullscreen().catch(() => {});
+      setFullscreen(false);
     }
-    setTitle("");
-    setTimerValues({ hours: 0, minutes: 25, seconds: 0, totalSeconds: 1500 });
-    setSavePreset(false);
-    setAddOpen(false);
+  };
+
+  const handleWakeLock = async () => {
+    if (wakeLock) {
+      await wakeLock.release();
+      setWakeLock(null);
+    } else if ("wakeLock" in navigator) {
+      try {
+        const lock = await navigator.wakeLock.request("screen");
+        setWakeLock(lock);
+        lock.addEventListener("release", () => setWakeLock(null));
+      } catch {
+        /* rejected */
+      }
+    }
   };
 
   const threatClass = crisis
     ? "crisis-state"
     : heightened
       ? "heightened-state"
-      : "watch-state";
-  const stealthClass = stealth ? "night-ops" : "";
+      : stealth
+        ? "stealth-state"
+        : "amber-state";
+
+  const showCountdownVideo = inCountdownWindow || forceCountdownFeed || crisis;
 
   return (
-    <main className={`ctu-terminal ${threatClass} ${stealthClass}`}>
+    <div className={`ctu-terminal min-h-screen ${threatClass}`}>
+      {/* Header telemetry bar */}
       <header className="terminal-header">
-        <div className="terminal-brand">
-          <span className="brand-badge">24</span>
-          <div>
-            <span className="brand-title">CTU TERMINAL</span>
-            <span className="brand-sub">
-              TACTICAL FIELD OPERATIONS · SECTOR 4
-            </span>
+        <div className="ctu-brand">
+          <div className="brand-logo">24</div>
+          <div className="brand-telemetry">
+            <div className="brand-title">CTU · COUNTER TERRORIST UNIT</div>
+            <div className="brand-sub">TACTICAL OPERATIONS COMMAND · DEFCON 2</div>
           </div>
         </div>
 
-        <div className="terminal-clock-block">
-          <div className="zulu-pill">
-            <span className="micro muted">ZULU / UTC</span>
-            <span className="zulu-clock">{zulu} Z</span>
+        <div className="header-clocks">
+          <div className="zulu-box">
+            <span className="telemetry-label">ZULU SYNC</span>
+            <span className="zulu-digits">{zuluClock}</span>
           </div>
 
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={toggleFullscreen}
-            aria-label={fullscreen ? "Exit fullscreen" : "Enter fullscreen"}
-            title="Toggle terminal fullscreen"
-          >
-            {fullscreen ? <Minimize2 /> : <Maximize2 />}
-          </Button>
+          <div className="header-controls">
+            <button
+              type="button"
+              className="ctrl-btn"
+              onClick={() => setFormat24((v) => !v)}
+              title="Toggle 24H / 12H display"
+            >
+              {format24 ? "24H" : "12H"}
+            </button>
+            <button
+              type="button"
+              className="ctrl-btn"
+              onClick={() => setStealth((v) => !v)}
+              title="Toggle Night Ops stealth phosphor"
+            >
+              <Moon size={13} />
+            </button>
+            <button
+              type="button"
+              className="ctrl-btn"
+              onClick={handleFullscreen}
+              title="Toggle Fullscreen"
+            >
+              {fullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+            </button>
+            <button
+              type="button"
+              className={`ctrl-btn ${wakeLock ? "active" : ""}`}
+              onClick={handleWakeLock}
+              title="Toggle Screen Wake Lock"
+            >
+              <ShieldCheck size={13} />
+            </button>
+          </div>
         </div>
       </header>
 
-      <div className="operations-layout">
+      {/* Main Command Deck Grid */}
+      <main className="operations-layout">
+        {/* Primary Stage Column */}
         <section className="primary-column">
-          <div className="terminal-panel focus-panel">
-            <div className="panel-heading">
+          <div className="unified-stage-panel">
+            {/* Stage Header */}
+            <div className="stage-top-bar flex items-center justify-between flex-wrap gap-2">
               <div className="flex items-center gap-2">
-                <span className="live-dot" />
-                <span>UNIFIED COMMAND DECK</span>
+                <span className="live-indicator-dot" />
+                <span className="stage-title">PRIMARY OPERATIONS COMMAND DECK</span>
               </div>
-              <div className="deck-toggles flex items-center gap-2">
-                {/* Audio quick-toggle directly on Command Deck */}
+              <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  className={`time-mode-btn flex items-center gap-1.5 ${audio.enabled ? "border-[var(--signal)] text-[var(--signal)]" : "text-muted-foreground opacity-80"}`}
                   onClick={toggleAudio}
-                  title="Toggle Tactical Audio"
+                  className={`time-mode-btn flex items-center gap-1.5 ${
+                    audio.enabled ? "border-[var(--signal)] text-[var(--signal)]" : "text-muted-foreground opacity-80"
+                  }`}
                 >
                   {audio.enabled ? <Volume2 size={13} /> : <VolumeX size={13} />}
                   <span>{audio.enabled ? "AUDIO ON" : "AUDIO MUTED"}</span>
                 </button>
-                <button
-                  type="button"
-                  className="time-mode-btn"
-                  onClick={() => setFormat24((f) => !f)}
-                  title="Toggle 24-hour / 12-hour local display"
-                >
-                  {format24 ? "24H FORMAT" : "12H FORMAT"}
-                </button>
-                <span className="micro text-muted-foreground uppercase hidden sm:inline">
-                  {activeFocus?.pinned ? "PINNED" : "AUTO-PRIORITY"}
-                </span>
+                <div className="flex items-center gap-1 bg-black/60 px-2 py-1 border border-border/50 text-[10px] tracking-wider">
+                  <Globe size={11} className="text-[var(--signal)]" />
+                  <select
+                    value={timeZone}
+                    onChange={(e) => setTimeZone(e.target.value)}
+                    className="bg-transparent text-[var(--signal)] outline-none cursor-pointer uppercase font-mono text-[10px]"
+                  >
+                    {TIMEZONE_SECTORS.map((s) => (
+                      <option key={s.id} value={s.id} className="bg-black text-[var(--signal)]">
+                        {s.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
             </div>
 
+            {/* Split Dual-Stage: Local Mission Clock + Active Operation */}
             <div className="unified-stage-grid">
-              {/* Local Mission Clock */}
-              <div className="stage-sector local-time-sector">
-                <div className="sector-header flex items-center justify-between flex-wrap gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className="sector-tag">LOCAL MISSION TIME</span>
-                    <select
-                      value={timeZone}
-                      onChange={(e) => setTimeZone(e.target.value)}
-                      className="time-mode-btn text-xs py-0.5 px-1.5 cursor-pointer bg-black/60 border border-[var(--border)] rounded text-[var(--signal)] uppercase"
-                      title="Select operational theater / timezone"
-                    >
-                      {TIMEZONE_SECTORS.map((s) => (
-                        <option
-                          key={s.id}
-                          value={s.id}
-                          className="bg-black text-[var(--signal)]"
-                        >
-                          {s.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <span className="sector-format-indicator">
-                    {format24 ? "MILITARY (24H)" : `CIVILIAN${localClock.period}`}
+              {/* Sector A: Local Mission Real-Time Clock */}
+              <div className="stage-sector stage-sector-local">
+                <div className="sector-tag flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <Globe size={12} className="text-[var(--signal)]" />
+                    <span>LOCAL MISSION TIME</span>
                   </span>
+                  <span className="text-[10px] opacity-75">{timeZone.split("/")[1]?.replace("_", " ") ?? timeZone}</span>
                 </div>
-                <div className="stage-clock-display">
+                <div className="clock-viewport">
                   <CTUDigits
-                    time={localClock.digits}
-                    className="mission-clock h-16 sm:h-20 lg:h-24"
+                    hours={localClock.h}
+                    minutes={localClock.m}
+                    seconds={localClock.s}
+                    period={localClock.p}
+                    variant="huge"
                   />
-                  <div className="digit-labels">
-                    <span>HOURS</span>
-                    <span>MINUTES</span>
-                    <span>SECONDS</span>
-                  </div>
                 </div>
-                <div className="sector-footer-telemetry">
-                  EVENTS OCCUR IN REAL TIME · {timeZone.split("/")[1]?.replace("_", " ").toUpperCase() || "THEATER"}
+                <div className="sector-telemetry">
+                  <span>STATUS: CONTINUOUS REAL-TIME LINK</span>
+                  <span className="accent">EVENTS OCCUR IN REAL TIME</span>
                 </div>
               </div>
 
-              {/* Active Operation Countdown */}
-              <div className="stage-sector active-op-sector">
-                <div className="sector-header flex items-center justify-between">
-                  <span className="sector-tag">
-                    {activeFocus ? activeFocus.title.toUpperCase() : "TARGET COUNTDOWN"}
+              {/* Sector B: Active Mission Countdown Focus */}
+              <div className="stage-sector stage-sector-operation">
+                <div className="sector-tag flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <Timer size={12} className="text-[var(--signal)]" />
+                    <span>ACTIVE OPERATION FOCUS</span>
                   </span>
-                  <span className="sector-status-pill">
-                    {activeFocus ? activeFocus.status : "STANDBY"}
-                  </span>
+                  {activeFocus && (
+                    <span className={`status-pill ${activeFocus.status.toLowerCase()}`}>
+                      {activeFocus.status}
+                    </span>
+                  )}
                 </div>
-                <div className="stage-clock-display">
+
+                <div className="clock-viewport">
                   {activeFocus ? (
                     <CTUDigits
-                      time={focusDigits}
-                      className="focus-clock h-16 sm:h-20 lg:h-24"
+                      hours={focusParts.h}
+                      minutes={focusParts.m}
+                      seconds={focusParts.s}
+                      variant="huge"
                     />
                   ) : (
                     <div className="standby-digits">00:00:00</div>
                   )}
-                  <div className="digit-labels">
-                    <span>HOURS</span>
-                    <span>MINUTES</span>
-                    <span>SECONDS</span>
-                  </div>
                 </div>
 
-                {activeFocus ? (
-                  <div className="focus-controls">
-                    {activeFocus.status === "ACTIVE" && (
-                      <Button
-                        size="lg"
-                        className="control-btn"
-                        onClick={() => control(activeFocus.id, "pause")}
+                <div className="operation-meta">
+                  <div className="op-title-row">
+                    <span className="op-title">
+                      {activeFocus ? activeFocus.title : "NO ACTIVE OPERATION IN QUEUE"}
+                    </span>
+                    {activeFocus && (
+                      <button
+                        type="button"
+                        className={`pin-btn ${activeFocus.pinned ? "pinned" : ""}`}
+                        onClick={() => togglePin(activeFocus.id)}
+                        title="Pin this operation to maintain primary focus"
                       >
-                        <Pause /> PAUSE
-                      </Button>
+                        <Pin size={12} />
+                      </button>
                     )}
-                    {(activeFocus.status === "PAUSED" ||
-                      activeFocus.status === "STOPPED") && (
+                  </div>
+
+                  {activeFocus && (
+                    <div className="progress-bar-rail">
+                      <div className="progress-bar-fill" style={{ width: `${focusProgress}%` }} />
+                    </div>
+                  )}
+
+                  {/* Operation Controls */}
+                  <div className="operation-controls">
+                    {activeFocus ? (
+                      <>
+                        {activeFocus.status === "ACTIVE" ? (
+                          <button
+                            type="button"
+                            className="control-btn pause"
+                            onClick={() => control(activeFocus.id, "pause")}
+                          >
+                            <Pause size={13} /> PAUSE
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="control-btn resume"
+                            onClick={() => control(activeFocus.id, "start")}
+                          >
+                            <Play size={13} /> RESUME
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="control-btn reset"
+                          onClick={() => control(activeFocus.id, "reset")}
+                        >
+                          <RotateCcw size={13} /> RESET
+                        </button>
+                        <button
+                          type="button"
+                          className="control-btn stop"
+                          onClick={() => control(activeFocus.id, "stop")}
+                        >
+                          <Square size={13} /> STOP
+                        </button>
+                        {activeFocus.status === "CRISIS" && (
+                          <button
+                            type="button"
+                            className="control-btn crisis-snooze"
+                            onClick={() => snooze(activeFocus.id)}
+                          >
+                            <Zap size={13} /> SNOOZE ({Math.floor(audio.snoozeMs / 60000)}M)
+                          </button>
+                        )}
+                      </>
+                    ) : (
                       <Button
-                        size="lg"
-                        className="control-btn primary-action"
-                        onClick={() => control(activeFocus.id, "start")}
+                        type="button"
+                        className="arm-callout-btn"
+                        onClick={() => {
+                          setKind("timer");
+                          setAddOpen(true);
+                        }}
                       >
-                        <Play /> RESUME
-                      </Button>
-                    )}
-                    <Button
-                      size="lg"
-                      variant="outline"
-                      className="control-btn"
-                      onClick={() => control(activeFocus.id, "reset")}
-                    >
-                      <RotateCcw /> RESET
-                    </Button>
-                    <Button
-                      size="lg"
-                      variant="outline"
-                      className="control-btn"
-                      onClick={() => control(activeFocus.id, "stop")}
-                    >
-                      <Square /> STOP
-                    </Button>
-                    {activeFocus.status === "CRISIS" && (
-                      <Button
-                        size="lg"
-                        className="control-btn crisis-snooze"
-                        onClick={() => snooze(activeFocus.id)}
-                      >
-                        <Zap /> SNOOZE ({Math.floor(audio.snoozeMs / 60000)}M)
+                        <Plus size={14} /> ARM OPERATION
                       </Button>
                     )}
                   </div>
-                ) : (
-                  <div className="focus-controls">
-                    <Button
-                      size="lg"
-                      className="control-btn primary-action w-full"
-                      onClick={() => setAddOpen(true)}
-                    >
-                      <Plus /> ARM NEW OPERATION
-                    </Button>
-                  </div>
-                )}
+                </div>
               </div>
             </div>
 
-            <div className="focus-footer">
-              <div className="threat-indicator-chip">
-                <span className="threat-square" />
-                <span>
-                  THREAT CON{" "}
-                  {crisis ? "1 · CODE RED" : heightened ? "2 · ORANGE" : "4 · AMBER"}
-                </span>
-              </div>
-              <div className="focus-active-title">
-                {activeFocus ? activeFocus.title : "COMMAND STANDBY"}
-              </div>
-              <div className="focus-target-time">
-                {activeFocus && activeFocus.endsAt > 0
-                  ? `TARGET: ${new Date(activeFocus.endsAt).toLocaleTimeString("en-US", { timeZone })}`
-                  : "STANDBY"}
-              </div>
-            </div>
-          </div>
-
-          <div className="terminal-panel presets-panel mt-4">
-            <div className="panel-heading">
-              <span>
-                <Zap size={14} /> QUICK-ARM PROTOCOLS
-              </span>
-              <span className="micro text-muted-foreground">INSTANT ENGAGEMENT</span>
-            </div>
-            <div className="preset-grid">
-              {presets.map((preset) => (
+            {/* Stage Quick-Arm Protocol Presets */}
+            <div className="stage-presets-footer">
+              <div className="presets-label">QUICK-ARM PROTOCOLS:</div>
+              <div className="presets-row">
+                {presets.slice(0, 4).map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    className="preset-chip"
+                    onClick={() =>
+                      arm({
+                        title: p.name,
+                        kind: "timer",
+                        durationMs: p.durationMs,
+                      })
+                    }
+                  >
+                    <span className="preset-name">{p.name}</span>
+                    <span className="preset-dur">{Math.round(p.durationMs / 60000)}M</span>
+                  </button>
+                ))}
                 <button
                   type="button"
-                  key={preset.id}
-                  className="preset-btn"
-                  onClick={() =>
-                    arm({
-                      title: preset.name,
-                      kind: "timer",
-                      durationMs: preset.durationMs,
-                    })
-                  }
+                  className="preset-chip arm-more"
+                  onClick={() => setAddOpen(true)}
                 >
-                  <span className="preset-name">{preset.name}</span>
-                  <span className="preset-dur">
-                    {Math.floor(preset.durationMs / 60000)} MIN
-                  </span>
-                  <span className="preset-desc">{preset.description}</span>
+                  <Plus size={12} /> CUSTOM ARM
                 </button>
-              ))}
+              </div>
             </div>
           </div>
-        </section>
 
-        <aside className="secondary-column">
-          <section className="terminal-panel queue-panel">
+          {/* Active Missions Queue */}
+          <section className="terminal-panel queue-panel mt-3">
             <div className="panel-heading">
-              <span>ACTIVE ROSTER ({missions.length})</span>
-              <span className="micro text-muted-foreground">AUTO-FOCUS</span>
+              <span>TACTICAL OPERATIONS QUEUE ({missionCount})</span>
+              <span className="accent">{activeCount} ACTIVE DEPLOYMENTS</span>
             </div>
-            <div className="queue-body">
+            <div className="missions-queue-list">
               {missions.length === 0 ? (
-                <div className="queue-empty">NO OPERATIONS IN ROSTER</div>
+                <div className="empty-queue-msg">
+                  ALL OPERATIONAL SECTORS QUIET · STANDING BY FOR MISSION DISPATCH
+                </div>
               ) : (
-                missions.map((m) => (
-                  <div
-                    key={m.id}
-                    className={`queue-item ${m.id === activeFocus?.id ? "active-queue-item" : ""}`}
-                  >
-                    <div className="queue-item-top">
-                      <span className="queue-kind">{m.kind.toUpperCase()}</span>
-                      <div className="queue-item-actions">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          aria-label={m.pinned ? "Unpin operation" : "Pin operation"}
-                          className={m.pinned ? "accent" : ""}
-                          onClick={() => togglePin(m.id)}
-                        >
-                          <Pin />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          aria-label={`Remove ${m.title}`}
-                          onClick={() => remove(m.id)}
-                        >
-                          <X />
-                        </Button>
+                missions.map((m) => {
+                  const rem = remainingMs(m, now);
+                  const totalSec = Math.max(0, Math.floor(rem / 1000));
+                  const h = String(Math.floor(totalSec / 3600)).padStart(2, "0");
+                  const min = String(Math.floor((totalSec % 3600) / 60)).padStart(2, "0");
+                  const s = String(totalSec % 60).padStart(2, "0");
+                  return (
+                    <div key={m.id} className={`queue-item-card ${m.status.toLowerCase()}`}>
+                      <div className="queue-item-header">
+                        <div className="flex items-center gap-2">
+                          {m.kind === "alarm" ? <Bell size={13} /> : <Timer size={13} />}
+                          <span className="queue-item-title">{m.title}</span>
+                          {m.pinned && <Pin size={11} className="text-[var(--signal)]" />}
+                        </div>
+                        <span className={`status-pill ${m.status.toLowerCase()}`}>
+                          {m.status}
+                        </span>
+                      </div>
+                      <div className="queue-item-body">
+                        <div className="queue-digits">
+                          {h}:{min}:{s}
+                        </div>
+                        <div className="queue-actions">
+                          {m.status === "ACTIVE" ? (
+                            <button
+                              type="button"
+                              className="q-act-btn"
+                              onClick={() => control(m.id, "pause")}
+                            >
+                              <Pause size={12} />
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              className="q-act-btn"
+                              onClick={() => control(m.id, "start")}
+                            >
+                              <Play size={12} />
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className="q-act-btn"
+                            onClick={() => control(m.id, "reset")}
+                          >
+                            <RotateCcw size={12} />
+                          </button>
+                          <button
+                            type="button"
+                            className="q-act-btn"
+                            onClick={() => togglePin(m.id)}
+                          >
+                            <Pin size={12} />
+                          </button>
+                          <button
+                            type="button"
+                            className="q-act-btn delete"
+                            onClick={() => remove(m.id)}
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
                       </div>
                     </div>
-                    <div className="queue-name">{m.title}</div>
-                    <div className="queue-item-bottom">
-                      <span className={`queue-status ${m.status === "CRISIS" ? "accent" : ""}`}>
-                        <span className="status-dot" />
-                        {m.status}
-                      </span>
-                      <span>{clockParts(remainingMs(m, now))}</span>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        aria-label={`${["PAUSED", "STOPPED"].includes(m.status) ? "Start" : "Pause"} ${m.title}`}
-                        disabled={m.status === "CRISIS"}
-                        onClick={() =>
-                          control(
-                            m.id,
-                            ["PAUSED", "STOPPED"].includes(m.status) ? "start" : "pause"
-                          )
-                        }
-                      >
-                        {["PAUSED", "STOPPED"].includes(m.status) ? <Play /> : <Pause />}
-                      </Button>
-                    </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
-            <div className="queue-add">
-              <Button variant="outline" className="w-full" onClick={() => setAddOpen(true)}>
-                <Plus /> ARM NEW OPERATION
-              </Button>
+          </section>
+        </section>
+
+        {/* Tactical Surveillance & Surveillance Column */}
+        <aside className="secondary-column">
+          {/* Tactical Surveillance & 24 Countdown Feed */}
+          <section className="terminal-panel surveillance-panel">
+            <div className="panel-heading flex items-center justify-between">
+              <span>{showCountdownVideo ? "24 COUNTDOWN MEDIA FEED" : "TACTICAL SURVEILLANCE FEED"}</span>
+              <button
+                type="button"
+                onClick={() => setForceCountdownFeed((v) => !v)}
+                className="text-[10px] text-[var(--signal)] underline cursor-pointer"
+              >
+                {forceCountdownFeed ? "[SHOW SAT-FEED]" : "[SHOW 24 FEED]"}
+              </button>
             </div>
+            <div className="surveillance-frame relative bg-black overflow-hidden h-[220px]">
+              {showCountdownVideo ? (
+                <video
+                  src="/24 Countdown.mp4"
+                  autoPlay
+                  loop
+                  muted={!audio.enabled}
+                  playsInline
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <img
+                  src={surveillance}
+                  alt="Watercolor aerial surveillance of downtown Los Angeles"
+                  className="surveillance-img w-full h-full object-cover opacity-75"
+                />
+              )}
+              <div className="surveillance-overlay pointer-events-none absolute inset-0">
+                <div className="cam-tag">
+                  {showCountdownVideo ? "CAM-24 · TITLES FEED" : "SAT-LINK 04 · SECTOR 7"}
+                </div>
+                <div className="surveillance-reticle" />
+                <div className="surveillance-footer">
+                  <span>{showCountdownVideo ? "AUDIO: SYNCHRONIZED" : "GRID: 34.0522° N, 118.2437° W"}</span>
+                  <span className="accent">
+                    {crisis ? "24 AT ZERO · CODE RED" : showCountdownVideo ? "COUNTDOWN ACTIVE" : "SIGNAL: 98.4%"}
+                  </span>
+                </div>
+              </div>
+            </div>
+            {crisis && (
+              <div className="p-2 bg-red-950/80 border-t border-red-500 text-red-200 text-xs font-mono flex items-center justify-between">
+                <span>🚨 24 AT ZERO · THEME ACTIVE</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    missions
+                      .filter((m) => m.status === "CRISIS")
+                      .forEach((m) => control(m.id, "stop"));
+                  }}
+                  className="px-2 py-0.5 bg-red-700 text-white uppercase text-[10px] font-bold"
+                >
+                  DISARM ALARM
+                </button>
+              </div>
+            )}
           </section>
 
-          <section className="terminal-panel surveillance-panel">
+          {/* Quick Presets & Audio Controls */}
+          <section className="terminal-panel audio-panel mt-3">
             <div className="panel-heading">
-              <span>
-                <Eye size={13} /> SURVEILLANCE FEED
-              </span>
-              <span className="accent micro">
-                <span className="status-dot" /> LIVE
-              </span>
+              <span>AUDIO MATRIX & CONTROLS</span>
+              <button
+                type="button"
+                className="accent text-[11px] underline"
+                onClick={testAlert}
+              >
+                TEST ZERO THEME
+              </button>
             </div>
-            <div className="surveillance-image">
-              <img
-                src={surveillance}
-                alt="Watercolor aerial surveillance of downtown Los Angeles"
-                width="1536"
-                height="1024"
-              />
-              <div className="feed-crosshair" />
-              <span className="feed-tag">CAM 07 / LOS ANGELES</span>
-              <span className="feed-coordinates">34°03′ N &nbsp; 118°15′ W</span>
-              <span className="feed-time">{zulu} Z</span>
-            </div>
-            <div className="feed-footer">
-              <span>
-                <Globe size={12} /> SECTOR 07 · DOWNTOWN
-              </span>
-              <span className="signal-bars">▂ ▄ ▆ █</span>
+            <div className="p-3 text-xs font-mono space-y-3">
+              <div className="flex items-center justify-between">
+                <span>MASTER AUDIO:</span>
+                <button
+                  type="button"
+                  onClick={toggleAudio}
+                  className={`px-3 py-1 border text-[11px] ${
+                    audio.enabled ? "border-[var(--signal)] text-[var(--signal)]" : "border-neutral-700 text-neutral-500"
+                  }`}
+                >
+                  {audio.enabled ? "ENABLED" : "MUTED"}
+                </button>
+              </div>
+
+              <div>
+                <div className="flex justify-between text-[11px] mb-1">
+                  <span>AT ZERO THEME VOLUME:</span>
+                  <span>{Math.round(audio.crisisVolume * 100)}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={audio.crisisVolume}
+                  onChange={(e) => setAudioVolume("crisis", Number(e.target.value))}
+                  className="w-full accent-[var(--signal)] cursor-pointer"
+                />
+              </div>
+
+              <div>
+                <div className="flex justify-between text-[11px] mb-1">
+                  <span>COUNTDOWN AUDIO WINDOW:</span>
+                  <span>{audio.countdownWindow} SECONDS</span>
+                </div>
+                <div className="flex gap-2">
+                  {[10, 23, 30, 60].map((sec) => (
+                    <button
+                      key={sec}
+                      type="button"
+                      onClick={() => setAudioWindow(sec)}
+                      className={`flex-1 py-1 text-[10px] border ${
+                        audio.countdownWindow === sec
+                          ? "border-[var(--signal)] bg-[var(--signal)]/20 text-[var(--signal)]"
+                          : "border-neutral-800 text-neutral-400"
+                      }`}
+                    >
+                      {sec}S
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="text-[10px] text-neutral-400 pt-1 border-t border-neutral-900 leading-relaxed">
+                • <strong>Countdown:</strong> plays <code>public/24 Countdown.mp4</code>.
+                <br />• <strong>At Zero:</strong> plays <code>public/24 At Zero theme.mp3</code>.
+              </div>
             </div>
           </section>
         </aside>
-      </div>
+      </main>
 
-      <section className="telemetry-bar">
-        <div className="telemetry-status">
-          <ShieldCheck size={17} />
-          <div>
-            <span className="micro muted">TERMINAL STATUS</span>
-            <span>
-              ONLINE <span className="muted">/</span> SECURE
-            </span>
-          </div>
-        </div>
-        <div className="threat-status">
-          <span className="micro muted">THREAT CONDITION</span>
-          <span className="accent">
-            <span className="tiny-square" /> CON{" "}
-            {crisis ? "1 · CODE RED" : heightened ? "2 · HEIGHTENED" : "4 · WATCH"}
-          </span>
-        </div>
-        <div className="telemetry-actions">
-          <Button
-            variant="ghost"
-            className={guard ? "accent" : ""}
-            onClick={toggleGuard}
-            title="Keep the screen awake"
-          >
-            <Shield size={15} />
-            <span>TERMINAL GUARD</span>
-            <span className={`toggle-track ${guard ? "on" : ""}`} />
-          </Button>
-          <Button
-            variant="ghost"
-            className={stealth ? "accent" : ""}
-            onClick={() => setStealth((s) => !s)}
-          >
-            <Moon size={15} />
-            <span>NIGHT OPS</span>
-            <span className={`toggle-track ${stealth ? "on" : ""}`} />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label={audio.enabled ? "Mute audio" : "Enable audio"}
-            title={audio.enabled ? "Mute audio" : "Enable audio"}
-            onClick={toggleAudio}
-          >
-            {audio.enabled ? <Volume2 /> : <VolumeX />}
-          </Button>
-          <Button
-            variant="ghost"
-            onClick={() => setAudioOpen((o) => !o)}
-            className={audioOpen ? "accent" : ""}
-          >
-            <AudioLines />
-            <span>AUDIO MATRIX</span>
-            <ChevronDown />
-          </Button>
-        </div>
-      </section>
-
-      {audioOpen && (
-        <section className="audio-matrix">
-          <div className="section-label">
-            <span>
-              <AudioLines size={14} /> CTU AUDIO MATRIX
-            </span>
-            <span className="muted">SYNTHESIZED SIGNALS</span>
-          </div>
-          <div className="audio-sliders">
-            <label>
-              <span>AMBIENT TICK ({Math.round(audio.ambientVolume * 100)}%)</span>
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.05"
-                value={audio.ambientVolume}
-                onChange={(e) => setAudioVolume("ambient", Number(e.target.value))}
-              />
-            </label>
-            <label>
-              <span>CRISIS THEME ({Math.round(audio.crisisVolume * 100)}%)</span>
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.05"
-                value={audio.crisisVolume}
-                onChange={(e) => setAudioVolume("crisis", Number(e.target.value))}
-              />
-            </label>
-          </div>
-          <div className="audio-toggles">
-            <div className="toggle-group">
-              <span className="micro muted">COUNTDOWN WINDOW</span>
-              <div className="pill-group">
-                {[60, 30, 10].map((sec) => (
-                  <button
-                    type="button"
-                    key={sec}
-                    className={`pill-btn ${audio.countdownWindow === sec ? "active" : ""}`}
-                    onClick={() => setAudioWindow(sec)}
-                  >
-                    {sec}S
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="toggle-group">
-              <span className="micro muted">SNOOZE DURATION</span>
-              <div className="pill-group">
-                {[5, 9, 10].map((m) => (
-                  <button
-                    type="button"
-                    key={m}
-                    className={`pill-btn ${audio.snoozeMs === m * 60000 ? "active" : ""}`}
-                    onClick={() => setSnoozeDuration(m)}
-                  >
-                    {m}M
-                  </button>
-                ))}
-              </div>
-            </div>
-            <label className="checkbox-label">
-              <input
-                type="checkbox"
-                checked={audio.phoneAlerts}
-                onChange={(e) => setPhoneAlerts(e.target.checked)}
-              />
-              <span>TACTICAL RING WARBLE</span>
-            </label>
-          </div>
-          <div className="flex justify-end gap-2 mt-3">
-            <Button variant="outline" size="sm" onClick={testAlert}>
-              TEST CRISIS ALARM (3 BURSTS)
-            </Button>
-          </div>
-        </section>
-      )}
-
+      {/* Arm Operation Modal Dialog */}
       {addOpen && (
         <div className="arm-modal-backdrop" onClick={() => setAddOpen(false)}>
           <section className="arm-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="arm-modal-header">
-              <div className="arm-modal-title">
-                <Plus />
-                <span>ARM AN OPERATION</span>
+            <div className="arm-header">
+              <div className="flex items-center gap-2">
+                <Shield size={16} className="text-[var(--signal)]" />
+                <span className="font-bold tracking-wider">ARM TACTICAL OPERATION</span>
               </div>
               <button
                 type="button"
-                className="arm-modal-close"
+                className="modal-close-btn"
                 onClick={() => setAddOpen(false)}
-                aria-label="Close dialog"
               >
-                <X />
+                <X size={16} />
               </button>
             </div>
 
-            <form onSubmit={submit} className="arm-form">
+            <form onSubmit={handleArmSubmit} className="arm-form">
+              {/* Kind Tabs */}
               <div className="arm-tabs">
                 <button
                   type="button"
                   className={`arm-tab ${kind === "timer" ? "active" : ""}`}
                   onClick={() => setKind("timer")}
                 >
-                  <Timer />
-                  <span>COUNTDOWN</span>
+                  <Timer size={14} /> COUNTDOWN TIMER
                 </button>
                 <button
                   type="button"
                   className={`arm-tab ${kind === "alarm" ? "active" : ""}`}
                   onClick={() => setKind("alarm")}
                 >
-                  <Bell />
-                  <span>DAILY ALARM</span>
+                  <Bell size={14} /> DAILY CHECKPOINT ALARM
                 </button>
               </div>
 
+              {/* Title Field */}
               <div className="arm-field">
-                <label htmlFor="mission-title">OPERATION CODENAME</label>
+                <label htmlFor="mission-title">OPERATION CODENAME / LABEL</label>
                 <input
                   id="mission-title"
                   type="text"
-                  placeholder={
-                    kind === "timer"
-                      ? "e.g., Tactical Sprint, Target Intercept"
-                      : "e.g., Shift Briefing, Sector Hand-Off"
-                  }
+                  placeholder={kind === "timer" ? "Tactical Sprint" : "Daily SITREP Report"}
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  maxLength={64}
+                  className="arm-input"
                 />
               </div>
 
-              <SamsungTimePicker
-                mode={kind}
-                timerValues={timerValues}
-                onTimerChange={setTimerValues}
-                alarmTime={alarmTime}
-                onAlarmChange={setAlarmTime}
-              />
+              {/* Samsung Style Time Setter */}
+              <div className="arm-picker-container">
+                <SamsungTimePicker
+                  mode={kind}
+                  values={timerValues}
+                  onChange={setTimerValues}
+                  alarmTime={alarmTime}
+                  onAlarmChange={setAlarmTime}
+                />
+              </div>
 
-              {kind === "timer" && (
-                <label className="save-preset-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={savePreset}
-                    onChange={(e) => setSavePreset(e.target.checked)}
-                  />
-                  <span>SAVE AS REUSABLE QUICK-ARM PROTOCOL</span>
-                </label>
-              )}
-
-              <Button type="submit" className="arm-submit">
-                <Plus />
-                ARM OPERATION
-                <ChevronRight />
-              </Button>
+              {/* Submit Buttons */}
+              <div className="arm-actions">
+                <button
+                  type="button"
+                  className="cancel-btn"
+                  onClick={() => setAddOpen(false)}
+                >
+                  ABORT
+                </button>
+                <Button type="submit" className="arm-submit-btn">
+                  CONFIRM & ARM DEPLOYMENT
+                </Button>
+              </div>
             </form>
           </section>
         </div>
       )}
-    </main>
+    </div>
   );
 }
