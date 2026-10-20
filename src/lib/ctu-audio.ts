@@ -1,10 +1,10 @@
 export type AudioSettings = {
   enabled: boolean;
-  ambient: number;     // 0..100
-  countdown: number;   // 0..100
-  alarm: number;       // 0..100
+  ambient: number;
+  countdown: number;
+  alarm: number;
   media: number;
-  window: number;      // countdown window in seconds
+  window: number;
   phone: boolean;
   snooze: number;
 };
@@ -21,19 +21,41 @@ export const defaultAudio: AudioSettings = {
 };
 
 export class CTUAudio {
-  context: AudioContext | null = null;
+  private context: AudioContext | null = null;
 
-  async unlock() {
-    if (typeof window === "undefined") return;
+  constructor() {
+    if (typeof window !== "undefined") {
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (AudioCtx) {
+        try {
+          this.context = new AudioCtx();
+        } catch {
+          /* delayed initialization */
+        }
+      }
+    }
+  }
+
+  unlock(): boolean {
+    if (typeof window === "undefined") return false;
     if (!this.context) {
       const AudioCtx =
         window.AudioContext ||
         (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      if (AudioCtx) this.context = new AudioCtx();
+      if (AudioCtx) {
+        try {
+          this.context = new AudioCtx();
+        } catch {
+          return false;
+        }
+      }
     }
     if (this.context && this.context.state === "suspended") {
-      await this.context.resume();
+      void this.context.resume();
     }
+    return !!this.context && this.context.state === "running";
   }
 
   tone(
@@ -43,31 +65,30 @@ export class CTUAudio {
     offset = 0,
     type: OscillatorType = "sine",
   ) {
-    const ctx = this.context;
-    if (!ctx || volume <= 0) return;
+    if (!this.context || volume <= 0) return;
 
     try {
-      if (ctx.state === "suspended") {
-        void ctx.resume();
+      if (this.context.state === "suspended") {
+        void this.context.resume();
       }
 
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      const start = ctx.currentTime + offset;
+      const osc = this.context.createOscillator();
+      const gain = this.context.createGain();
+      const start = this.context.currentTime + offset;
 
       osc.type = type;
       osc.frequency.setValueAtTime(frequency, start);
 
-      gain.gain.setValueAtTime(0, start);
-      const peak = Math.min(1, volume * 0.55);
-      gain.gain.linearRampToValueAtTime(peak, start + 0.008);
+      gain.gain.setValueAtTime(0.0001, start);
+      const peak = Math.min(1, volume * 0.7);
+      gain.gain.linearRampToValueAtTime(peak, start + 0.012);
       gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
 
       osc.connect(gain);
-      gain.connect(ctx.destination);
+      gain.connect(this.context.destination);
 
       osc.start(start);
-      osc.stop(start + duration + 0.02);
+      osc.stop(start + duration + 0.03);
     } catch {
       /* Audio context error */
     }
@@ -75,23 +96,23 @@ export class CTUAudio {
 
   /**
    * Signature 24 digital clock tick:
-   * A crisp high click (1400Hz) layered over a punchy digital body (180Hz)
+   * 1400Hz click + 240Hz punch, 65ms body for phone speakers
    */
-  tickClock(volume = 0.55) {
-    this.tone(1400, 0.035, volume * 0.9, 0, "square");
-    this.tone(180, 0.05, volume * 0.6, 0, "triangle");
+  tickClock(volume = 0.6) {
+    this.tone(1400, 0.045, volume * 0.9, 0, "square");
+    this.tone(240, 0.065, volume * 0.75, 0, "triangle");
   }
 
   /**
    * Arming confirmation chirp
    */
-  chirp(volume = 0.65) {
-    this.tone(1200, 0.05, volume, 0, "triangle");
-    this.tone(1800, 0.09, volume, 0.06, "sine");
+  chirp(volume = 0.7) {
+    this.tone(1200, 0.06, volume, 0, "triangle");
+    this.tone(1800, 0.1, volume, 0.05, "sine");
   }
 
   /**
-   * Play the tick or crisis based on the current operational tier
+   * Operational tier dispatcher:
    * tier 1 = active timer ambient tick
    * tier 2 = urgent countdown final seconds
    * tier 3 = crisis alarm (timer expired)
@@ -103,23 +124,21 @@ export class CTUAudio {
       // CRISIS / ALARM: Signature CTU tactical warble
       const vol = settings.alarm / 100;
       if (settings.phone) {
-        // High-low tactical telephone ring
         this.tone(850, 0.22, vol, 0, "square");
         this.tone(1200, 0.22, vol, 0, "sine");
         this.tone(850, 0.22, vol, 0.28, "square");
         this.tone(1200, 0.22, vol, 0.28, "sine");
       } else {
-        // Iconic 24 crisis pulse chord
         [440, 554, 659, 880].forEach((freq, idx) => {
-          this.tone(freq, 0.28, vol * 0.85, idx * 0.06, "triangle");
+          this.tone(freq, 0.32, vol * 0.9, idx * 0.06, "triangle");
         });
-        this.tone(110, 0.55, vol * 0.95, 0, "sawtooth");
+        this.tone(110, 0.6, vol, 0, "sawtooth");
       }
     } else if (tier === 2) {
       // COUNTDOWN URGENCY: Double-tone syncopated pulse
       const vol = settings.countdown / 100;
-      this.tone(beat % 2 ? 960 : 720, 0.12, vol * 0.85, 0, "sine");
-      this.tone(220, 0.09, vol * 0.75, 0, "triangle");
+      this.tone(beat % 2 ? 980 : 740, 0.14, vol * 0.9, 0, "sine");
+      this.tone(240, 0.1, vol * 0.8, 0, "triangle");
     } else {
       // TIER 1: Standard tactical second clock tick
       const vol = settings.ambient / 100;
