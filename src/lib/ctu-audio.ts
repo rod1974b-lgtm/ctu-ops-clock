@@ -11,7 +11,7 @@ export type AudioSettings = {
 
 export const defaultAudio: AudioSettings = {
   enabled: true,
-  ambient: 60,
+  ambient: 70,
   countdown: 85,
   alarm: 100,
   media: 70,
@@ -26,7 +26,9 @@ export class CTUAudio {
   async unlock() {
     if (typeof window === "undefined") return;
     if (!this.context) {
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       if (AudioCtx) this.context = new AudioCtx();
     }
     if (this.context && this.context.state === "suspended") {
@@ -42,9 +44,13 @@ export class CTUAudio {
     type: OscillatorType = "sine",
   ) {
     const ctx = this.context;
-    if (!ctx || ctx.state !== "running" || volume <= 0) return;
+    if (!ctx || volume <= 0) return;
 
     try {
+      if (ctx.state === "suspended") {
+        void ctx.resume();
+      }
+
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       const start = ctx.currentTime + offset;
@@ -53,8 +59,7 @@ export class CTUAudio {
       osc.frequency.setValueAtTime(frequency, start);
 
       gain.gain.setValueAtTime(0, start);
-      // Punchy attack and exponential decay
-      const peak = Math.min(1, volume * 0.45);
+      const peak = Math.min(1, volume * 0.55);
       gain.gain.linearRampToValueAtTime(peak, start + 0.008);
       gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
 
@@ -64,26 +69,23 @@ export class CTUAudio {
       osc.start(start);
       osc.stop(start + duration + 0.02);
     } catch {
-      /* Audio context dropped */
+      /* Audio context error */
     }
   }
 
   /**
    * Signature 24 digital clock tick:
-   * A crisp high click (1400Hz) layered over a punchy digital body (160Hz)
+   * A crisp high click (1400Hz) layered over a punchy digital body (180Hz)
    */
-  tickClock(volume = 0.5) {
-    if (!this.context || this.context.state !== "running") return;
-    // Digital clock click
+  tickClock(volume = 0.55) {
     this.tone(1400, 0.035, volume * 0.9, 0, "square");
-    // Resonant tactical thud
     this.tone(180, 0.05, volume * 0.6, 0, "triangle");
   }
 
   /**
    * Arming confirmation chirp
    */
-  chirp(volume = 0.6) {
+  chirp(volume = 0.65) {
     this.tone(1200, 0.05, volume, 0, "triangle");
     this.tone(1800, 0.09, volume, 0.06, "sine");
   }
@@ -95,7 +97,7 @@ export class CTUAudio {
    * tier 3 = crisis alarm (timer expired)
    */
   tick(tier: number, settings: AudioSettings, beat: number) {
-    if (!settings.enabled || !this.context || this.context.state !== "running") return;
+    if (!settings.enabled) return;
 
     if (tier === 3) {
       // CRISIS / ALARM: Signature CTU tactical warble
@@ -109,15 +111,15 @@ export class CTUAudio {
       } else {
         // Iconic 24 crisis pulse chord
         [440, 554, 659, 880].forEach((freq, idx) => {
-          this.tone(freq, 0.28, vol * 0.8, idx * 0.07, "triangle");
+          this.tone(freq, 0.28, vol * 0.85, idx * 0.06, "triangle");
         });
-        this.tone(110, 0.55, vol * 0.9, 0, "sawtooth");
+        this.tone(110, 0.55, vol * 0.95, 0, "sawtooth");
       }
     } else if (tier === 2) {
       // COUNTDOWN URGENCY: Double-tone syncopated pulse
       const vol = settings.countdown / 100;
-      this.tone(beat % 2 ? 960 : 720, 0.12, vol * 0.8, 0, "sine");
-      this.tone(220, 0.09, vol * 0.7, 0, "triangle");
+      this.tone(beat % 2 ? 960 : 720, 0.12, vol * 0.85, 0, "sine");
+      this.tone(220, 0.09, vol * 0.75, 0, "triangle");
     } else {
       // TIER 1: Standard tactical second clock tick
       const vol = settings.ambient / 100;
