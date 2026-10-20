@@ -126,48 +126,48 @@ function CTUTerminal() {
     if (typeof window === "undefined") return "Asia/Bangkok";
     try {
       const saved = localStorage.getItem("ctu-settings-v1");
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed.timeZone) return parsed.timeZone;
-      }
-      const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      return detected && detected !== "UTC" ? detected : "Asia/Bangkok";
+      return saved && JSON.parse(saved).timeZone ? JSON.parse(saved).timeZone : "Asia/Bangkok";
     } catch {
       return "Asia/Bangkok";
     }
   });
 
   const [fullscreen, setFullscreen] = useState(false);
+  const [guard, setGuard] = useState(false);
+  const [wakeLock, setWakeLock] = useState<WakeLockSentinel | null>(null);
   const [audioOpen, setAudioOpen] = useState(false);
+
+  // Arm modal state
   const [addOpen, setAddOpen] = useState(false);
   const [kind, setKind] = useState<"timer" | "alarm">("timer");
   const [title, setTitle] = useState("");
-
-  // Samsung Galaxy Timer State (Hours, Minutes, Seconds)
   const [timerValues, setTimerValues] = useState<SamsungTimerValues>({
     hours: 0,
     minutes: 25,
     seconds: 0,
     totalSeconds: 1500,
   });
-
-  // Samsung Galaxy Alarm State (HH:MM:SS)
-  const [alarmTime, setAlarmTime] = useState("09:00:00");
+  const [alarmTime, setAlarmTime] = useState<string>("09:00:00");
   const [savePreset, setSavePreset] = useState(false);
-  const [guard, setGuard] = useState(false);
-  const [wakeLock, setWakeLock] = useState<WakeLockSentinel | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
 
+  // Sync settings
   useEffect(() => {
     try {
       localStorage.setItem(
         "ctu-settings-v1",
-        JSON.stringify({ format24, stealth, timeZone })
+        JSON.stringify({ format24, stealth, timeZone }),
       );
     } catch {
-      // ignore
+      /* ignore */
     }
   }, [format24, stealth, timeZone]);
+
+  const activeFocus = useMemo(() => focusMission(missions, now), [missions, now]);
+  const crisis = useMemo(() => missions.some((m) => m.status === "CRISIS"), [missions]);
+  const heightened = useMemo(() => {
+    const active = missions.filter((m) => m.status === "ACTIVE");
+    return active.some((m) => remainingMs(m, now) < 5 * 60 * 1000);
+  }, [missions, now]);
 
   const toggleFullscreen = useCallback(async () => {
     try {
@@ -179,59 +179,33 @@ function CTUTerminal() {
         setFullscreen(false);
       }
     } catch {
-      // ignore
+      /* fullscreen blocked */
     }
   }, []);
 
   const toggleGuard = useCallback(async () => {
-    if (guard && wakeLock) {
-      try {
-        await wakeLock.release();
-      } catch {
-        // ignore
-      }
-      setWakeLock(null);
-      setGuard(false);
-      setNotice("TERMINAL GUARD DISENGAGED");
-      setTimeout(() => setNotice(null), 3000);
-      return;
-    }
-
     if ("wakeLock" in navigator) {
       try {
-        const lock = await navigator.wakeLock.request("screen");
-        setWakeLock(lock);
-        setGuard(true);
-        setNotice("TERMINAL GUARD ENGAGED · SCREEN KEPT AWAKE");
-        setTimeout(() => setNotice(null), 3500);
-        lock.addEventListener("release", () => {
-          setGuard(false);
+        if (!guard) {
+          const wl = await navigator.wakeLock.request("screen");
+          setWakeLock(wl);
+          setGuard(true);
+          wl.addEventListener("release", () => setGuard(false));
+        } else if (wakeLock) {
+          await wakeLock.release();
           setWakeLock(null);
-        });
+          setGuard(false);
+        }
       } catch {
-        setNotice("TERMINAL GUARD UNAVAILABLE ON THIS DEVICE");
-        setTimeout(() => setNotice(null), 3000);
+        setGuard(false);
       }
     }
   }, [guard, wakeLock]);
 
-  const activeFocus = useMemo(() => focusMission(missions), [missions]);
-
-  const crisis = useMemo(
-    () => missions.some((m) => m.status === "CRISIS"),
-    [missions]
-  );
-
-  const heightened = useMemo(() => {
-    if (crisis) return false;
-    return missions.some((m) => {
-      if (m.status !== "ACTIVE") return false;
-      return remainingMs(m, now) <= 5 * 60 * 1000;
-    });
-  }, [missions, crisis, now]);
-
+  // Operational theater local time
   const localClock = useMemo(() => {
-    const d = new Date(now || Date.now());
+    const ts = now || Date.now();
+    const d = new Date(ts);
     try {
       const parts = new Intl.DateTimeFormat("en-US", {
         timeZone,
@@ -241,12 +215,19 @@ function CTUTerminal() {
         hour12: !format24,
       }).formatToParts(d);
 
-      const h = parts.find((p) => p.type === "hour")?.value ?? "00";
-      const m = parts.find((p) => p.type === "minute")?.value ?? "00";
-      const s = parts.find((p) => p.type === "second")?.value ?? "00";
-      const dayPeriod = parts.find((p) => p.type === "dayPeriod")?.value;
+      let h = 0;
+      let m = 0;
+      let s = 0;
+      let dayPeriod = "";
 
-      const pad = (str: string) => str.padStart(2, "0");
+      for (const p of parts) {
+        if (p.type === "hour") h = parseInt(p.value, 10);
+        else if (p.type === "minute") m = parseInt(p.value, 10);
+        else if (p.type === "second") s = parseInt(p.value, 10);
+        else if (p.type === "dayPeriod") dayPeriod = p.value;
+      }
+
+      const pad = (n: number) => String(n).padStart(2, "0");
       return {
         digits: `${pad(h)}:${pad(m)}:${pad(s)}`,
         period: dayPeriod ? ` ${dayPeriod.toUpperCase()}` : "",
@@ -371,6 +352,16 @@ function CTUTerminal() {
                 <span>UNIFIED COMMAND DECK</span>
               </div>
               <div className="deck-toggles flex items-center gap-2">
+                {/* Audio quick-toggle directly on Command Deck */}
+                <button
+                  type="button"
+                  className={`time-mode-btn flex items-center gap-1.5 ${audio.enabled ? "border-[var(--signal)] text-[var(--signal)]" : "text-muted-foreground opacity-80"}`}
+                  onClick={toggleAudio}
+                  title="Toggle Tactical Audio"
+                >
+                  {audio.enabled ? <Volume2 size={13} /> : <VolumeX size={13} />}
+                  <span>{audio.enabled ? "AUDIO ON" : "AUDIO MUTED"}</span>
+                </button>
                 <button
                   type="button"
                   className="time-mode-btn"
@@ -379,13 +370,14 @@ function CTUTerminal() {
                 >
                   {format24 ? "24H FORMAT" : "12H FORMAT"}
                 </button>
-                <span className="micro text-muted-foreground uppercase">
-                  {activeFocus?.pinned ? "MANUALLY PINNED" : "AUTO-SELECT PRIORITY"}
+                <span className="micro text-muted-foreground uppercase hidden sm:inline">
+                  {activeFocus?.pinned ? "PINNED" : "AUTO-PRIORITY"}
                 </span>
               </div>
             </div>
 
             <div className="unified-stage-grid">
+              {/* Local Mission Clock */}
               <div className="stage-sector local-time-sector">
                 <div className="sector-header flex items-center justify-between flex-wrap gap-2">
                   <div className="flex items-center gap-2">
@@ -422,34 +414,29 @@ function CTUTerminal() {
                     <span>SECONDS</span>
                   </div>
                 </div>
-                <div className="realtime-banner">
-                  <span className="ticker-marker">■</span>
-                  <span>THE FOLLOWING EVENTS TAKE PLACE IN REAL TIME</span>
-                  <span className="ticker-marker">■</span>
+                <div className="sector-footer-telemetry">
+                  EVENTS OCCUR IN REAL TIME · {timeZone.split("/")[1]?.replace("_", " ").toUpperCase() || "THEATER"}
                 </div>
               </div>
 
-              <div className="stage-sector active-operation-sector">
-                <div className="sector-header">
-                  <span className="sector-tag">ACTIVE OPERATION TARGET</span>
-                  {activeFocus && (
-                    <span className="sector-protocol-pill">
-                      {activeFocus.kind.toUpperCase()} · {activeFocus.status}
-                    </span>
-                  )}
+              {/* Active Operation Countdown */}
+              <div className="stage-sector active-op-sector">
+                <div className="sector-header flex items-center justify-between">
+                  <span className="sector-tag">
+                    {activeFocus ? activeFocus.title.toUpperCase() : "TARGET COUNTDOWN"}
+                  </span>
+                  <span className="sector-status-pill">
+                    {activeFocus ? activeFocus.status : "STANDBY"}
+                  </span>
                 </div>
-
                 <div className="stage-clock-display">
                   {activeFocus ? (
                     <CTUDigits
                       time={focusDigits}
-                      className="focus-clock h-20 sm:h-24 lg:h-28"
+                      className="focus-clock h-16 sm:h-20 lg:h-24"
                     />
                   ) : (
-                    <div className="focus-standby">
-                      <div className="standby-digits">00:00:00</div>
-                      <span className="standby-tag">NO ACTIVE MISSIONS ARMED</span>
-                    </div>
+                    <div className="standby-digits">00:00:00</div>
                   )}
                   <div className="digit-labels">
                     <span>HOURS</span>
@@ -460,7 +447,17 @@ function CTUTerminal() {
 
                 {activeFocus ? (
                   <div className="focus-controls">
-                    {["PAUSED", "STOPPED"].includes(activeFocus.status) ? (
+                    {activeFocus.status === "ACTIVE" && (
+                      <Button
+                        size="lg"
+                        className="control-btn"
+                        onClick={() => control(activeFocus.id, "pause")}
+                      >
+                        <Pause /> PAUSE
+                      </Button>
+                    )}
+                    {(activeFocus.status === "PAUSED" ||
+                      activeFocus.status === "STOPPED") && (
                       <Button
                         size="lg"
                         className="control-btn primary-action"
@@ -468,18 +465,7 @@ function CTUTerminal() {
                       >
                         <Play /> RESUME
                       </Button>
-                    ) : (
-                      <Button
-                        size="lg"
-                        variant="outline"
-                        className="control-btn"
-                        disabled={activeFocus.status === "CRISIS"}
-                        onClick={() => control(activeFocus.id, "pause")}
-                      >
-                        <Pause /> PAUSE
-                      </Button>
                     )}
-
                     <Button
                       size="lg"
                       variant="outline"
@@ -488,16 +474,14 @@ function CTUTerminal() {
                     >
                       <RotateCcw /> RESET
                     </Button>
-
                     <Button
                       size="lg"
-                      variant="destructive"
+                      variant="outline"
                       className="control-btn"
                       onClick={() => control(activeFocus.id, "stop")}
                     >
-                      <Square /> DISARM
+                      <Square /> STOP
                     </Button>
-
                     {activeFocus.status === "CRISIS" && (
                       <Button
                         size="lg"
@@ -800,104 +784,88 @@ function CTUTerminal() {
                 type="checkbox"
                 checked={audio.phoneAlerts}
                 onChange={(e) => setPhoneAlerts(e.target.checked)}
-              />{" "}
-              PHONE ALERT SOUND (FALLBACK)
+              />
+              <span>TACTICAL RING WARBLE</span>
             </label>
+          </div>
+          <div className="flex justify-end gap-2 mt-3">
             <Button variant="outline" size="sm" onClick={testAlert}>
-              <Zap /> TEST 3S ALERT SIGNAL
+              TEST CRISIS ALARM (3 BURSTS)
             </Button>
           </div>
         </section>
       )}
 
-      <footer className="terminal-footer">
-        <span>CTU LOS ANGELES · OPERATIONAL DATA SYSTEM V4.18</span>
-        <span>
-          CIPHER: <span className="accent">AES-256-GCM</span> · STATUS:{" "}
-          <span className="accent">ALL CHANNELS SECURE</span>
-        </span>
-      </footer>
-
-      {notice && (
-        <div role="status" className="terminal-notice">
-          {notice}
-        </div>
-      )}
-
       {addOpen && (
-        <div className="modal-backdrop" onClick={() => setAddOpen(false)}>
-          <section
-            className="arm-dialog terminal-panel"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="arm-heading"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="panel-heading">
-              <span>
-                <Plus size={14} /> NEW OPERATION
-              </span>
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label="Close new operation"
+        <div className="arm-modal-backdrop" onClick={() => setAddOpen(false)}>
+          <section className="arm-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="arm-modal-header">
+              <div className="arm-modal-title">
+                <Plus />
+                <span>ARM AN OPERATION</span>
+              </div>
+              <button
+                type="button"
+                className="arm-modal-close"
                 onClick={() => setAddOpen(false)}
+                aria-label="Close dialog"
               >
                 <X />
-              </Button>
+              </button>
             </div>
-            <form onSubmit={submit}>
-              <h2 id="arm-heading">ARM AN OPERATION</h2>
-              <div className="dialog-tabs">
-                <Button
+
+            <form onSubmit={submit} className="arm-form">
+              <div className="arm-tabs">
+                <button
                   type="button"
-                  variant={kind === "timer" ? "default" : "outline"}
+                  className={`arm-tab ${kind === "timer" ? "active" : ""}`}
                   onClick={() => setKind("timer")}
                 >
                   <Timer />
-                  COUNTDOWN
-                </Button>
-                <Button
+                  <span>COUNTDOWN</span>
+                </button>
+                <button
                   type="button"
-                  variant={kind === "alarm" ? "default" : "outline"}
+                  className={`arm-tab ${kind === "alarm" ? "active" : ""}`}
                   onClick={() => setKind("alarm")}
                 >
                   <Bell />
-                  DAILY ALARM
-                </Button>
+                  <span>DAILY ALARM</span>
+                </button>
               </div>
 
-              <label className="field-group">
-                <span className="input-header-label">MISSION TITLE</span>
+              <div className="arm-field">
+                <label htmlFor="mission-title">OPERATION CODENAME</label>
                 <input
-                  autoFocus
-                  maxLength={70}
+                  id="mission-title"
+                  type="text"
+                  placeholder={
+                    kind === "timer"
+                      ? "e.g., Tactical Sprint, Target Intercept"
+                      : "e.g., Shift Briefing, Sector Hand-Off"
+                  }
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  placeholder="Operation: Afternoon Sprint"
-                  className="terminal-text-input"
-                />
-              </label>
-
-              {/* Samsung Galaxy One UI Drum Picker */}
-              <div className="time-picker-section">
-                <SamsungTimePicker
-                  mode={kind === "timer" ? "countdown" : "alarm"}
-                  timerValues={timerValues}
-                  onTimerChange={setTimerValues}
-                  alarmTime={alarmTime}
-                  onAlarmChange={setAlarmTime}
+                  maxLength={64}
                 />
               </div>
 
+              <SamsungTimePicker
+                mode={kind}
+                timerValues={timerValues}
+                onTimerChange={setTimerValues}
+                alarmTime={alarmTime}
+                onAlarmChange={setAlarmTime}
+              />
+
               {kind === "timer" && (
-                <label className="checkbox-label">
+                <label className="save-preset-checkbox">
                   <input
                     type="checkbox"
                     checked={savePreset}
                     onChange={(e) => setSavePreset(e.target.checked)}
-                  />{" "}
-                  SAVE AS QUICK-ARM PROTOCOL
+                  />
+                  <span>SAVE AS REUSABLE QUICK-ARM PROTOCOL</span>
                 </label>
               )}
 
