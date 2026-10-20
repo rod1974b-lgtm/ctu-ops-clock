@@ -77,7 +77,7 @@ export function useMissions() {
     return engine.current;
   }, []);
 
-  // Global user gesture listener: unlocks Web Audio on very first tap or keypress
+  // Global user gesture listener: unlocks Web Audio & pre-warms media on first tap
   useEffect(() => {
     const handleGesture = () => {
       void ensureAudio();
@@ -160,23 +160,34 @@ export function useMissions() {
     }
   }, [missions, customPresets, audio, loaded]);
 
-  // Expire missions into CRISIS
+  // Expire missions into CRISIS (At Zero)
   useEffect(() => {
     if (!now) return;
-    setMissions((current) =>
-      current.some((m) => m.status === "ACTIVE" && m.endsAt <= now)
-        ? current.map((m) =>
-            m.status === "ACTIVE" && m.endsAt <= now
-              ? { ...m, status: "CRISIS", remainingMs: 0 }
-              : m,
-          )
-        : current,
-    );
-  }, [now]);
+    setMissions((current) => {
+      const needsCrisis = current.some((m) => m.status === "ACTIVE" && m.endsAt <= now);
+      if (!needsCrisis) return current;
+
+      // When hitting Zero, immediately trigger the At Zero theme
+      if (audio.enabled) {
+        void ensureAudio().then((eng) => eng.playAtZero(audio.crisisVolume));
+      }
+
+      return current.map((m) =>
+        m.status === "ACTIVE" && m.endsAt <= now
+          ? { ...m, status: "CRISIS", remainingMs: 0 }
+          : m,
+      );
+    });
+  }, [now, audio.enabled, audio.crisisVolume, ensureAudio]);
 
   // Audio heartbeat, fires precisely once per second
   useEffect(() => {
-    if (!now || !audio.enabled) return;
+    if (!now) return;
+
+    if (!audio.enabled) {
+      engine.current?.stopAll();
+      return;
+    }
 
     const sec = Math.floor(now / 1000);
     if (sec === lastSecond.current) return;
@@ -189,7 +200,7 @@ export function useMissions() {
 
     const settings = toSettings(audio);
 
-    // Crisis alert takes top priority (sounds on every beat)
+    // Crisis alert takes top priority: plays 24 At Zero theme
     if (missions.some((m) => m.status === "CRISIS")) {
       void ensureAudio().then((eng) => eng.tick(3, settings, beat.current));
       return;
@@ -197,7 +208,10 @@ export function useMissions() {
 
     // Active mission ticking
     const active = missions.filter((m) => m.status === "ACTIVE");
-    if (!active.length) return;
+    if (!active.length) {
+      engine.current?.stopAll();
+      return;
+    }
 
     const closest = Math.min(...active.map((m) => remainingMs(m, now)));
     const tier = closest <= audio.countdownWindow * 1000 ? 2 : 1;
@@ -232,8 +246,8 @@ export function useMissions() {
     (id: string, action: "start" | "pause" | "reset" | "stop") => {
       void ensureAudio();
       const at = Date.now();
-      setMissions((items) =>
-        items.map((m) => {
+      setMissions((items) => {
+        const next = items.map((m) => {
           if (m.id !== id) return m;
           if (action === "start") {
             const endsAt = at + (m.remainingMs > 0 ? m.remainingMs : m.durationMs);
@@ -255,8 +269,16 @@ export function useMissions() {
             return { ...m, status: "STOPPED", remainingMs: 0 };
           }
           return m;
-        }),
-      );
+        });
+
+        // If no more missions in CRISIS, stop the Zero theme immediately
+        const stillInCrisis = next.some((m) => m.status === "CRISIS");
+        if (!stillInCrisis) {
+          engine.current?.stopAtZero();
+        }
+
+        return next;
+      });
     },
     [ensureAudio],
   );
@@ -265,8 +287,8 @@ export function useMissions() {
     (id: string) => {
       void ensureAudio();
       const at = Date.now();
-      setMissions((items) =>
-        items.map((m) => {
+      setMissions((items) => {
+        const next = items.map((m) => {
           if (m.id !== id) return m;
           const endsAt = at + audio.snoozeMs;
           return {
@@ -275,14 +297,29 @@ export function useMissions() {
             endsAt,
             remainingMs: audio.snoozeMs,
           };
-        }),
-      );
+        });
+
+        // Silence Zero theme on snooze
+        const stillInCrisis = next.some((m) => m.status === "CRISIS");
+        if (!stillInCrisis) {
+          engine.current?.stopAtZero();
+        }
+
+        return next;
+      });
     },
     [audio.snoozeMs, ensureAudio],
   );
 
   const remove = useCallback((id: string) => {
-    setMissions((items) => items.filter((m) => m.id !== id));
+    setMissions((items) => {
+      const next = items.filter((m) => m.id !== id);
+      const stillInCrisis = next.some((m) => m.status === "CRISIS");
+      if (!stillInCrisis) {
+        engine.current?.stopAtZero();
+      }
+      return next;
+    });
   }, []);
 
   const togglePin = useCallback((id: string) => {
@@ -326,17 +363,24 @@ export function useMissions() {
 
   const toggleAudio = useCallback(() => {
     void ensureAudio();
-    setAudio((a) => ({ ...a, enabled: !a.enabled }));
+    setAudio((a) => {
+      const nextEnabled = !a.enabled;
+      if (!nextEnabled) {
+        engine.current?.stopAll();
+      }
+      return { ...a, enabled: nextEnabled };
+    });
   }, [ensureAudio]);
 
   const testAlert = useCallback(() => {
     void ensureAudio().then((eng) => {
-      const settings = toSettings(audio);
-      eng.tick(3, settings, 1);
-      setTimeout(() => eng.tick(3, settings, 2), 400);
-      setTimeout(() => eng.tick(3, settings, 3), 800);
+      eng.playAtZero(audio.crisisVolume);
+      // Automatically stop test blast after 5 seconds
+      setTimeout(() => {
+        eng.stopAtZero();
+      }, 5000);
     });
-  }, [audio, ensureAudio]);
+  }, [audio.crisisVolume, ensureAudio]);
 
   return {
     now,
