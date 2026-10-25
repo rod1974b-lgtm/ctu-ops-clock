@@ -1,11 +1,8 @@
+// src/routes/index.tsx
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  AudioLines,
   Bell,
-  ChevronDown,
-  ChevronRight,
-  Eye,
   Globe,
   Maximize2,
   Minimize2,
@@ -42,9 +39,6 @@ import surveillance from "@/assets/la-surveillance.jpg";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      {
-        title: "CTU Operational Timer · Tactical Mission Terminal",
-      },
       {
         name: "description",
         content:
@@ -92,56 +86,25 @@ function CTUTerminal() {
     snooze,
     remove,
     togglePin,
-    saveCustomPreset,
     setAudioVolume,
     setAudioWindow,
-    setSnoozeDuration,
-    setPhoneAlerts,
     toggleAudio,
     testAlert,
     now,
   } = useMissions();
 
-  const [format24, setFormat24] = useState<boolean>(() => {
-    if (typeof window === "undefined") return true;
-    try {
-      const saved = localStorage.getItem("ctu-settings-v1");
-      return saved ? JSON.parse(saved).format24 ?? true : true;
-    } catch {
-      return true;
-    }
-  });
-
-  const [stealth, setStealth] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
-    try {
-      const saved = localStorage.getItem("ctu-settings-v1");
-      return saved ? JSON.parse(saved).stealth ?? false : false;
-    } catch {
-      return false;
-    }
-  });
-
-  const [timeZone, setTimeZone] = useState<string>(() => {
-    if (typeof window === "undefined") return "Asia/Bangkok";
-    try {
-      const saved = localStorage.getItem("ctu-settings-v1");
-      return saved && JSON.parse(saved).timeZone ? JSON.parse(saved).timeZone : "Asia/Bangkok";
-    } catch {
-      return "Asia/Bangkok";
-    }
-  });
-
-  const [fullscreen, setFullscreen] = useState(false);
-  const [guard, setGuard] = useState(false);
+  // Settings & display state
+  const [format24, setFormat24] = useState<boolean>(true);
+  const [stealth, setStealth] = useState<boolean>(false);
+  const [timeZone, setTimeZone] = useState<string>("Asia/Bangkok");
+  const [fullscreen, setFullscreen] = useState<boolean>(false);
   const [wakeLock, setWakeLock] = useState<WakeLockSentinel | null>(null);
-  const [audioOpen, setAudioOpen] = useState(false);
-  const [forceCountdownFeed, setForceCountdownFeed] = useState(false);
+  const [forceCountdownFeed, setForceCountdownFeed] = useState<boolean>(false);
 
   // Arm modal state
-  const [addOpen, setAddOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState<boolean>(false);
   const [kind, setKind] = useState<"timer" | "alarm">("timer");
-  const [title, setTitle] = useState("");
+  const [title, setTitle] = useState<string>("");
   const [timerValues, setTimerValues] = useState<SamsungTimerValues>({
     hours: 0,
     minutes: 25,
@@ -150,10 +113,34 @@ function CTUTerminal() {
   });
   const [alarmTime, setAlarmTime] = useState<string>("09:00:00");
 
-  const [savingPreset, setSavingPreset] = useState(false);
-  const [presetName, setPresetName] = useState("");
-  const [presetDesc, setPresetDesc] = useState("");
+  // Load client-persisted preferences once on mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("ctu-settings-v1");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (typeof parsed.format24 === "boolean") setFormat24(parsed.format24);
+        if (typeof parsed.stealth === "boolean") setStealth(parsed.stealth);
+        if (typeof parsed.timeZone === "string") setTimeZone(parsed.timeZone);
+      }
+    } catch {
+      /* ignore storage read error */
+    }
+  }, []);
 
+  // Persist preferences on change
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        "ctu-settings-v1",
+        JSON.stringify({ format24, stealth, timeZone }),
+      );
+    } catch {
+      /* ignore storage write error */
+    }
+  }, [format24, stealth, timeZone]);
+
+  // Derived tactical status
   const activeFocus = useMemo(() => focusMission(missions, now), [missions, now]);
   const crisis = useMemo(() => missions.some((m) => m.status === "CRISIS"), [missions]);
 
@@ -180,21 +167,11 @@ function CTUTerminal() {
   const missionCount = missions.length;
   const activeCount = activeMissions.length;
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(
-        "ctu-settings-v1",
-        JSON.stringify({ format24, stealth, timeZone }),
-      );
-    } catch {
-      /* ignore */
-    }
-  }, [format24, stealth, timeZone]);
-
+  // Local Mission Clock digits
   const localClock = useMemo(() => {
-    if (!now) return { h: "00", m: "00", s: "00", p: "" };
+    const ts = now || Date.now();
     try {
-      const date = new Date(now);
+      const date = new Date(ts);
       const parts = new Intl.DateTimeFormat("en-US", {
         timeZone,
         hour12: !format24,
@@ -207,41 +184,48 @@ function CTUTerminal() {
       const m = parts.find((p) => p.type === "minute")?.value || "00";
       const s = parts.find((p) => p.type === "second")?.value || "00";
       const p = parts.find((p) => p.type === "dayPeriod")?.value || "";
-      return { h, m, s, p: format24 ? "" : p };
+      return {
+        digits: `${h}:${m}:${s}`,
+        period: format24 ? "" : p.toUpperCase(),
+      };
     } catch {
-      return clockParts(now, format24);
+      return {
+        digits: clockParts(ts),
+        period: "",
+      };
     }
   }, [now, format24, timeZone]);
 
+  // Zulu UTC Clock
   const zuluClock = useMemo(() => {
-    if (!now) return "00:00:00Z";
-    const d = new Date(now);
+    const d = new Date(now || Date.now());
     const h = String(d.getUTCHours()).padStart(2, "0");
     const m = String(d.getUTCMinutes()).padStart(2, "0");
     const s = String(d.getUTCSeconds()).padStart(2, "0");
     return `${h}:${m}:${s}Z`;
   }, [now]);
 
-  const focusParts = useMemo(() => {
-    if (!activeFocus) return { h: "00", m: "00", s: "00" };
+  // Active Focus Countdown digits
+  const focusDigits = useMemo(() => {
+    if (!activeFocus) return "00:00:00";
     const rem = remainingMs(activeFocus, now);
-    const totalSec = Math.max(0, Math.floor(rem / 1000));
-    const h = String(Math.floor(totalSec / 3600)).padStart(2, "0");
-    const m = String(Math.floor((totalSec % 3600) / 60)).padStart(2, "0");
-    const s = String(totalSec % 60).padStart(2, "0");
-    return { h, m, s };
+    return clockParts(rem);
   }, [activeFocus, now]);
 
+  // Active Operation progress %
   const focusProgress = useMemo(() => {
-    if (!activeFocus || activeFocus.durationMs <= 0) return 0;
+    if (!activeFocus || !activeFocus.durationMs || activeFocus.durationMs <= 0) return 0;
     const rem = remainingMs(activeFocus, now);
     return Math.max(0, Math.min(100, 100 - (rem / activeFocus.durationMs) * 100));
   }, [activeFocus, now]);
 
+  // Arm submission handler
   const handleArmSubmit = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
-      const finalTitle = title.trim() || (kind === "timer" ? "Tactical Operation" : "Daily Checkpoint");
+      const finalTitle =
+        title.trim() ||
+        (kind === "timer" ? "Tactical Operation" : "Daily Checkpoint");
 
       if (kind === "timer") {
         const durationMs = timerValues.totalSeconds * 1000;
@@ -273,12 +257,16 @@ function CTUTerminal() {
   );
 
   const handleFullscreen = async () => {
-    if (!document.fullscreenElement) {
-      await document.documentElement.requestFullscreen().catch(() => {});
-      setFullscreen(true);
-    } else {
-      await document.exitFullscreen().catch(() => {});
-      setFullscreen(false);
+    try {
+      if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen();
+        setFullscreen(true);
+      } else {
+        await document.exitFullscreen();
+        setFullscreen(false);
+      }
+    } catch {
+      /* fullscreen blocked */
     }
   };
 
@@ -292,7 +280,7 @@ function CTUTerminal() {
         setWakeLock(lock);
         lock.addEventListener("release", () => setWakeLock(null));
       } catch {
-        /* rejected */
+        /* wake lock rejected */
       }
     }
   };
@@ -378,7 +366,9 @@ function CTUTerminal() {
                   type="button"
                   onClick={toggleAudio}
                   className={`time-mode-btn flex items-center gap-1.5 ${
-                    audio.enabled ? "border-[var(--signal)] text-[var(--signal)]" : "text-muted-foreground opacity-80"
+                    audio.enabled
+                      ? "border-[var(--signal)] text-[var(--signal)]"
+                      : "text-muted-foreground opacity-80"
                   }`}
                 >
                   {audio.enabled ? <Volume2 size={13} /> : <VolumeX size={13} />}
@@ -410,15 +400,15 @@ function CTUTerminal() {
                     <Globe size={12} className="text-[var(--signal)]" />
                     <span>LOCAL MISSION TIME</span>
                   </span>
-                  <span className="text-[10px] opacity-75">{timeZone.split("/")[1]?.replace("_", " ") ?? timeZone}</span>
+                  <span className="text-[10px] opacity-75">
+                    {timeZone.split("/")[1]?.replace("_", " ") ?? timeZone}{" "}
+                    {localClock.period ? `(${localClock.period})` : ""}
+                  </span>
                 </div>
                 <div className="clock-viewport">
                   <CTUDigits
-                    hours={localClock.h}
-                    minutes={localClock.m}
-                    seconds={localClock.s}
-                    period={localClock.p}
-                    variant="huge"
+                    time={localClock.digits}
+                    className="mission-clock h-16 sm:h-20 lg:h-24"
                   />
                 </div>
                 <div className="sector-telemetry">
@@ -444,10 +434,8 @@ function CTUTerminal() {
                 <div className="clock-viewport">
                   {activeFocus ? (
                     <CTUDigits
-                      hours={focusParts.h}
-                      minutes={focusParts.m}
-                      seconds={focusParts.s}
-                      variant="huge"
+                      time={focusDigits}
+                      className="focus-clock h-16 sm:h-20 lg:h-24"
                     />
                   ) : (
                     <div className="standby-digits">00:00:00</div>
@@ -473,7 +461,10 @@ function CTUTerminal() {
 
                   {activeFocus && (
                     <div className="progress-bar-rail">
-                      <div className="progress-bar-fill" style={{ width: `${focusProgress}%` }} />
+                      <div
+                        className="progress-bar-fill"
+                        style={{ width: `${focusProgress}%` }}
+                      />
                     </div>
                   )}
 
@@ -518,7 +509,8 @@ function CTUTerminal() {
                             className="control-btn crisis-snooze"
                             onClick={() => snooze(activeFocus.id)}
                           >
-                            <Zap size={13} /> SNOOZE ({Math.floor(audio.snoozeMs / 60000)}M)
+                            <Zap size={13} /> SNOOZE (
+                            {Math.floor(audio.snoozeMs / 60000)}M)
                           </button>
                         )}
                       </>
@@ -557,7 +549,9 @@ function CTUTerminal() {
                     }
                   >
                     <span className="preset-name">{p.name}</span>
-                    <span className="preset-dur">{Math.round(p.durationMs / 60000)}M</span>
+                    <span className="preset-dur">
+                      {Math.round(p.durationMs / 60000)}M
+                    </span>
                   </button>
                 ))}
                 <button
@@ -585,12 +579,12 @@ function CTUTerminal() {
               ) : (
                 missions.map((m) => {
                   const rem = remainingMs(m, now);
-                  const totalSec = Math.max(0, Math.floor(rem / 1000));
-                  const h = String(Math.floor(totalSec / 3600)).padStart(2, "0");
-                  const min = String(Math.floor((totalSec % 3600) / 60)).padStart(2, "0");
-                  const s = String(totalSec % 60).padStart(2, "0");
+                  const qDigits = clockParts(rem);
                   return (
-                    <div key={m.id} className={`queue-item-card ${m.status.toLowerCase()}`}>
+                    <div
+                      key={m.id}
+                      className={`queue-item-card ${m.status.toLowerCase()}`}
+                    >
                       <div className="queue-item-header">
                         <div className="flex items-center gap-2">
                           {m.kind === "alarm" ? <Bell size={13} /> : <Timer size={13} />}
@@ -602,9 +596,7 @@ function CTUTerminal() {
                         </span>
                       </div>
                       <div className="queue-item-body">
-                        <div className="queue-digits">
-                          {h}:{min}:{s}
-                        </div>
+                        <div className="queue-digits">{qDigits}</div>
                         <div className="queue-actions">
                           {m.status === "ACTIVE" ? (
                             <button
@@ -659,7 +651,11 @@ function CTUTerminal() {
           {/* Tactical Surveillance & 24 Countdown Feed */}
           <section className="terminal-panel surveillance-panel">
             <div className="panel-heading flex items-center justify-between">
-              <span>{showCountdownVideo ? "24 COUNTDOWN MEDIA FEED" : "TACTICAL SURVEILLANCE FEED"}</span>
+              <span>
+                {showCountdownVideo
+                  ? "24 COUNTDOWN MEDIA FEED"
+                  : "TACTICAL SURVEILLANCE FEED"}
+              </span>
               <button
                 type="button"
                 onClick={() => setForceCountdownFeed((v) => !v)}
@@ -687,13 +683,23 @@ function CTUTerminal() {
               )}
               <div className="surveillance-overlay pointer-events-none absolute inset-0">
                 <div className="cam-tag">
-                  {showCountdownVideo ? "CAM-24 · TITLES FEED" : "SAT-LINK 04 · SECTOR 7"}
+                  {showCountdownVideo
+                    ? "CAM-24 · TITLES FEED"
+                    : "SAT-LINK 04 · SECTOR 7"}
                 </div>
                 <div className="surveillance-reticle" />
                 <div className="surveillance-footer">
-                  <span>{showCountdownVideo ? "AUDIO: SYNCHRONIZED" : "GRID: 34.0522° N, 118.2437° W"}</span>
+                  <span>
+                    {showCountdownVideo
+                      ? "AUDIO: SYNCHRONIZED"
+                      : "GRID: 34.0522° N, 118.2437° W"}
+                  </span>
                   <span className="accent">
-                    {crisis ? "24 AT ZERO · CODE RED" : showCountdownVideo ? "COUNTDOWN ACTIVE" : "SIGNAL: 98.4%"}
+                    {crisis
+                      ? "24 AT ZERO · CODE RED"
+                      : showCountdownVideo
+                        ? "COUNTDOWN ACTIVE"
+                        : "SIGNAL: 98.4%"}
                   </span>
                 </div>
               </div>
@@ -735,7 +741,9 @@ function CTUTerminal() {
                   type="button"
                   onClick={toggleAudio}
                   className={`px-3 py-1 border text-[11px] ${
-                    audio.enabled ? "border-[var(--signal)] text-[var(--signal)]" : "border-neutral-700 text-neutral-500"
+                    audio.enabled
+                      ? "border-[var(--signal)] text-[var(--signal)]"
+                      : "border-neutral-700 text-neutral-500"
                   }`}
                 >
                   {audio.enabled ? "ENABLED" : "MUTED"}
@@ -753,7 +761,7 @@ function CTUTerminal() {
                   max="1"
                   step="0.05"
                   value={audio.crisisVolume}
-                  onChange={(e) => setAudioVolume("crisis", Number(e.target.value))}
+                  onChange={(e) => setAudioVolume(Number(e.target.value))}
                   className="w-full accent-[var(--signal)] cursor-pointer"
                 />
               </div>
@@ -833,7 +841,9 @@ function CTUTerminal() {
                 <input
                   id="mission-title"
                   type="text"
-                  placeholder={kind === "timer" ? "Tactical Sprint" : "Daily SITREP Report"}
+                  placeholder={
+                    kind === "timer" ? "Tactical Sprint" : "Daily SITREP Report"
+                  }
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                   className="arm-input"
@@ -844,7 +854,9 @@ function CTUTerminal() {
               <div className="arm-picker-container">
                 <SamsungTimePicker
                   mode={kind}
+                  timerValues={timerValues}
                   values={timerValues}
+                  onTimerChange={setTimerValues}
                   onChange={setTimerValues}
                   alarmTime={alarmTime}
                   onAlarmChange={setAlarmTime}
