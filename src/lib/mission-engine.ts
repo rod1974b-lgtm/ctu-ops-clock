@@ -74,10 +74,20 @@ export function nextAlarm(alarmTime: string, now = Date.now()): number {
 
 export function focusMission(
   missions: Mission[],
-  pinnedId: string | null = null,
-  now = Date.now(),
+  pinnedIdOrNow?: string | number | null,
+  nowParam?: number,
 ): Mission | null {
   if (!missions.length) return null;
+
+  let pinnedId: string | null = null;
+  let now = Date.now();
+
+  if (typeof pinnedIdOrNow === "string") {
+    pinnedId = pinnedIdOrNow;
+    if (typeof nowParam === "number") now = nowParam;
+  } else if (typeof pinnedIdOrNow === "number") {
+    now = pinnedIdOrNow;
+  }
 
   if (pinnedId) {
     const explicitlyPinned = missions.find((m) => m.id === pinnedId);
