@@ -14,12 +14,10 @@ interface DrumColumnProps {
 function DrumColumn({ label, value, max, min = 0, step = 1, pad = 2, onChange }: DrumColumnProps) {
   const rangeSize = max - min + 1;
 
-  // Natural vertical ordering:
-  // Top slot: previous number (value - step)
-  // Center slot: current number (value)
-  // Bottom slot: next number (value + step)
-  const prevVal = value - step < min ? max - ((min - (value - step) - 1) % rangeSize) : value - step;
-  const nextVal = value + step > max ? min + ((value + step - max - 1) % rangeSize) : value + step;
+  // Up button & top slot: INCREMENTS (+step)
+  const incVal = value + step > max ? min + ((value + step - max - 1) % rangeSize) : value + step;
+  // Down button & bottom slot: DECREMENTS (-step)
+  const decVal = value - step < min ? max - ((min - (value - step) - 1) % rangeSize) : value - step;
 
   const [isFocused, setIsFocused] = useState(false);
   const [inputValue, setInputValue] = useState(String(value).padStart(pad, "0"));
@@ -34,14 +32,12 @@ function DrumColumn({ label, value, max, min = 0, step = 1, pad = 2, onChange }:
     (e: React.WheelEvent) => {
       e.preventDefault();
       if (e.deltaY < 0) {
-        // Wheel up rolls up -> next number
-        onChange(nextVal);
+        onChange(incVal);
       } else if (e.deltaY > 0) {
-        // Wheel down rolls down -> previous number
-        onChange(prevVal);
+        onChange(decVal);
       }
     },
-    [prevVal, nextVal, onChange]
+    [incVal, decVal, onChange]
   );
 
   return (
@@ -50,25 +46,25 @@ function DrumColumn({ label, value, max, min = 0, step = 1, pad = 2, onChange }:
       <button
         type="button"
         className="drum-step-btn"
-        onClick={() => onChange(prevVal)}
-        aria-label={`Previous ${label}`}
+        onClick={() => onChange(incVal)}
+        aria-label={`Increase ${label}`}
       >
         <ChevronUp className="h-4 w-4" />
       </button>
 
       <div className="drum-barrel">
-        {/* Top slot (previous number) */}
+        {/* Top slot (incremented value) */}
         <button
           type="button"
           tabIndex={-1}
           className="drum-slot drum-slot-neighbor"
-          onClick={() => onChange(prevVal)}
-          title={`Set ${label} to ${String(prevVal).padStart(pad, "0")}`}
+          onClick={() => onChange(incVal)}
+          title={`Set ${label} to ${String(incVal).padStart(pad, "0")}`}
         >
-          {String(prevVal).padStart(pad, "0")}
+          {String(incVal).padStart(pad, "0")}
         </button>
 
-        {/* Center active slot: direct numeric input */}
+        {/* Center active slot: direct editable input */}
         <div className="drum-slot drum-slot-active">
           <input
             type="text"
@@ -106,10 +102,10 @@ function DrumColumn({ label, value, max, min = 0, step = 1, pad = 2, onChange }:
                 (e.target as HTMLInputElement).blur();
               } else if (e.key === "ArrowUp") {
                 e.preventDefault();
-                onChange(prevVal);
+                onChange(incVal);
               } else if (e.key === "ArrowDown") {
                 e.preventDefault();
-                onChange(nextVal);
+                onChange(decVal);
               }
             }}
             style={{
@@ -131,23 +127,23 @@ function DrumColumn({ label, value, max, min = 0, step = 1, pad = 2, onChange }:
           />
         </div>
 
-        {/* Bottom slot (next number) */}
+        {/* Bottom slot (decremented value) */}
         <button
           type="button"
           tabIndex={-1}
           className="drum-slot drum-slot-neighbor"
-          onClick={() => onChange(nextVal)}
-          title={`Set ${label} to ${String(nextVal).padStart(pad, "0")}`}
+          onClick={() => onChange(decVal)}
+          title={`Set ${label} to ${String(decVal).padStart(pad, "0")}`}
         >
-          {String(nextVal).padStart(pad, "0")}
+          {String(decVal).padStart(pad, "0")}
         </button>
       </div>
 
       <button
         type="button"
         className="drum-step-btn"
-        onClick={() => onChange(nextVal)}
-        aria-label={`Next ${label}`}
+        onClick={() => onChange(decVal)}
+        aria-label={`Decrease ${label}`}
       >
         <ChevronDown className="h-4 w-4" />
       </button>
@@ -162,35 +158,42 @@ export interface SamsungTimerValues {
   totalSeconds: number;
 }
 
-interface SamsungTimePickerProps {
+export interface SamsungTimePickerProps {
   mode: "countdown" | "timer" | "alarm";
-  // Countdown / Timer props
   timerValues?: SamsungTimerValues;
+  values?: SamsungTimerValues;
   onTimerChange?: (values: SamsungTimerValues) => void;
-  // Alarm props
-  alarmTime?: string; // "HH:MM:SS" or "HH:MM"
+  onChange?: (values: SamsungTimerValues) => void;
+  alarmTime?: string;
   onAlarmChange?: (timeStr: string) => void;
 }
 
 export function SamsungTimePicker({
   mode,
   timerValues,
+  values,
   onTimerChange,
+  onChange,
   alarmTime = "09:00:00",
   onAlarmChange,
 }: SamsungTimePickerProps) {
   const isCountdown = mode === "countdown" || mode === "timer";
 
-  // Countdown local state
-  const hours = timerValues?.hours ?? 0;
-  const minutes = timerValues?.minutes ?? 25;
-  const seconds = timerValues?.seconds ?? 0;
+  const resolvedTimerValues = timerValues ?? values ?? {
+    hours: 0,
+    minutes: 25,
+    seconds: 0,
+    totalSeconds: 1500,
+  };
+  const fireTimerChange = onTimerChange ?? onChange;
 
-  // Alarm local state
+  const hours = resolvedTimerValues.hours;
+  const minutes = resolvedTimerValues.minutes;
+  const seconds = resolvedTimerValues.seconds;
+
   const [use12Hour, setUse12Hour] = useState(false);
   const [alarmPeriod, setAlarmPeriod] = useState<"AM" | "PM">("AM");
 
-  // Parse initial alarmTime
   const parseAlarm = useCallback((str: string) => {
     const parts = str.split(":").map((n) => Number(n) || 0);
     return {
@@ -227,7 +230,7 @@ export function SamsungTimePicker({
 
   const handleCountdownChange = (newH: number, newM: number, newS: number) => {
     const total = newH * 3600 + newM * 60 + newS;
-    onTimerChange?.({
+    fireTimerChange?.({
       hours: newH,
       minutes: newM,
       seconds: newS,
@@ -244,7 +247,6 @@ export function SamsungTimePicker({
     handleCountdownChange(h, m, s);
   };
 
-  // 12-Hour Alarm Handlers
   const display12H = alarmH % 12 === 0 ? 12 : alarmH % 12;
 
   const handle12HourChange = (new12H: number) => {
@@ -299,7 +301,7 @@ export function SamsungTimePicker({
           />
         </div>
 
-        {/* Quick-Add Chips — Countdown Mode */}
+        {/* Quick-Add Chips */}
         <div className="samsung-quick-chips">
           <button
             type="button"
@@ -362,7 +364,6 @@ export function SamsungTimePicker({
 
   return (
     <div className="samsung-picker-container">
-      {/* 12H vs 24H Toggle */}
       <div className="samsung-format-bar">
         <div className="format-toggle-group">
           <button
