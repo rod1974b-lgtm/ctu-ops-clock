@@ -59,154 +59,149 @@ export function useMissions() {
   const [missions, setMissions] = useState<Mission[]>([]);
   const [customPresets, setCustomPresets] = useState<Preset[]>([]);
   const [audio, setAudio] = useState<AudioState>(defaultAudioState);
-  const [loaded, setLoaded] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
+
   const engine = useRef<CTUAudio | null>(null);
   const beat = useRef(0);
-  const lastSecond = useRef(0);
+  const workerRef = useRef<Worker | null>(null);
 
-  // Helper to ensure audio engine is initialized and unlocked
   const ensureAudio = useCallback(async () => {
     if (!engine.current) {
       engine.current = new CTUAudio();
     }
-    try {
-      await engine.current.unlock();
-    } catch {
-      /* Audio context blocked until interaction */
-    }
+    await engine.current.unlock();
     return engine.current;
   }, []);
 
-  // Global user gesture listener: unlocks Web Audio & pre-warms media on first tap
   useEffect(() => {
-    const handleGesture = () => {
+    const handleFirstGesture = () => {
       void ensureAudio();
+      window.removeEventListener("pointerdown", handleFirstGesture);
+      window.removeEventListener("keydown", handleFirstGesture);
     };
-
-    window.addEventListener("pointerdown", handleGesture, { once: true, passive: true });
-    window.addEventListener("keydown", handleGesture, { once: true, passive: true });
-
+    window.addEventListener("pointerdown", handleFirstGesture, { once: true });
+    window.addEventListener("keydown", handleFirstGesture, { once: true });
     return () => {
-      window.removeEventListener("pointerdown", handleGesture);
-      window.removeEventListener("keydown", handleGesture);
+      window.removeEventListener("pointerdown", handleFirstGesture);
+      window.removeEventListener("keydown", handleFirstGesture);
     };
   }, [ensureAudio]);
 
-  // Load from localStorage + start drift-free ticker (browser only)
   useEffect(() => {
-    setNow(Date.now());
+    if (typeof window === "undefined") return;
     try {
-      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null");
-      if (saved) {
-        if (Array.isArray(saved.missions)) setMissions(saved.missions.filter(isMission));
-        if (Array.isArray(saved.presets)) setCustomPresets(saved.presets);
-        if (saved.audio) {
-          setAudio({
-            ...defaultAudioState,
-            ...saved.audio,
-            enabled: saved.audio.enabled ?? true,
-          });
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed.missions)) {
+          setMissions(parsed.missions.filter(isMission));
+        }
+        if (Array.isArray(parsed.presets)) {
+          setCustomPresets(parsed.presets);
+        }
+        if (parsed.audio && typeof parsed.audio === "object") {
+          setAudio((prev) => ({ ...prev, ...parsed.audio }));
         }
       }
     } catch {
-      /* fresh terminal */
+      // Ignore corrupted cache
     }
-    setLoaded(true);
-
-    let worker: Worker | undefined;
-    let url: string | undefined;
-    let fallback: ReturnType<typeof setInterval> | undefined;
-    const tick = () => setNow(Date.now());
-
-    try {
-      url = URL.createObjectURL(
-        new Blob(["setInterval(() => postMessage(Date.now()), 250);"], {
-          type: "text/javascript",
-        }),
-      );
-      worker = new Worker(url);
-      worker.onmessage = tick;
-      worker.onerror = () => {
-        worker?.terminate();
-        if (!fallback) fallback = setInterval(tick, 250);
-      };
-    } catch {
-      fallback = setInterval(tick, 250);
-    }
-
-    document.addEventListener("visibilitychange", tick);
-    window.addEventListener("focus", tick);
-
-    return () => {
-      worker?.terminate();
-      if (url) URL.revokeObjectURL(url);
-      if (fallback) clearInterval(fallback);
-      document.removeEventListener("visibilitychange", tick);
-      window.removeEventListener("focus", tick);
-      engine.current?.close();
-    };
+    setNow(Date.now());
+    setHydrated(true);
   }, []);
 
-  // Persist
   useEffect(() => {
-    if (!loaded) return;
+    if (!hydrated || typeof window === "undefined") return;
     try {
       localStorage.setItem(
         STORAGE_KEY,
         JSON.stringify({ missions, presets: customPresets, audio }),
       );
     } catch {
-      /* storage unavailable */
+      // Storage quota exceeded
     }
-  }, [missions, customPresets, audio, loaded]);
+  }, [missions, customPresets, audio, hydrated]);
 
-  // Expire missions into CRISIS (At Zero)
   useEffect(() => {
-    if (!now) return;
-    setMissions((current) => {
-      const needsCrisis = current.some((m) => m.status === "ACTIVE" && m.endsAt <= now);
-      if (!needsCrisis) return current;
+    if (typeof window === "undefined") return;
 
-      // When hitting Zero, immediately trigger the At Zero theme
-      if (audio.enabled) {
-        void ensureAudio().then((eng) => eng.playAtZero(audio.crisisVolume));
+    let fallbackInterval: number | null = null;
+    const code = `
+      self.onmessage = function(e) {
+        if (e.data === 'start') {
+          setInterval(function() { self.postMessage('tick'); }, 250);
+        }
+      };
+    `;
+    const blob = new Blob([code], { type: "application/javascript" });
+    const url = URL.createObjectURL(blob);
+
+    try {
+      const w = new Worker(url);
+      workerRef.current = w;
+      w.onmessage = () => {
+        setNow(Date.now());
+      };
+      w.postMessage("start");
+    } catch {
+      fallbackInterval = window.setInterval(() => {
+        setNow(Date.now());
+      }, 250);
+    }
+
+    return () => {
+      if (workerRef.current) {
+        workerRef.current.terminate();
+        workerRef.current = null;
       }
+      if (fallbackInterval) {
+        clearInterval(fallbackInterval);
+      }
+      URL.revokeObjectURL(url);
+    };
+  }, []);
 
-      return current.map((m) =>
-        m.status === "ACTIVE" && m.endsAt <= now
-          ? { ...m, status: "CRISIS", remainingMs: 0 }
-          : m,
-      );
-    });
-  }, [now, audio.enabled, audio.crisisVolume, ensureAudio]);
-
-  // Audio heartbeat, fires precisely once per second
   useEffect(() => {
-    if (!now) return;
+    if (!missions.length || !now) return;
 
-    if (!audio.enabled) {
+    let changed = false;
+    const updated = missions.map((m) => {
+      if (m.status !== "ACTIVE") return m;
+      const rem = remainingMs(m, now);
+      if (rem <= 0) {
+        changed = true;
+        void ensureAudio().then((eng) => eng.playAtZero(audio.crisisVolume));
+        return {
+          ...m,
+          status: "CRISIS" as const,
+          remainingMs: 0,
+        };
+      }
+      return m;
+    });
+
+    if (changed) {
+      setMissions(updated);
+    }
+  }, [now, missions, audio.crisisVolume, ensureAudio]);
+
+  useEffect(() => {
+    if (!audio.enabled || !now) {
       engine.current?.stopAll();
       return;
     }
 
-    const sec = Math.floor(now / 1000);
-    if (sec === lastSecond.current) return;
-    lastSecond.current = sec;
-    beat.current += 1;
-
-    if (!engine.current) {
-      engine.current = new CTUAudio();
-    }
+    const currentSec = Math.floor(now / 1000);
+    if (currentSec === beat.current) return;
+    beat.current = currentSec;
 
     const settings = toSettings(audio);
 
-    // Crisis alert takes top priority: plays 24 At Zero theme
     if (missions.some((m) => m.status === "CRISIS")) {
       void ensureAudio().then((eng) => eng.tick(3, settings, beat.current));
       return;
     }
 
-    // Active mission ticking
     const active = missions.filter((m) => m.status === "ACTIVE");
     if (!active.length) {
       engine.current?.stopAll();
@@ -220,12 +215,10 @@ export function useMissions() {
 
   const arm = useCallback(
     (opts: { title: string; kind: "timer" | "alarm"; durationMs: number; alarmTime?: string }) => {
-      // User gesture: wake audio and chirp confirmation
       void ensureAudio().then((eng) => eng.chirp(0.6));
 
       const at = Date.now();
-      const endsAt =
-        opts.kind === "alarm" && opts.alarmTime ? nextAlarm(opts.alarmTime, at) : at + opts.durationMs;
+      const endsAt = at + opts.durationMs;
       const mission: Mission = {
         id: crypto.randomUUID(),
         title: opts.title,
@@ -244,51 +237,77 @@ export function useMissions() {
 
   const control = useCallback(
     (id: string, action: "start" | "pause" | "reset" | "stop") => {
-      void ensureAudio();
+      void ensureAudio().then((eng) => eng.chirp(0.5));
       const at = Date.now();
-      setMissions((items) => {
-        const next = items.map((m) => {
+
+      setMissions((items) =>
+        items.map((m) => {
           if (m.id !== id) return m;
-          if (action === "start") {
-            const endsAt = at + (m.remainingMs > 0 ? m.remainingMs : m.durationMs);
-            return { ...m, status: "ACTIVE", endsAt, remainingMs: endsAt - at };
-          }
+
           if (action === "pause") {
-            const rem = Math.max(0, m.endsAt - at);
-            return { ...m, status: "PAUSED", remainingMs: rem };
+            const rem = remainingMs(m, at);
+            return {
+              ...m,
+              status: "PAUSED",
+              remainingMs: rem,
+              remaining: rem,
+            };
           }
+
+          if (action === "start") {
+            const rem = m.remainingMs ?? m.durationMs;
+            return {
+              ...m,
+              status: "ACTIVE",
+              endsAt: at + rem,
+              remainingMs: rem,
+            };
+          }
+
           if (action === "reset") {
             return {
               ...m,
-              status: "STOPPED",
-              remainingMs: m.durationMs,
+              status: "PAUSED",
               endsAt: at + m.durationMs,
+              remainingMs: m.durationMs,
+              remaining: m.durationMs,
             };
           }
+
           if (action === "stop") {
-            return { ...m, status: "STOPPED", remainingMs: 0 };
+            return {
+              ...m,
+              status: "STOPPED",
+              remainingMs: 0,
+            };
           }
+
           return m;
+        }),
+      );
+
+      setTimeout(() => {
+        setMissions((curr) => {
+          if (!curr.some((m) => m.status === "CRISIS")) {
+            engine.current?.stopAtZero();
+          }
+          return curr;
         });
-
-        // If no more missions in CRISIS, stop the Zero theme immediately
-        const stillInCrisis = next.some((m) => m.status === "CRISIS");
-        if (!stillInCrisis) {
-          engine.current?.stopAtZero();
-        }
-
-        return next;
-      });
+      }, 50);
     },
     [ensureAudio],
   );
 
   const snooze = useCallback(
     (id: string) => {
-      void ensureAudio();
+      void ensureAudio().then((eng) => {
+        eng.chirp(0.8);
+        eng.stopAtZero();
+      });
+
       const at = Date.now();
-      setMissions((items) => {
-        const next = items.map((m) => {
+      setMissions((items) =>
+        items.map((m) => {
           if (m.id !== id) return m;
           const endsAt = at + audio.snoozeMs;
           return {
@@ -297,16 +316,8 @@ export function useMissions() {
             endsAt,
             remainingMs: audio.snoozeMs,
           };
-        });
-
-        // Silence Zero theme on snooze
-        const stillInCrisis = next.some((m) => m.status === "CRISIS");
-        if (!stillInCrisis) {
-          engine.current?.stopAtZero();
-        }
-
-        return next;
-      });
+        }),
+      );
     },
     [audio.snoozeMs, ensureAudio],
   );
@@ -314,8 +325,7 @@ export function useMissions() {
   const remove = useCallback((id: string) => {
     setMissions((items) => {
       const next = items.filter((m) => m.id !== id);
-      const stillInCrisis = next.some((m) => m.status === "CRISIS");
-      if (!stillInCrisis) {
+      if (!next.some((m) => m.status === "CRISIS")) {
         engine.current?.stopAtZero();
       }
       return next;
@@ -329,63 +339,62 @@ export function useMissions() {
   }, []);
 
   const saveCustomPreset = useCallback(
-    (preset: { name: string; durationMs: number; description: string }) => {
-      const p: Preset = {
+    (name: string, durationMs: number, description?: string) => {
+      const preset: Preset = {
         id: `custom-${Date.now()}`,
-        name: preset.name,
-        durationMs: preset.durationMs,
-        description: preset.description,
-        isCustom: true,
+        name,
+        durationMs,
+        description: description || "Custom Tactical Preset",
       };
-      setCustomPresets((prev) => [...prev, p]);
+      setCustomPresets((prev) => [...prev, preset]);
     },
     [],
   );
 
-  const setAudioVolume = useCallback((bus: "ambient" | "crisis", val: number) => {
-    const clamped = Math.max(0, Math.min(1, val));
-    setAudio((a) =>
-      bus === "ambient" ? { ...a, ambientVolume: clamped } : { ...a, crisisVolume: clamped },
-    );
+  const setAudioVolume = useCallback((val: number) => {
+    setAudio((prev) => ({
+      ...prev,
+      ambientVolume: val,
+      crisisVolume: val,
+    }));
   }, []);
 
-  const setAudioWindow = useCallback((windowSec: number) => {
-    setAudio((a) => ({ ...a, countdownWindow: windowSec }));
+  const setAudioWindow = useCallback((seconds: number) => {
+    setAudio((prev) => ({ ...prev, countdownWindow: seconds }));
   }, []);
 
   const setSnoozeDuration = useCallback((minutes: number) => {
-    setAudio((a) => ({ ...a, snoozeMs: minutes * 60000 }));
+    setAudio((prev) => ({ ...prev, snoozeMs: minutes * 60000 }));
   }, []);
 
   const setPhoneAlerts = useCallback((enabled: boolean) => {
-    setAudio((a) => ({ ...a, phoneAlerts: enabled }));
+    setAudio((prev) => ({ ...prev, phoneAlerts: enabled }));
   }, []);
 
   const toggleAudio = useCallback(() => {
-    void ensureAudio();
-    setAudio((a) => {
-      const nextEnabled = !a.enabled;
+    setAudio((prev) => {
+      const nextEnabled = !prev.enabled;
       if (!nextEnabled) {
         engine.current?.stopAll();
+      } else {
+        void ensureAudio();
       }
-      return { ...a, enabled: nextEnabled };
+      return { ...prev, enabled: nextEnabled };
     });
   }, [ensureAudio]);
 
   const testAlert = useCallback(() => {
     void ensureAudio().then((eng) => {
       eng.playAtZero(audio.crisisVolume);
-      // Automatically stop test blast after 5 seconds
-      setTimeout(() => {
-        eng.stopAtZero();
-      }, 5000);
+      setTimeout(() => eng.stopAtZero(), 5000);
     });
   }, [audio.crisisVolume, ensureAudio]);
 
+  const presets = [...protocols, ...customPresets];
+
   return {
-    now,
     missions,
-    presets: [...protocols, ...customPresets],
+    presets,
     audio,
     arm,
     control,
@@ -399,5 +408,6 @@ export function useMissions() {
     setPhoneAlerts,
     toggleAudio,
     testAlert,
+    now,
   };
 }
