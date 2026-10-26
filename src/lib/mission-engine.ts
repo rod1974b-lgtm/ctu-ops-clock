@@ -6,8 +6,12 @@ export interface Mission {
   title: string;
   kind: "timer" | "alarm";
   durationMs: number;
+  duration?: number;
   deadline: number;
+  endsAt?: number;
   pausedRemaining?: number;
+  remaining?: number;
+  remainingMs?: number;
   status: MissionStatus;
   pinned?: boolean;
   alarmTime?: string;
@@ -16,10 +20,12 @@ export interface Mission {
 
 export interface Preset {
   id: string;
-  title: string;
-  kind: "timer" | "alarm";
+  title?: string;
+  name?: string;
+  kind?: "timer" | "alarm";
   durationMs: number;
   alarmTime?: string;
+  description?: string;
 }
 
 export const PROTOCOLS: Preset[] = [
@@ -49,11 +55,20 @@ export const PROTOCOLS: Preset[] = [
   },
 ];
 
+export const protocols = PROTOCOLS;
+
 export function remainingMs(mission: Mission, now = Date.now()): number {
   if (mission.status === "PAUSED") {
-    return Math.max(0, mission.pausedRemaining ?? 0);
+    return Math.max(
+      0,
+      mission.pausedRemaining ??
+        mission.remaining ??
+        mission.remainingMs ??
+        0,
+    );
   }
-  return Math.max(0, mission.deadline - now);
+  const target = mission.deadline ?? mission.endsAt ?? now;
+  return Math.max(0, target - now);
 }
 
 export function nextAlarm(alarmTime: string, now = Date.now()): number {
