@@ -1,6 +1,6 @@
 // src/routes/index.tsx
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Bell,
   Globe,
@@ -20,6 +20,7 @@ import {
   VolumeX,
   X,
   Zap,
+  Film,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CTUDigits } from "@/components/ctu-digits";
@@ -76,6 +77,8 @@ function getTzOffsetMs(date: Date, tz: string): number {
   }
 }
 
+type SurveillanceChannel = "auto" | "opening" | "countdown" | "closing" | "sat";
+
 function CTUTerminal() {
   const {
     missions,
@@ -99,7 +102,10 @@ function CTUTerminal() {
   const [timeZone, setTimeZone] = useState<string>("Asia/Bangkok");
   const [fullscreen, setFullscreen] = useState<boolean>(false);
   const [wakeLock, setWakeLock] = useState<WakeLockSentinel | null>(null);
-  const [forceCountdownFeed, setForceCountdownFeed] = useState<boolean>(false);
+
+  // Surveillance feed channel state
+  const [activeChannel, setActiveChannel] = useState<SurveillanceChannel>("auto");
+  const videoRef = useRef<HTMLVideoElement | null>(null);
 
   // Arm modal state
   const [addOpen, setAddOpen] = useState<boolean>(false);
@@ -136,69 +142,86 @@ function CTUTerminal() {
         JSON.stringify({ format24, stealth, timeZone }),
       );
     } catch {
-      /* ignore storage write error */
+      /* ignore */
     }
   }, [format24, stealth, timeZone]);
 
-  // Derived tactical status
-  const activeFocus = useMemo(() => focusMission(missions, now), [missions, now]);
-  const crisis = useMemo(() => missions.some((m) => m.status === "CRISIS"), [missions]);
+  // Request WakeLock to keep screen on (critical for operations)
+  useEffect(() => {
+    if ("wakeLock" in navigator) {
+      navigator.wakeLock
+        .request("screen")
+        .then((sentinel) => setWakeLock(sentinel))
+        .catch(() => {});
+    }
+    return () => {
+      wakeLock?.release().catch(() => {});
+    };
+  }, []);
 
-  const activeMissions = useMemo(
-    () => missions.filter((m) => m.status === "ACTIVE"),
+  // Current active focus mission
+  const activeFocus = useMemo(() => focusMission(missions, now), [missions, now]);
+
+  const crisis = useMemo(
+    () => missions.some((m) => m.status === "CRISIS"),
     [missions],
   );
 
   const closestRemaining = useMemo(() => {
-    if (!activeMissions.length) return Infinity;
-    return Math.min(...activeMissions.map((m) => remainingMs(m, now)));
-  }, [activeMissions, now]);
+    if (!activeFocus) return Infinity;
+    return remainingMs(activeFocus, now);
+  }, [activeFocus, now]);
 
-  const heightened = useMemo(
-    () => closestRemaining <= 5 * 60 * 1000 && closestRemaining > 0,
-    [closestRemaining],
-  );
+  const threatState = useMemo<"nominal" | "warning" | "crisis">(() => {
+    if (crisis) return "crisis";
+    if (closestRemaining <= 300000 && closestRemaining > 0) return "warning";
+    return "nominal";
+  }, [crisis, closestRemaining]);
 
   const inCountdownWindow = useMemo(
     () => closestRemaining <= audio.countdownWindow * 1000 && closestRemaining > 0,
     [closestRemaining, audio.countdownWindow],
   );
 
-  const missionCount = missions.length;
-  const activeCount = activeMissions.length;
-
-  // Local Mission Clock digits
-  const localClock = useMemo(() => {
-    const ts = now || Date.now();
-    try {
-      const date = new Date(ts);
-      const parts = new Intl.DateTimeFormat("en-US", {
-        timeZone,
-        hour12: !format24,
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-      }).formatToParts(date);
-
-      const h = parts.find((p) => p.type === "hour")?.value || "00";
-      const m = parts.find((p) => p.type === "minute")?.value || "00";
-      const s = parts.find((p) => p.type === "second")?.value || "00";
-      const p = parts.find((p) => p.type === "dayPeriod")?.value || "";
-      return {
-        digits: `${h}:${m}:${s}`,
-        period: format24 ? "" : p.toUpperCase(),
-      };
-    } catch {
-      return {
-        digits: clockParts(ts),
-        period: "",
-      };
+  // Resolved channel considering automatic operational triggers
+  const resolvedChannel = useMemo<"opening" | "countdown" | "closing" | "sat">(() => {
+    if (activeChannel !== "auto") return activeChannel;
+    if (crisis) return "closing";
+    if (inCountdownWindow) return "countdown";
+    if (activeFocus && activeFocus.status === "ACTIVE") {
+      const elapsed = now - (activeFocus.startedAt || 0);
+      if (elapsed >= 0 && elapsed <= 35000) return "opening";
     }
-  }, [now, format24, timeZone]);
+    return "sat";
+  }, [activeChannel, crisis, inCountdownWindow, activeFocus, now]);
+
+  // Local Theater Clock
+  const localClock = useMemo(() => {
+    const tzOffset = getTzOffsetMs(new Date(now), timeZone);
+    const tzDate = new Date(now + tzOffset);
+
+    let h = tzDate.getUTCHours();
+    const m = String(tzDate.getUTCMinutes()).padStart(2, "0");
+    const s = String(tzDate.getUTCSeconds()).padStart(2, "0");
+
+    let period = "";
+    if (!format24) {
+      period = h >= 12 ? "PM" : "AM";
+      h = h % 12 || 12;
+    }
+    const hStr = String(h).padStart(2, "0");
+    return {
+      digits: `${hStr}:${m}:${s}`,
+      period,
+      h: hStr,
+      m,
+      s,
+    };
+  }, [now, timeZone, format24]);
 
   // Zulu UTC Clock
   const zuluClock = useMemo(() => {
-    const d = new Date(now || Date.now());
+    const d = new Date(now);
     const h = String(d.getUTCHours()).padStart(2, "0");
     const m = String(d.getUTCMinutes()).padStart(2, "0");
     const s = String(d.getUTCSeconds()).padStart(2, "0");
@@ -212,14 +235,24 @@ function CTUTerminal() {
     return clockParts(rem);
   }, [activeFocus, now]);
 
-  // Active Operation progress %
   const focusProgress = useMemo(() => {
-    if (!activeFocus || !activeFocus.durationMs || activeFocus.durationMs <= 0) return 0;
+    if (!activeFocus || !activeFocus.durationMs || activeFocus.durationMs <= 0)
+      return 0;
     const rem = remainingMs(activeFocus, now);
     return Math.max(0, Math.min(100, 100 - (rem / activeFocus.durationMs) * 100));
   }, [activeFocus, now]);
 
-  // Arm submission handler
+  // Fullscreen toggle
+  const toggleFullscreen = useCallback(() => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(() => {});
+      setFullscreen(true);
+    } else {
+      document.exitFullscreen().catch(() => {});
+      setFullscreen(false);
+    }
+  }, []);
+
   const handleArmSubmit = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
@@ -236,184 +269,204 @@ function CTUTerminal() {
           durationMs,
         });
       } else {
-        const at = Date.now();
-        const tzOffset = getTzOffsetMs(new Date(at), timeZone);
-        const localNow = at + tzOffset;
-        const targetLocal = nextAlarm(alarmTime, localNow);
-        const durationMs = Math.max(1000, targetLocal - localNow);
+        const parts = alarmTime.split(":").map(Number);
+        const alarmH = parts[0] ?? 9;
+        const alarmM = parts[1] ?? 0;
+        const alarmS = parts[2] ?? 0;
+
+        const tzOffset = getTzOffsetMs(new Date(now), timeZone);
+        const theaterNow = now + tzOffset;
+        const targetTheaterTime = nextAlarm(
+          `${String(alarmH).padStart(2, "0")}:${String(alarmM).padStart(2, "0")}:${String(alarmS).padStart(2, "0")}`,
+          theaterNow,
+        );
+
+        const durationMs = Math.max(1000, targetTheaterTime - theaterNow);
 
         arm({
           title: finalTitle,
           kind: "alarm",
-          durationMs,
           alarmTime,
+          durationMs,
         });
       }
 
-      setTitle("");
       setAddOpen(false);
+      setTitle("");
+      // When newly arming, auto channel switches smoothly to Opening
+      if (activeChannel === "auto") {
+        setActiveChannel("opening");
+      }
     },
-    [title, kind, timerValues, alarmTime, arm, timeZone],
+    [kind, title, timerValues, alarmTime, arm, now, timeZone, activeChannel],
   );
 
-  const handleFullscreen = async () => {
-    try {
-      if (!document.fullscreenElement) {
-        await document.documentElement.requestFullscreen();
-        setFullscreen(true);
-      } else {
-        await document.exitFullscreen();
-        setFullscreen(false);
-      }
-    } catch {
-      /* fullscreen blocked */
+  const threatClass =
+    threatState === "crisis"
+      ? "threat-crisis"
+      : threatState === "warning"
+        ? "threat-warning"
+        : stealth
+          ? "stealth-state"
+          : "amber-state";
+
+  // Channel-specific metadata
+  const channelMeta = useMemo(() => {
+    switch (resolvedChannel) {
+      case "opening":
+        return {
+          title: "CAM-01 · 24 OPENING PROTOCOL",
+          status: "INFILTRATION / MISSION INITIATION",
+          footer: "SOURCE: 24 OPENING · SYNC AUDIO",
+          src: "/24 Opening.mp4",
+          isVideo: true,
+        };
+      case "countdown":
+        return {
+          title: "CAM-24 · 24 COUNTDOWN TITLES",
+          status: "CRITICAL COUNTDOWN APPROACH",
+          footer: "SOURCE: 24 COUNTDOWN · SYNC AUDIO",
+          src: "/24 Countdown.mp4",
+          isVideo: true,
+        };
+      case "closing":
+        return {
+          title: "CAM-99 · 24 EPISODE CLOSING",
+          status: crisis ? "24 AT ZERO · CODE RED" : "OPERATION STAND-DOWN",
+          footer: "SOURCE: 24 CLOSING · SYNC AUDIO",
+          src: "/24 Closing.mp4",
+          isVideo: true,
+        };
+      case "sat":
+      default:
+        return {
+          title: "SAT-LINK 04 · SECTOR 7 RECON",
+          status: "SIGNAL: 98.4% NOMINAL",
+          footer: "GRID: 34.0522° N, 118.2437° W",
+          src: surveillance,
+          isVideo: false,
+        };
     }
-  };
-
-  const handleWakeLock = async () => {
-    if (wakeLock) {
-      await wakeLock.release();
-      setWakeLock(null);
-    } else if ("wakeLock" in navigator) {
-      try {
-        const lock = await navigator.wakeLock.request("screen");
-        setWakeLock(lock);
-        lock.addEventListener("release", () => setWakeLock(null));
-      } catch {
-        /* wake lock rejected */
-      }
-    }
-  };
-
-  const threatClass = crisis
-    ? "crisis-state"
-    : heightened
-      ? "heightened-state"
-      : stealth
-        ? "stealth-state"
-        : "amber-state";
-
-  const showCountdownVideo = inCountdownWindow || forceCountdownFeed || crisis;
+  }, [resolvedChannel, crisis]);
 
   return (
     <div className={`ctu-terminal min-h-screen ${threatClass}`}>
-      {/* Header telemetry bar */}
-      <header className="terminal-header">
-        <div className="ctu-brand">
-          <div className="brand-logo">24</div>
-          <div className="brand-telemetry">
-            <div className="brand-title">CTU · COUNTER TERRORIST UNIT</div>
-            <div className="brand-sub">TACTICAL OPERATIONS COMMAND · DEFCON 2</div>
+      {/* Top Banner / Global CTU Header */}
+      <header className="ctu-header">
+        <div className="header-left">
+          <div className="ctu-badge-giant font-title">24</div>
+          <div className="ctu-meta-block">
+            <span className="ctu-org">CTU · COUNTER TERRORIST UNIT</span>
+            <span className="ctu-subhead">
+              TACTICAL OPERATIONS COMMAND · DIVISION 1
+            </span>
           </div>
         </div>
 
-        <div className="header-clocks">
-          <div className="zulu-box">
-            <span className="telemetry-label">ZULU SYNC</span>
-            <span className="zulu-digits">{zuluClock}</span>
+        <div className="header-right">
+          {/* Audio State Toggle */}
+          <button
+            type="button"
+            onClick={toggleAudio}
+            className={`tactical-pill flex items-center gap-1.5 ${
+              audio.enabled ? "tactical-pill-active" : ""
+            }`}
+            title="Toggle synthesized audio output"
+          >
+            {audio.enabled ? <Volume2 size={13} /> : <VolumeX size={13} />}
+            <span>AUDIO: {audio.enabled ? "ACTIVE" : "MUTED"}</span>
+          </button>
+
+          {/* Zulu Time Pill */}
+          <div className="tactical-pill hidden sm:flex items-center gap-1.5">
+            <Globe size={13} />
+            <span>ZULU: {zuluClock}</span>
           </div>
 
-          <div className="header-controls">
-            <button
-              type="button"
-              className="ctrl-btn"
-              onClick={() => setFormat24((v) => !v)}
-              title="Toggle 24H / 12H display"
-            >
-              {format24 ? "24H" : "12H"}
-            </button>
-            <button
-              type="button"
-              className="ctrl-btn"
-              onClick={() => setStealth((v) => !v)}
-              title="Toggle Night Ops stealth phosphor"
-            >
-              <Moon size={13} />
-            </button>
-            <button
-              type="button"
-              className="ctrl-btn"
-              onClick={handleFullscreen}
-              title="Toggle Fullscreen"
-            >
-              {fullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
-            </button>
-            <button
-              type="button"
-              className={`ctrl-btn ${wakeLock ? "active" : ""}`}
-              onClick={handleWakeLock}
-              title="Toggle Screen Wake Lock"
-            >
-              <ShieldCheck size={13} />
-            </button>
-          </div>
+          {/* Stealth Mode */}
+          <button
+            type="button"
+            onClick={() => setStealth((v) => !v)}
+            className={`tactical-pill ${stealth ? "tactical-pill-active" : ""}`}
+            title="Toggle Night Phosphor Stealth Mode"
+          >
+            <Moon size={13} />
+            <span className="hidden md:inline">STEALTH</span>
+          </button>
+
+          {/* Fullscreen */}
+          <button
+            type="button"
+            onClick={toggleFullscreen}
+            className="tactical-pill"
+            title="Toggle Fullscreen"
+          >
+            {fullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+          </button>
         </div>
       </header>
 
-      {/* Main Command Deck Grid */}
-      <main className="operations-layout">
-        {/* Primary Stage Column */}
+      {/* Main Terminal Viewport */}
+      <main className="terminal-body operations-layout">
+        {/* Left Column: Primary Operation Center */}
         <section className="primary-column">
-          <div className="unified-stage-panel">
-            {/* Stage Header */}
-            <div className="stage-top-bar flex items-center justify-between flex-wrap gap-2">
+          {/* THE UNIFIED COMMAND DECK: Local Mission Clock + Active Operation Countdown */}
+          <section className="terminal-panel unified-command-stage">
+            <div className="panel-heading flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <span className="live-indicator-dot" />
-                <span className="stage-title">PRIMARY OPERATIONS COMMAND DECK</span>
+                <span className="live-indicator" />
+                <span className="tracking-widest">
+                  PRIMARY TACTICAL DISPLAY · REAL-TIME STAGE
+                </span>
               </div>
               <div className="flex items-center gap-2">
+                {/* 12h/24h toggle */}
                 <button
                   type="button"
-                  onClick={toggleAudio}
-                  className={`time-mode-btn flex items-center gap-1.5 ${
-                    audio.enabled
-                      ? "border-[var(--signal)] text-[var(--signal)]"
-                      : "text-muted-foreground opacity-80"
-                  }`}
+                  onClick={() => setFormat24((v) => !v)}
+                  className="stage-btn-mini"
+                  title="Toggle 12H / 24H Format"
                 >
-                  {audio.enabled ? <Volume2 size={13} /> : <VolumeX size={13} />}
-                  <span>{audio.enabled ? "AUDIO ON" : "AUDIO MUTED"}</span>
+                  {format24 ? "24H FORMAT" : "12H FORMAT"}
                 </button>
-                <div className="flex items-center gap-1 bg-black/60 px-2 py-1 border border-border/50 text-[10px] tracking-wider">
-                  <Globe size={11} className="text-[var(--signal)]" />
+              </div>
+            </div>
+
+            <div className="stage-dual-grid">
+              {/* Sector A: Local Mission Time */}
+              <div className="stage-sector stage-sector-clock">
+                <div className="sector-tag flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <Globe size={11} />
+                    LOCAL MISSION TIME
+                  </span>
+
+                  {/* Theater selector */}
                   <select
                     value={timeZone}
                     onChange={(e) => setTimeZone(e.target.value)}
-                    className="bg-transparent text-[var(--signal)] outline-none cursor-pointer uppercase font-mono text-[10px]"
+                    className="stage-tz-select"
                   >
-                    {TIMEZONE_SECTORS.map((s) => (
-                      <option key={s.id} value={s.id} className="bg-black text-[var(--signal)]">
-                        {s.label}
+                    {TIMEZONE_SECTORS.map((sec) => (
+                      <option key={sec.id} value={sec.id}>
+                        {sec.label}
                       </option>
                     ))}
                   </select>
                 </div>
-              </div>
-            </div>
 
-            {/* Split Dual-Stage: Local Mission Clock + Active Operation */}
-            <div className="unified-stage-grid">
-              {/* Sector A: Local Mission Real-Time Clock */}
-              <div className="stage-sector stage-sector-local">
-                <div className="sector-tag flex items-center justify-between">
-                  <span className="flex items-center gap-1.5">
-                    <Globe size={12} className="text-[var(--signal)]" />
-                    <span>LOCAL MISSION TIME</span>
-                  </span>
-                  <span className="text-[10px] opacity-75">
-                    {timeZone.split("/")[1]?.replace("_", " ") ?? timeZone}{" "}
-                    {localClock.period ? `(${localClock.period})` : ""}
-                  </span>
+                <div className="stage-digits-container">
+                  <CTUDigits time={localClock.digits} size="xl" />
+                  {!format24 && (
+                    <span className="stage-ampm font-mono text-xs text-[var(--signal)] ml-2">
+                      {localClock.period}
+                    </span>
+                  )}
                 </div>
-                <div className="clock-viewport">
-                  <CTUDigits
-                    time={localClock.digits}
-                    className="mission-clock h-16 sm:h-20 lg:h-24"
-                  />
-                </div>
-                <div className="sector-telemetry">
-                  <span>STATUS: CONTINUOUS REAL-TIME LINK</span>
-                  <span className="accent">EVENTS OCCUR IN REAL TIME</span>
+
+                <div className="stage-meta-row flex justify-between text-[11px] font-mono text-[var(--signal)]/80 mt-1">
+                  <span>THEATER: {timeZone.split("/")[1]?.replace("_", " ") || "BANGKOK"}</span>
+                  <span>SYNC: REAL-TIME SECONDS</span>
                 </div>
               </div>
 
@@ -421,183 +474,191 @@ function CTUTerminal() {
               <div className="stage-sector stage-sector-operation">
                 <div className="sector-tag flex items-center justify-between">
                   <span className="flex items-center gap-1.5">
-                    <Timer size={12} className="text-[var(--signal)]" />
-                    <span>ACTIVE OPERATION FOCUS</span>
+                    <Shield size={11} />
+                    ACTIVE OPERATION COUNTDOWN
                   </span>
-                  {activeFocus && (
-                    <span className={`status-pill ${activeFocus.status.toLowerCase()}`}>
-                      {activeFocus.status}
-                    </span>
-                  )}
+                  <span className="text-[10px] text-[var(--signal)]">
+                    {activeFocus
+                      ? activeFocus.pinned
+                        ? "MANUAL PIN LOCK"
+                        : "CLOSEST THREAT"
+                      : "STANDBY"}
+                  </span>
                 </div>
 
-                <div className="clock-viewport">
-                  {activeFocus ? (
-                    <CTUDigits
-                      time={focusDigits}
-                      className="focus-clock h-16 sm:h-20 lg:h-24"
-                    />
+                <div className="stage-digits-container">
+                  <CTUDigits time={focusDigits} size="xl" />
+                </div>
+
+                <div className="stage-meta-row flex items-center justify-between text-[11px] font-mono text-[var(--signal)]/80 mt-1">
+                  <span className="truncate max-w-[200px]">
+                    {activeFocus ? activeFocus.title.toUpperCase() : "NO ACTIVE OPERATION"}
+                  </span>
+                  <span>
+                    {activeFocus
+                      ? activeFocus.kind === "alarm"
+                        ? `ALARM @ ${activeFocus.alarmTime || "--:--:--"}`
+                        : `${Math.round(focusProgress)}% COMPLETE`
+                      : "ALL SECTORS SECURE"}
+                  </span>
+                </div>
+
+                {/* Progress bar */}
+                <div className="stage-progress-bar mt-2">
+                  <div
+                    className="stage-progress-fill"
+                    style={{ width: `${focusProgress}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Stage Quick Controls */}
+            {activeFocus && (
+              <div className="stage-controls-bar flex items-center justify-between p-2 border-t border-[var(--border-amber)]">
+                <div className="flex items-center gap-2">
+                  {activeFocus.status === "ACTIVE" ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => control(activeFocus.id, "pause")}
+                      className="tactical-btn"
+                    >
+                      <Pause size={12} className="mr-1" /> PAUSE OPERATION
+                    </Button>
+                  ) : activeFocus.status === "PAUSED" ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => control(activeFocus.id, "start")}
+                      className="tactical-btn text-green-400"
+                    >
+                      <Play size={12} className="mr-1" /> RESUME OPERATION
+                    </Button>
                   ) : (
-                    <div className="standby-digits">00:00:00</div>
-                  )}
-                </div>
-
-                <div className="operation-meta">
-                  <div className="op-title-row">
-                    <span className="op-title">
-                      {activeFocus ? activeFocus.title : "NO ACTIVE OPERATION IN QUEUE"}
-                    </span>
-                    {activeFocus && (
-                      <button
-                        type="button"
-                        className={`pin-btn ${activeFocus.pinned ? "pinned" : ""}`}
-                        onClick={() => togglePin(activeFocus.id)}
-                        title="Pin this operation to maintain primary focus"
-                      >
-                        <Pin size={12} />
-                      </button>
-                    )}
-                  </div>
-
-                  {activeFocus && (
-                    <div className="progress-bar-rail">
-                      <div
-                        className="progress-bar-fill"
-                        style={{ width: `${focusProgress}%` }}
-                      />
-                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => snooze(activeFocus.id)}
+                      className="tactical-btn text-yellow-400"
+                    >
+                      <RotateCcw size={12} className="mr-1" /> SNOOZE (+9M)
+                    </Button>
                   )}
 
-                  {/* Operation Controls */}
-                  <div className="operation-controls">
-                    {activeFocus ? (
-                      <>
-                        {activeFocus.status === "ACTIVE" ? (
-                          <button
-                            type="button"
-                            className="control-btn pause"
-                            onClick={() => control(activeFocus.id, "pause")}
-                          >
-                            <Pause size={13} /> PAUSE
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            className="control-btn resume"
-                            onClick={() => control(activeFocus.id, "start")}
-                          >
-                            <Play size={13} /> RESUME
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          className="control-btn reset"
-                          onClick={() => control(activeFocus.id, "reset")}
-                        >
-                          <RotateCcw size={13} /> RESET
-                        </button>
-                        <button
-                          type="button"
-                          className="control-btn stop"
-                          onClick={() => control(activeFocus.id, "stop")}
-                        >
-                          <Square size={13} /> STOP
-                        </button>
-                        {activeFocus.status === "CRISIS" && (
-                          <button
-                            type="button"
-                            className="control-btn crisis-snooze"
-                            onClick={() => snooze(activeFocus.id)}
-                          >
-                            <Zap size={13} /> SNOOZE (
-                            {Math.floor(audio.snoozeMs / 60000)}M)
-                          </button>
-                        )}
-                      </>
-                    ) : (
-                      <Button
-                        type="button"
-                        className="arm-callout-btn"
-                        onClick={() => {
-                          setKind("timer");
-                          setAddOpen(true);
-                        }}
-                      >
-                        <Plus size={14} /> ARM OPERATION
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Stage Quick-Arm Protocol Presets */}
-            <div className="stage-presets-footer">
-              <div className="presets-label">QUICK-ARM PROTOCOLS:</div>
-              <div className="presets-row">
-                {presets.slice(0, 4).map((p) => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    className="preset-chip"
-                    onClick={() =>
-                      arm({
-                        title: p.name,
-                        kind: "timer",
-                        durationMs: p.durationMs,
-                      })
-                    }
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => control(activeFocus.id, "reset")}
+                    className="tactical-btn"
                   >
-                    <span className="preset-name">{p.name}</span>
-                    <span className="preset-dur">
-                      {Math.round(p.durationMs / 60000)}M
-                    </span>
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  className="preset-chip arm-more"
-                  onClick={() => setAddOpen(true)}
-                >
-                  <Plus size={12} /> CUSTOM ARM
-                </button>
+                    <RotateCcw size={12} className="mr-1" /> RESET
+                  </Button>
+
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => togglePin(activeFocus.id)}
+                    className={`tactical-btn ${activeFocus.pinned ? "text-amber-400" : ""}`}
+                  >
+                    <Pin size={12} className="mr-1" /> {activeFocus.pinned ? "PINNED" : "PIN"}
+                  </Button>
+                </div>
+
+                <div className="text-[11px] font-mono text-[var(--signal)]">
+                  STATUS: <strong>{activeFocus.status}</strong>
+                </div>
               </div>
+            )}
+          </section>
+
+          {/* Quick-Arm Tactical Presets */}
+          <section className="terminal-panel mt-3 presets-deck">
+            <div className="panel-heading flex items-center justify-between">
+              <span>QUICK-ARM PROTOCOLS</span>
+              <span className="text-[10px] text-neutral-400">ONE-TOUCH DEPLOYMENT</span>
             </div>
-          </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 p-2">
+              {presets.map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  onClick={() => {
+                    arm({
+                      title: preset.title,
+                      kind: preset.kind,
+                      durationMs: preset.durationMs,
+                    });
+                    if (activeChannel === "auto") {
+                      setActiveChannel("opening");
+                    }
+                  }}
+                  className="preset-tactical-tile p-2.5 text-left border border-[var(--border-amber)] hover:bg-[var(--border-amber)]/20 transition-colors"
+                >
+                  <div className="text-[10px] font-mono text-amber-500/80">
+                    {preset.kind === "alarm" ? "DAILY ALARM" : "COUNTDOWN"}
+                  </div>
+                  <div className="font-bold text-xs truncate text-[var(--signal)]">
+                    {preset.title}
+                  </div>
+                  <div className="text-[11px] font-mono text-neutral-300 mt-1">
+                    {preset.kind === "alarm"
+                      ? preset.alarmTime
+                      : `${Math.round(preset.durationMs / 60000)} MIN`}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </section>
 
           {/* Active Missions Queue */}
-          <section className="terminal-panel queue-panel mt-3">
-            <div className="panel-heading">
-              <span>TACTICAL OPERATIONS QUEUE ({missionCount})</span>
-              <span className="accent">{activeCount} ACTIVE DEPLOYMENTS</span>
+          <section className="terminal-panel mt-3 queue-deck">
+            <div className="panel-heading flex items-center justify-between">
+              <span>ACTIVE OPERATIONS QUEUE ({missions.length})</span>
+              <Button
+                size="sm"
+                onClick={() => setAddOpen(true)}
+                className="arm-action-btn flex items-center gap-1 text-xs"
+              >
+                <Plus size={13} /> ARM OPERATION
+              </Button>
             </div>
-            <div className="missions-queue-list">
+
+            <div className="queue-list p-2 space-y-2">
               {missions.length === 0 ? (
-                <div className="empty-queue-msg">
-                  ALL OPERATIONAL SECTORS QUIET · STANDING BY FOR MISSION DISPATCH
+                <div className="p-4 text-center text-xs font-mono text-neutral-400">
+                  NO ACTIVE MISSIONS IN THEATER. USE QUICK-ARM OR "ARM OPERATION".
                 </div>
               ) : (
                 missions.map((m) => {
                   const rem = remainingMs(m, now);
-                  const qDigits = clockParts(rem);
+                  const isCurrent = activeFocus?.id === m.id;
                   return (
                     <div
                       key={m.id}
-                      className={`queue-item-card ${m.status.toLowerCase()}`}
+                      className={`queue-item p-2 border ${
+                        isCurrent
+                          ? "border-[var(--signal)] bg-[var(--border-amber)]/10"
+                          : "border-neutral-800"
+                      } flex items-center justify-between`}
                     >
-                      <div className="queue-item-header">
-                        <div className="flex items-center gap-2">
-                          {m.kind === "alarm" ? <Bell size={13} /> : <Timer size={13} />}
-                          <span className="queue-item-title">{m.title}</span>
-                          {m.pinned && <Pin size={11} className="text-[var(--signal)]" />}
+                      <div className="flex items-center gap-2">
+                        {m.pinned && <Pin size={11} className="text-amber-400" />}
+                        <div>
+                          <div className="font-bold text-xs text-[var(--signal)]">
+                            {m.title}
+                          </div>
+                          <div className="text-[10px] font-mono text-neutral-400">
+                            {m.kind.toUpperCase()} · STATUS: {m.status}
+                          </div>
                         </div>
-                        <span className={`status-pill ${m.status.toLowerCase()}`}>
-                          {m.status}
-                        </span>
                       </div>
-                      <div className="queue-item-body">
-                        <div className="queue-digits">{qDigits}</div>
-                        <div className="queue-actions">
+
+                      <div className="flex items-center gap-3">
+                        <span className="font-mono text-sm text-[var(--signal)]">
+                          {clockParts(rem)}
+                        </span>
+                        <div className="flex items-center gap-1">
                           {m.status === "ACTIVE" ? (
                             <button
                               type="button"
@@ -615,13 +676,6 @@ function CTUTerminal() {
                               <Play size={12} />
                             </button>
                           )}
-                          <button
-                            type="button"
-                            className="q-act-btn"
-                            onClick={() => control(m.id, "reset")}
-                          >
-                            <RotateCcw size={12} />
-                          </button>
                           <button
                             type="button"
                             className="q-act-btn"
@@ -648,26 +702,38 @@ function CTUTerminal() {
 
         {/* Tactical Surveillance & Surveillance Column */}
         <aside className="secondary-column">
-          {/* Tactical Surveillance & 24 Countdown Feed */}
+          {/* Tactical Surveillance & 24 Video Feeds (Opening / Countdown / Closing / Sat) */}
           <section className="terminal-panel surveillance-panel">
-            <div className="panel-heading flex items-center justify-between">
-              <span>
-                {showCountdownVideo
-                  ? "24 COUNTDOWN MEDIA FEED"
-                  : "TACTICAL SURVEILLANCE FEED"}
-              </span>
-              <button
-                type="button"
-                onClick={() => setForceCountdownFeed((v) => !v)}
-                className="text-[10px] text-[var(--signal)] underline cursor-pointer"
-              >
-                {forceCountdownFeed ? "[SHOW SAT-FEED]" : "[SHOW 24 FEED]"}
-              </button>
+            <div className="panel-heading flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between">
+              <span className="truncate">{channelMeta.title}</span>
+              
+              {/* Surveillance Channel Switcher Chips */}
+              <div className="flex items-center gap-1 flex-wrap">
+                {(["auto", "opening", "countdown", "closing", "sat"] as const).map(
+                  (ch) => (
+                    <button
+                      key={ch}
+                      type="button"
+                      onClick={() => setActiveChannel(ch)}
+                      className={`text-[9px] font-mono px-1.5 py-0.5 border cursor-pointer uppercase transition-colors ${
+                        activeChannel === ch
+                          ? "bg-[var(--signal)] text-black border-[var(--signal)] font-bold"
+                          : "border-neutral-700 text-neutral-300 hover:border-amber-400"
+                      }`}
+                    >
+                      [{ch}]
+                    </button>
+                  ),
+                )}
+              </div>
             </div>
+
             <div className="surveillance-frame relative bg-black overflow-hidden h-[220px]">
-              {showCountdownVideo ? (
+              {channelMeta.isVideo ? (
                 <video
-                  src="/24 Countdown.mp4"
+                  ref={videoRef}
+                  key={channelMeta.src}
+                  src={channelMeta.src}
                   autoPlay
                   loop
                   muted={!audio.enabled}
@@ -676,37 +742,26 @@ function CTUTerminal() {
                 />
               ) : (
                 <img
-                  src={surveillance}
+                  src={channelMeta.src}
                   alt="Watercolor aerial surveillance of downtown Los Angeles"
                   className="surveillance-img w-full h-full object-cover opacity-75"
                 />
               )}
+
               <div className="surveillance-overlay pointer-events-none absolute inset-0">
-                <div className="cam-tag">
-                  {showCountdownVideo
-                    ? "CAM-24 · TITLES FEED"
-                    : "SAT-LINK 04 · SECTOR 7"}
-                </div>
+                <div className="cam-tag">{channelMeta.title}</div>
                 <div className="surveillance-reticle" />
                 <div className="surveillance-footer">
-                  <span>
-                    {showCountdownVideo
-                      ? "AUDIO: SYNCHRONIZED"
-                      : "GRID: 34.0522° N, 118.2437° W"}
-                  </span>
-                  <span className="accent">
-                    {crisis
-                      ? "24 AT ZERO · CODE RED"
-                      : showCountdownVideo
-                        ? "COUNTDOWN ACTIVE"
-                        : "SIGNAL: 98.4%"}
-                  </span>
+                  <span>{channelMeta.footer}</span>
+                  <span className="accent">{channelMeta.status}</span>
                 </div>
               </div>
             </div>
+
+            {/* Crisis Alert Banner */}
             {crisis && (
               <div className="p-2 bg-red-950/80 border-t border-red-500 text-red-200 text-xs font-mono flex items-center justify-between">
-                <span>🚨 24 AT ZERO · THEME ACTIVE</span>
+                <span>🚨 24 AT ZERO · CODE RED ACTIVE</span>
                 <button
                   type="button"
                   onClick={() => {
@@ -714,7 +769,7 @@ function CTUTerminal() {
                       .filter((m) => m.status === "CRISIS")
                       .forEach((m) => control(m.id, "stop"));
                   }}
-                  className="px-2 py-0.5 bg-red-700 text-white uppercase text-[10px] font-bold"
+                  className="px-2 py-0.5 bg-red-700 text-white uppercase text-[10px] font-bold cursor-pointer"
                 >
                   DISARM ALARM
                 </button>
@@ -722,65 +777,98 @@ function CTUTerminal() {
             )}
           </section>
 
-          {/* Quick Presets & Audio Controls */}
+          {/* Audio Matrix & Multimedia Controls */}
           <section className="terminal-panel audio-panel mt-3">
-            <div className="panel-heading">
-              <span>AUDIO MATRIX & CONTROLS</span>
+            <div className="panel-heading flex items-center justify-between">
+              <span>AUDIO MATRIX & MEDIA FEEDS</span>
               <button
                 type="button"
-                className="accent text-[11px] underline"
-                onClick={testAlert}
+                onClick={toggleAudio}
+                className="text-[10px] text-[var(--signal)] underline cursor-pointer"
               >
-                TEST ZERO THEME
+                {audio.enabled ? "MUTE" : "UNMUTE"}
               </button>
             </div>
-            <div className="p-3 text-xs font-mono space-y-3">
-              <div className="flex items-center justify-between">
-                <span>MASTER AUDIO:</span>
-                <button
-                  type="button"
-                  onClick={toggleAudio}
-                  className={`px-3 py-1 border text-[11px] ${
-                    audio.enabled
-                      ? "border-[var(--signal)] text-[var(--signal)]"
-                      : "border-neutral-700 text-neutral-500"
-                  }`}
-                >
-                  {audio.enabled ? "ENABLED" : "MUTED"}
-                </button>
+
+            <div className="p-3 space-y-3">
+              {/* Media Preview Triggers */}
+              <div>
+                <label className="text-[10px] font-mono text-neutral-300 block mb-1">
+                  TACTICAL SURVEILLANCE FEED TRIGGERS
+                </label>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveChannel("opening");
+                      if (!audio.enabled) toggleAudio();
+                    }}
+                    className="tactical-btn text-[10px] flex items-center justify-center gap-1 py-1"
+                  >
+                    <Film size={11} /> 24 OPENING
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveChannel("countdown");
+                      if (!audio.enabled) toggleAudio();
+                    }}
+                    className="tactical-btn text-[10px] flex items-center justify-center gap-1 py-1"
+                  >
+                    <Film size={11} /> 24 COUNTDOWN
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveChannel("closing");
+                      if (!audio.enabled) toggleAudio();
+                    }}
+                    className="tactical-btn text-[10px] flex items-center justify-center gap-1 py-1"
+                  >
+                    <Film size={11} /> 24 CLOSING
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => testAlert()}
+                    className="tactical-btn text-[10px] flex items-center justify-center gap-1 py-1 text-red-400"
+                  >
+                    <Zap size={11} /> ZERO THEME (MP3)
+                  </button>
+                </div>
               </div>
 
+              {/* Master Volume */}
               <div>
-                <div className="flex justify-between text-[11px] mb-1">
-                  <span>AT ZERO THEME VOLUME:</span>
-                  <span>{Math.round(audio.crisisVolume * 100)}%</span>
+                <div className="flex justify-between text-[11px] font-mono text-[var(--signal)] mb-1">
+                  <span>MASTER CRISIS VOLUME</span>
+                  <span>{audio.alarmVolume}%</span>
                 </div>
                 <input
                   type="range"
                   min="0"
-                  max="1"
-                  step="0.05"
-                  value={audio.crisisVolume}
+                  max="100"
+                  value={audio.alarmVolume}
                   onChange={(e) => setAudioVolume(Number(e.target.value))}
-                  className="w-full accent-[var(--signal)] cursor-pointer"
+                  className="w-full accent-[var(--signal)]"
                 />
               </div>
 
+              {/* Countdown Audio Window */}
               <div>
-                <div className="flex justify-between text-[11px] mb-1">
-                  <span>COUNTDOWN AUDIO WINDOW:</span>
+                <div className="flex justify-between text-[11px] font-mono text-[var(--signal)] mb-1">
+                  <span>COUNTDOWN VIDEO/AUDIO WINDOW</span>
                   <span>{audio.countdownWindow} SECONDS</span>
                 </div>
-                <div className="flex gap-2">
+                <div className="grid grid-cols-4 gap-1">
                   {[10, 23, 30, 60].map((sec) => (
                     <button
                       key={sec}
                       type="button"
                       onClick={() => setAudioWindow(sec)}
-                      className={`flex-1 py-1 text-[10px] border ${
+                      className={`text-[10px] font-mono py-1 border text-center ${
                         audio.countdownWindow === sec
-                          ? "border-[var(--signal)] bg-[var(--signal)]/20 text-[var(--signal)]"
-                          : "border-neutral-800 text-neutral-400"
+                          ? "bg-[var(--signal)] text-black border-[var(--signal)] font-bold"
+                          : "border-neutral-700 text-neutral-300"
                       }`}
                     >
                       {sec}S
@@ -789,55 +877,68 @@ function CTUTerminal() {
                 </div>
               </div>
 
-              <div className="text-[10px] text-neutral-400 pt-1 border-t border-neutral-900 leading-relaxed">
-                • <strong>Countdown:</strong> plays <code>public/24 Countdown.mp4</code>.
-                <br />• <strong>At Zero:</strong> plays <code>public/24 At Zero theme.mp3</code>.
+              <div className="text-[10px] text-neutral-400 pt-1 border-t border-neutral-900 leading-relaxed font-mono">
+                • <strong>Opening:</strong> <code>public/24 Opening.mp4</code> (35s mission initiation)
+                <br />• <strong>Countdown:</strong> <code>public/24 Countdown.mp4</code> (23s titles approaching zero)
+                <br />• <strong>Closing:</strong> <code>public/24 Closing.mp4</code> (60s stand-down / at zero)
+                <br />• <strong>Theme:</strong> <code>public/24 At Zero theme.mp3</code> (Code Red)
               </div>
             </div>
           </section>
         </aside>
       </main>
 
-      {/* Arm Operation Modal Dialog */}
+      {/* Arm Operation Modal (Samsung One UI Time Picker) */}
       {addOpen && (
-        <div className="arm-modal-backdrop" onClick={() => setAddOpen(false)}>
-          <section className="arm-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="arm-header">
-              <div className="flex items-center gap-2">
-                <Shield size={16} className="text-[var(--signal)]" />
-                <span className="font-bold tracking-wider">ARM TACTICAL OPERATION</span>
-              </div>
+        <div className="arm-modal-backdrop">
+          <div className="arm-modal">
+            <div className="arm-modal-header flex items-center justify-between">
+              <span className="font-title tracking-wider text-base text-[var(--signal)]">
+                ARM NEW OPERATION PROTOCOL
+              </span>
               <button
                 type="button"
-                className="modal-close-btn"
                 onClick={() => setAddOpen(false)}
+                className="text-neutral-400 hover:text-white"
               >
                 <X size={16} />
               </button>
             </div>
 
-            <form onSubmit={handleArmSubmit} className="arm-form">
-              {/* Kind Tabs */}
-              <div className="arm-tabs">
-                <button
-                  type="button"
-                  className={`arm-tab ${kind === "timer" ? "active" : ""}`}
-                  onClick={() => setKind("timer")}
-                >
-                  <Timer size={14} /> COUNTDOWN TIMER
-                </button>
-                <button
-                  type="button"
-                  className={`arm-tab ${kind === "alarm" ? "active" : ""}`}
-                  onClick={() => setKind("alarm")}
-                >
-                  <Bell size={14} /> DAILY CHECKPOINT ALARM
-                </button>
-              </div>
+            {/* Mode selection tabs */}
+            <div className="arm-modal-tabs grid grid-cols-2 gap-1 p-2 bg-black border-b border-neutral-800">
+              <button
+                type="button"
+                className={`tab-btn flex items-center justify-center gap-1.5 py-1.5 text-xs font-mono font-bold ${
+                  kind === "timer"
+                    ? "bg-[var(--signal)] text-black"
+                    : "text-neutral-400 border border-neutral-800"
+                }`}
+                onClick={() => setKind("timer")}
+              >
+                <Timer size={13} /> COUNTDOWN TIMER
+              </button>
+              <button
+                type="button"
+                className={`tab-btn flex items-center justify-center gap-1.5 py-1.5 text-xs font-mono font-bold ${
+                  kind === "alarm"
+                    ? "bg-[var(--signal)] text-black"
+                    : "text-neutral-400 border border-neutral-800"
+                }`}
+                onClick={() => setKind("alarm")}
+              >
+                <Bell size={13} /> DAILY ALARM
+              </button>
+            </div>
 
-              {/* Title Field */}
-              <div className="arm-field">
-                <label htmlFor="mission-title">OPERATION CODENAME / LABEL</label>
+            <form onSubmit={handleArmSubmit} className="p-4 space-y-4">
+              <div>
+                <label
+                  htmlFor="mission-title"
+                  className="text-[11px] font-mono text-[var(--signal)] block mb-1"
+                >
+                  OPERATION CODENAME / LABEL
+                </label>
                 <input
                   id="mission-title"
                   type="text"
@@ -846,38 +947,44 @@ function CTUTerminal() {
                   }
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  className="arm-input"
+                  className="arm-input w-full p-2 bg-neutral-950 border border-neutral-800 text-[var(--signal)] font-mono text-sm"
                 />
               </div>
 
-              {/* Samsung Style Time Setter */}
-              <div className="arm-picker-container">
+              {/* Samsung Galaxy One UI Drum Setter */}
+              <div className="picker-wrapper py-2">
+                <label className="text-[11px] font-mono text-neutral-400 block mb-2 text-center">
+                  {kind === "timer"
+                    ? "SET COUNTDOWN (HOURS : MINUTES : SECONDS)"
+                    : `SET ALARM TIME (${timeZone.split("/")[1]?.replace("_", " ") || "THEATER"})`}
+                </label>
+
                 <SamsungTimePicker
                   mode={kind}
                   timerValues={timerValues}
-                  values={timerValues}
                   onTimerChange={setTimerValues}
-                  onChange={setTimerValues}
                   alarmTime={alarmTime}
                   onAlarmChange={setAlarmTime}
                 />
               </div>
 
-              {/* Submit Buttons */}
-              <div className="arm-actions">
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-neutral-900">
                 <button
                   type="button"
-                  className="cancel-btn"
                   onClick={() => setAddOpen(false)}
+                  className="px-3 py-1.5 text-xs font-mono text-neutral-400 hover:text-white"
                 >
-                  ABORT
+                  CANCEL
                 </button>
-                <Button type="submit" className="arm-submit-btn">
-                  CONFIRM & ARM DEPLOYMENT
+                <Button
+                  type="submit"
+                  className="bg-[var(--signal)] text-black hover:bg-amber-400 font-bold font-mono text-xs px-4 py-1.5"
+                >
+                  DEPLOY OPERATION
                 </Button>
               </div>
             </form>
-          </section>
+          </div>
         </div>
       )}
     </div>
