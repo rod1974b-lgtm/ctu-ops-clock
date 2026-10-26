@@ -1,60 +1,59 @@
-export type MissionStatus = "ACTIVE" | "PAUSED" | "STOPPED" | "CRISIS";
+// src/lib/mission-engine.ts
+export type MissionStatus = "ACTIVE" | "PAUSED" | "CRISIS" | "STOPPED";
 
 export interface Mission {
   id: string;
   title: string;
   kind: "timer" | "alarm";
-  durationMs?: number;
-  duration?: number;
-  remainingMs?: number;
-  remaining?: number;
-  endsAt?: number;
-  deadline?: number;
+  durationMs: number;
+  deadline: number;
+  pausedRemaining?: number;
   status: MissionStatus;
   pinned?: boolean;
-  alarmTime?: string; // HH:MM:SS or HH:MM
+  alarmTime?: string;
+  startedAt?: number;
 }
 
 export interface Preset {
   id: string;
-  name: string;
+  title: string;
+  kind: "timer" | "alarm";
   durationMs: number;
-  description: string;
+  alarmTime?: string;
 }
 
-export const protocols: Preset[] = [
+export const PROTOCOLS: Preset[] = [
   {
-    id: "p-sprint",
-    name: "Tactical Sprint",
+    id: "tactical-sprint",
+    title: "Tactical Sprint",
+    kind: "timer",
     durationMs: 25 * 60 * 1000,
-    description: "25m deep-focus high-tempo sprint",
   },
   {
-    id: "p-interrogation",
-    name: "Interrogation",
+    id: "interrogation",
+    title: "Interrogation Window",
+    kind: "timer",
     durationMs: 15 * 60 * 1000,
-    description: "15m rapid debriefing or standup",
   },
   {
-    id: "p-satellite",
-    name: "Satellite Pass",
+    id: "satellite-pass",
+    title: "Satellite Pass",
+    kind: "timer",
     durationMs: 45 * 60 * 1000,
-    description: "45m orbit monitoring window",
   },
   {
-    id: "p-standdown",
-    name: "Field Stand-Down",
+    id: "field-stand-down",
+    title: "Field Stand-Down",
+    kind: "timer",
     durationMs: 5 * 60 * 1000,
-    description: "5m tactical breath & reload",
   },
 ];
 
 export function remainingMs(mission: Mission, now = Date.now()): number {
-  if (mission.status === "PAUSED" || mission.status === "STOPPED") {
-    return mission.remainingMs ?? mission.remaining ?? 0;
+  if (mission.status === "PAUSED") {
+    return Math.max(0, mission.pausedRemaining ?? 0);
   }
-  const target = mission.endsAt ?? mission.deadline ?? now;
-  return Math.max(0, target - now);
+  return Math.max(0, mission.deadline - now);
 }
 
 export function nextAlarm(alarmTime: string, now = Date.now()): number {
@@ -84,9 +83,11 @@ export function focusMission(
 
   if (typeof pinnedIdOrNow === "string") {
     pinnedId = pinnedIdOrNow;
-    if (typeof nowParam === "number") now = nowParam;
   } else if (typeof pinnedIdOrNow === "number") {
     now = pinnedIdOrNow;
+  }
+  if (typeof nowParam === "number") {
+    now = nowParam;
   }
 
   if (pinnedId) {
@@ -115,6 +116,5 @@ export function clockParts(ms: number): string {
   const h = Math.floor(totalSeconds / 3600);
   const m = Math.floor((totalSeconds % 3600) / 60);
   const s = totalSeconds % 60;
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${pad(h)}:${pad(m)}:${pad(s)}`;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
