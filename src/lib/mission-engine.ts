@@ -9,7 +9,7 @@ export interface Mission {
   duration?: number;
   deadline: number;
   endsAt?: number;
-  pausedRemaining?: number;
+  pausedRemaining?: number | undefined;
   remaining?: number;
   remainingMs?: number;
   status: MissionStatus;
