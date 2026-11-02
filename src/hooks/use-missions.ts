@@ -26,7 +26,7 @@ const defaultAudioState: AudioState = {
   ambientVolume: defaultAudio.ambient / 100,
   crisisVolume: defaultAudio.alarm / 100,
   alarmVolume: defaultAudio.alarm / 100,
-  countdownWindow: defaultAudio.window,
+  countdownWindow: 10, // Fixed 10-second alert window
   snoozeMs: defaultAudio.snooze * 60000,
   phoneAlerts: defaultAudio.phone,
 };
@@ -103,7 +103,7 @@ export function useMissions() {
           setCustomPresets(parsed.presets);
         }
         if (parsed.audio && typeof parsed.audio === "object") {
-          setAudio((prev) => ({ ...prev, ...parsed.audio }));
+          setAudio((prev) => ({ ...prev, ...parsed.audio, countdownWindow: 10 }));
         }
       }
     } catch {
@@ -126,7 +126,7 @@ export function useMissions() {
     }
   }, [missions, customPresets, audio, hydrated]);
 
-  // Heartbeat loop (drift-free Worker with requestAnimationFrame fallback)
+  // Heartbeat loop
   useEffect(() => {
     let timer: number | null = null;
     const tick = () => {
@@ -155,7 +155,7 @@ export function useMissions() {
         return changed ? next : current;
       });
 
-      // Sound per-second heartbeat
+      // Sound per-second heartbeat: ONLY at <= 10 seconds or at Zero
       const s = Math.floor(at / 1000);
       if (s !== beat.current) {
         beat.current = s;
@@ -169,11 +169,15 @@ export function useMissions() {
             const minRemaining = Math.min(
               ...activeList.map((m) => remainingMs(m, at)),
             );
-            if (minRemaining <= audio.countdownWindow * 1000) {
+            // ONLY trigger countdown sound when <= 10 seconds
+            if (minRemaining <= 10000 && minRemaining > 0) {
               engine.current.tick(2, toSettings(audio), s);
             } else {
+              // Greater than 10 seconds: completely silent
               engine.current.tick(1, toSettings(audio), s);
             }
+          } else {
+            engine.current.stopAll();
           }
         }
       }
@@ -261,29 +265,31 @@ export function useMissions() {
             };
           }
 
-          if (action === "START" && (m.status === "PAUSED" || m.status === "STOPPED")) {
-            const left = m.pausedRemaining ?? m.durationMs;
-            const deadline = at + left;
+          if (action === "START" && m.status === "PAUSED") {
+            const remaining = m.pausedRemaining ?? m.remainingMs ?? m.durationMs;
+            const deadline = at + remaining;
             const updated: Mission = {
               ...m,
               status: "ACTIVE" as const,
               deadline,
               endsAt: deadline,
-              remainingMs: left,
+              remainingMs: remaining,
             };
             delete updated.pausedRemaining;
             return updated;
           }
 
           if (action === "RESET") {
+            const dur = m.durationMs;
             const updated: Mission = {
               ...m,
-              status: "PAUSED" as const,
-              deadline: at + m.durationMs,
-              endsAt: at + m.durationMs,
-              remainingMs: m.durationMs,
-              pausedRemaining: m.durationMs,
+              status: "ACTIVE" as const,
+              startedAt: at,
+              deadline: at + dur,
+              endsAt: at + dur,
+              remainingMs: dur,
             };
+            delete updated.pausedRemaining;
             return updated;
           }
 
@@ -301,7 +307,9 @@ export function useMissions() {
 
       setTimeout(() => {
         setMissions((curr) => {
-          if (!curr.some((m) => m.status === "CRISIS")) {
+          if (!curr.some((m) => m.status === "CRISIS" || m.status === "ACTIVE")) {
+            engine.current?.stopAll();
+          } else if (!curr.some((m) => m.status === "CRISIS")) {
             engine.current?.stopAtZero();
           }
           return curr;
@@ -315,7 +323,7 @@ export function useMissions() {
     (id: string) => {
       void ensureAudio().then((eng) => {
         eng.chirp(0.8);
-        eng.stopAtZero();
+        eng.stopAll();
       });
 
       const at = Date.now();
@@ -341,7 +349,9 @@ export function useMissions() {
   const remove = useCallback((id: string) => {
     setMissions((items) => {
       const next = items.filter((m) => m.id !== id);
-      if (!next.some((m) => m.status === "CRISIS")) {
+      if (!next.some((m) => m.status === "CRISIS" || m.status === "ACTIVE")) {
+        engine.current?.stopAll();
+      } else if (!next.some((m) => m.status === "CRISIS")) {
         engine.current?.stopAtZero();
       }
       return next;
