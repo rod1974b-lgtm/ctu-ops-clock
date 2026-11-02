@@ -87,6 +87,7 @@ export function CTUTerminal() {
     setAudioWindow,
     toggleAudio,
     testAlert,
+    testCountdown,
     ensureAudio,
   } = useMissions();
 
@@ -667,6 +668,13 @@ export function CTUTerminal() {
               onClick={() => void testAlert()}
             >
               TEST ZERO THEME (5S)
+            </button>
+            <button
+              type="button"
+              className="test-audio-btn"
+              onClick={() => void testCountdown()}
+            >
+              TEST COUNTDOWN ALERT (8S)
             </button>
           </div>
 
