@@ -22,13 +22,17 @@ export const defaultAudio: AudioSettings = {
 
 const ZERO_THEME_URL = encodeURI("/24 At Zero theme.mp3");
 const COUNTDOWN_MEDIA_URL = encodeURI("/24 Countdown.mp4");
+// User-supplied reference recording: the countdown alert sound profile.
+const ALARM_COUNTDOWN_URL = encodeURI("/24 Alarm Countdown.mp3");
 
 export class CTUAudio {
   private context: AudioContext | null = null;
   private zeroAudio: HTMLAudioElement | null = null;
   private countdownAudio: HTMLAudioElement | null = null;
+  private alertAudio: HTMLAudioElement | null = null;
   private isZeroPlaying = false;
   private isCountdownPlaying = false;
+  private isAlertPlaying = false;
 
   constructor() {
     if (typeof window !== "undefined") {
@@ -68,6 +72,16 @@ export class CTUAudio {
         /* audio element blocked */
       }
     }
+
+    if (!this.alertAudio) {
+      try {
+        this.alertAudio = new Audio(ALARM_COUNTDOWN_URL);
+        this.alertAudio.preload = "auto";
+        this.alertAudio.loop = true;
+      } catch {
+        /* audio element blocked */
+      }
+    }
   }
 
   unlock(): boolean {
@@ -97,6 +111,9 @@ export class CTUAudio {
     }
     if (this.countdownAudio) {
       this.countdownAudio.load();
+    }
+    if (this.alertAudio) {
+      this.alertAudio.load();
     }
 
     return !!this.context && this.context.state === "running";
@@ -160,6 +177,7 @@ export class CTUAudio {
    */
   playAtZero(volume = 1.0) {
     this.stopCountdown();
+    this.stopAlert();
     this.initMediaElements();
 
     const targetVolume = Math.max(0, Math.min(1, volume));
@@ -203,6 +221,7 @@ export class CTUAudio {
    */
   playCountdown(volume = 0.85) {
     this.stopAtZero();
+    this.stopAlert();
     this.initMediaElements();
 
     const targetVolume = Math.max(0, Math.min(1, volume));
@@ -241,6 +260,51 @@ export class CTUAudio {
   }
 
   /**
+   * Play the user-supplied alarm countdown alert
+   * (public/24 Alarm Countdown.mp3)
+   */
+  playAlertCountdown(volume = 0.9) {
+    this.stopAtZero();
+    this.stopCountdown();
+    this.initMediaElements();
+
+    const targetVolume = Math.max(0, Math.min(1, volume));
+
+    if (this.alertAudio) {
+      this.alertAudio.volume = targetVolume;
+      if (!this.isAlertPlaying) {
+        this.alertAudio.currentTime = 0;
+        this.alertAudio
+          .play()
+          .then(() => {
+            this.isAlertPlaying = true;
+          })
+          .catch(() => {
+            // Fallback: urgent synth warning pips
+            this.syntheticWarningPips(targetVolume);
+          });
+      }
+    } else {
+      this.syntheticWarningPips(targetVolume);
+    }
+  }
+
+  /**
+   * Stop the alarm countdown alert
+   */
+  stopAlert() {
+    if (this.alertAudio && this.isAlertPlaying) {
+      try {
+        this.alertAudio.pause();
+        this.alertAudio.currentTime = 0;
+      } catch {
+        /* ignore */
+      }
+    }
+    this.isAlertPlaying = false;
+  }
+
+  /**
    * Synthetic crisis chord fallback when media is blocked or on phone
    */
   private syntheticCrisisAlert(vol: number) {
@@ -251,35 +315,52 @@ export class CTUAudio {
   }
 
   /**
+   * Synthetic warning pips fallback for the countdown alert
+   */
+  private syntheticWarningPips(vol: number) {
+    this.tone(880, 0.12, vol * 0.8, 0, "square");
+    this.tone(880, 0.12, vol * 0.8, 0.25, "square");
+    this.tone(660, 0.2, vol * 0.9, 0.5, "square");
+  }
+
+  /**
    * Operational tier dispatcher:
    * tier 1 = active timer ambient tick
-   * tier 2 = urgent countdown (public/24 Countdown.mp4)
+   * tier 2 = countdown window (public/24 Alarm Countdown.mp3 — user reference sound)
    * tier 3 = at zero crisis (public/24 At Zero theme.mp3)
    */
-  tick(tier: number, settings: AudioSettings, beat: number) {
-    if (!settings.enabled) {
+  tick(tier: number, settings?: AudioSettings, beat?: number) {
+    // Tolerate legacy one-argument callers: safe defaults keep the engine alive.
+    const cfg: AudioSettings = settings ?? defaultAudio;
+
+    if (!cfg.enabled) {
       this.stopAll();
       return;
     }
 
     if (tier === 3) {
       // AT ZERO: 24 At Zero theme
-      this.playAtZero(settings.alarm / 100);
+      this.playAtZero(cfg.alarm / 100);
     } else if (tier === 2) {
-      // COUNTDOWN WINDOW: 24 Countdown media
-      this.playCountdown(settings.countdown / 100);
+      // COUNTDOWN WINDOW: user reference alarm countdown sound
+      this.playAlertCountdown(cfg.countdown / 100);
     } else {
       // TIER 1: Ambient clock tick
       this.stopAtZero();
       this.stopCountdown();
-      const vol = settings.ambient / 100;
+      this.stopAlert();
+      const vol = cfg.ambient / 100;
       this.tickClock(vol);
     }
+
+    // beat is retained for future signature compatibility
+    void beat;
   }
 
   stopAll() {
     this.stopAtZero();
     this.stopCountdown();
+    this.stopAlert();
   }
 
   async mute() {

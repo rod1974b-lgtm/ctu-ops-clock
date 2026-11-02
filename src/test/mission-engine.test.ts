@@ -6,10 +6,15 @@ import {
   clockParts,
   type Mission,
 } from "@/lib/mission-engine";
-const mission = (id: string, deadline: number, status: Mission["status"] = "ACTIVE"): Mission => ({
+const mission = (
+  id: string,
+  deadline: number,
+  status: Mission["status"] = "ACTIVE",
+): Mission => ({
   id,
   title: id,
   kind: "timer",
+  durationMs: 60000,
   duration: 60000,
   remaining: 30000,
   deadline,

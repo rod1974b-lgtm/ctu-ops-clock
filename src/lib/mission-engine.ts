@@ -116,14 +116,14 @@ export function focusMission(
   const active = missions
     .filter((m) => m.status === "ACTIVE" || m.status === "CRISIS")
     .sort((a, b) => remainingMs(a, now) - remainingMs(b, now));
-  if (active.length) return active[0];
+  if (active.length) return active[0] ?? null;
 
   const paused = missions
     .filter((m) => m.status === "PAUSED")
     .sort((a, b) => remainingMs(a, now) - remainingMs(b, now));
-  if (paused.length) return paused[0];
+  if (paused.length) return paused[0] ?? null;
 
-  return missions[0];
+  return missions[0] ?? null;
 }
 
 export function clockParts(ms: number): string {

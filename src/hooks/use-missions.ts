@@ -164,15 +164,15 @@ export function useMissions() {
             (m) => m.status === "ACTIVE" || m.status === "CRISIS",
           );
           if (activeList.some((m) => m.status === "CRISIS")) {
-            engine.current.tick(3);
+            engine.current.tick(3, toSettings(audio), s);
           } else if (activeList.length > 0) {
             const minRemaining = Math.min(
               ...activeList.map((m) => remainingMs(m, at)),
             );
             if (minRemaining <= audio.countdownWindow * 1000) {
-              engine.current.tick(2);
+              engine.current.tick(2, toSettings(audio), s);
             } else {
-              engine.current.tick(1);
+              engine.current.tick(1, toSettings(audio), s);
             }
           }
         }
@@ -234,7 +234,7 @@ export function useMissions() {
         remainingMs: opts.durationMs,
         remaining: opts.durationMs,
         status: "ACTIVE",
-        alarmTime: opts.alarmTime,
+        ...(opts.alarmTime !== undefined ? { alarmTime: opts.alarmTime } : {}),
       };
 
       setMissions((prev) => [newMission, ...prev]);
@@ -383,7 +383,7 @@ export function useMissions() {
     setAudio((prev) => {
       const next = !prev.enabled;
       if (!next) {
-        engine.current?.stopAtZero();
+        engine.current?.stopAll();
       }
       return { ...prev, enabled: next };
     });
@@ -395,6 +395,14 @@ export function useMissions() {
     setTimeout(() => {
       eng.stopAtZero();
     }, 5000);
+  }, [ensureAudio]);
+
+  const testCountdown = useCallback(async () => {
+    const eng = await ensureAudio();
+    eng.playAlertCountdown();
+    setTimeout(() => {
+      eng.stopAlert();
+    }, 8000);
   }, [ensureAudio]);
 
   const presets = [...protocols, ...customPresets];
@@ -416,6 +424,7 @@ export function useMissions() {
     setPhoneAlerts,
     toggleAudio,
     testAlert,
+    testCountdown,
     ensureAudio,
   };
 }
