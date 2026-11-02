@@ -197,7 +197,7 @@ export function CTUTerminal() {
       const str = formatter.format(new Date(at));
       const match = str.match(/(\d{1,2}):(\d{2}):(\d{2})\s*(AM|PM)?/i);
       if (match) {
-        const hh = match[1].padStart(2, "0");
+        const hh = (match[1] ?? "00").padStart(2, "0");
         const mm = match[2] ?? "00";
         const ss = match[3] ?? "00";
         return {
