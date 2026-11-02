@@ -277,9 +277,7 @@ export function CTUTerminal() {
         isCrisis ? "threat-crisis" : ""
       }`}
     >
-      {/* =========================================================================
-          10-SECOND TACTICAL TAKEOVER (EXACT SEQUENCE FROM USER'S S23 RECORDING)
-          ========================================================================= */}
+      {/* 10-SECOND TACTICAL TAKEOVER */}
       {isCountdownTakeover && (
         <div
           className={`countdown-takeover-overlay ${
@@ -292,11 +290,9 @@ export function CTUTerminal() {
           tabIndex={0}
           aria-label="Tactical countdown in progress. Tap to cancel."
         >
-          {/* Subtle tactical scanlines & CRT vignette */}
           <div className="takeover-crt-overlay" />
 
           <div className="takeover-content">
-            {/* GIANT COUNTDOWN DIGIT */}
             <div
               className={`takeover-digit ${
                 isCrisisTakeover ? "takeover-digit-red" : "takeover-digit-amber"
@@ -305,15 +301,12 @@ export function CTUTerminal() {
               {focusTotalSeconds}
             </div>
 
-            {/* HEADER / CONTEXT */}
             <div className="takeover-title">
               {activeFocus?.kind === "alarm" ? "ALARM IMMINENT" : "TIMER / ALARM"}
             </div>
 
-            {/* TAP TO CANCEL PROMPT */}
             <div className="takeover-cancel-sub">TAP TO CANCEL</div>
 
-            {/* HORIZONTAL DEPLETING PROGRESS BAR */}
             <div className="takeover-bar-track">
               <div
                 className={`takeover-bar-fill ${
@@ -506,7 +499,6 @@ export function CTUTerminal() {
               <span>SECONDS</span>
             </div>
 
-            {/* PRIMARY TIMING CONTROLS */}
             <div className="sector-actions">
               {activeFocus ? (
                 <>
@@ -611,7 +603,6 @@ export function CTUTerminal() {
               <Tv size={14} />
               <span className="panel-heading">TACTICAL SURVEILLANCE FEED</span>
             </div>
-            {/* CHANNEL SELECTOR */}
             <div className="feed-channel-selector">
               {(["AUTO", "OPENING", "COUNTDOWN", "CLOSING", "SAT"] as const).map(
                 (ch) => (
@@ -767,9 +758,7 @@ export function CTUTerminal() {
         </section>
       )}
 
-      {/* =========================================================================
-          ARM AN OPERATION MODAL (WITH SAMSUNG ONE UI TIME PICKER)
-          ========================================================================= */}
+      {/* ARM MODAL */}
       {armModalOpen && (
         <div className="arm-modal-backdrop" onClick={() => setArmModalOpen(false)}>
           <div className="arm-modal" onClick={(e) => e.stopPropagation()}>
@@ -820,7 +809,6 @@ export function CTUTerminal() {
                 />
               </div>
 
-              {/* SAMSUNG STYLE TIME PICKER */}
               <SamsungTimePicker
                 mode={armKind}
                 values={timerValues}
