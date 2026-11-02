@@ -1,3 +1,4 @@
+// src/lib/ctu-audio.ts
 export type AudioSettings = {
   enabled: boolean;
   ambient: number;
@@ -15,14 +16,13 @@ export const defaultAudio: AudioSettings = {
   countdown: 85,
   alarm: 100,
   media: 70,
-  window: 30,
+  window: 10, // Default 10-second countdown alert window
   phone: false,
   snooze: 5,
 };
 
 const ZERO_THEME_URL = encodeURI("/24 At Zero theme.mp3");
 const COUNTDOWN_MEDIA_URL = encodeURI("/24 Countdown.mp4");
-// User-supplied reference recording: the countdown alert sound profile.
 const ALARM_COUNTDOWN_URL = encodeURI("/24 Alarm Countdown.mp3");
 
 export class CTUAudio {
@@ -105,16 +105,9 @@ export class CTUAudio {
       void this.context.resume();
     }
 
-    // Pre-warm HTML5 audio elements on user gesture
-    if (this.zeroAudio) {
-      this.zeroAudio.load();
-    }
-    if (this.countdownAudio) {
-      this.countdownAudio.load();
-    }
-    if (this.alertAudio) {
-      this.alertAudio.load();
-    }
+    if (this.zeroAudio) this.zeroAudio.load();
+    if (this.countdownAudio) this.countdownAudio.load();
+    if (this.alertAudio) this.alertAudio.load();
 
     return !!this.context && this.context.state === "running";
   }
@@ -155,26 +148,16 @@ export class CTUAudio {
     }
   }
 
-  /**
-   * Signature 24 digital clock tick:
-   * 1400Hz click + 240Hz punch body
-   */
   tickClock(volume = 0.6) {
     this.tone(1400, 0.045, volume * 0.9, 0, "square");
     this.tone(240, 0.065, volume * 0.75, 0, "triangle");
   }
 
-  /**
-   * Arming confirmation chirp
-   */
   chirp(volume = 0.7) {
     this.tone(1200, 0.06, volume, 0, "triangle");
     this.tone(1800, 0.1, volume, 0.05, "sine");
   }
 
-  /**
-   * Play the official 24 At Zero theme (public/24 At Zero theme.mp3)
-   */
   playAtZero(volume = 1.0) {
     this.stopCountdown();
     this.stopAlert();
@@ -192,7 +175,6 @@ export class CTUAudio {
             this.isZeroPlaying = true;
           })
           .catch(() => {
-            // Browser autoplay fallback: synthetic CTU crisis chord
             this.syntheticCrisisAlert(targetVolume);
           });
       }
@@ -201,9 +183,6 @@ export class CTUAudio {
     }
   }
 
-  /**
-   * Stop the 24 At Zero theme
-   */
   stopAtZero() {
     if (this.zeroAudio && this.isZeroPlaying) {
       try {
@@ -216,9 +195,6 @@ export class CTUAudio {
     this.isZeroPlaying = false;
   }
 
-  /**
-   * Play the official 24 Countdown audio (public/24 Countdown.mp4)
-   */
   playCountdown(volume = 0.85) {
     this.stopAtZero();
     this.stopAlert();
@@ -235,7 +211,6 @@ export class CTUAudio {
             this.isCountdownPlaying = true;
           })
           .catch(() => {
-            // Fallback syncopated tick
             this.tickClock(targetVolume);
           });
       }
@@ -244,9 +219,6 @@ export class CTUAudio {
     }
   }
 
-  /**
-   * Stop the 24 Countdown audio
-   */
   stopCountdown() {
     if (this.countdownAudio && this.isCountdownPlaying) {
       try {
@@ -259,10 +231,6 @@ export class CTUAudio {
     this.isCountdownPlaying = false;
   }
 
-  /**
-   * Play the user-supplied alarm countdown alert
-   * (public/24 Alarm Countdown.mp3)
-   */
   playAlertCountdown(volume = 0.9) {
     this.stopAtZero();
     this.stopCountdown();
@@ -280,7 +248,6 @@ export class CTUAudio {
             this.isAlertPlaying = true;
           })
           .catch(() => {
-            // Fallback: urgent synth warning pips
             this.syntheticWarningPips(targetVolume);
           });
       }
@@ -289,9 +256,6 @@ export class CTUAudio {
     }
   }
 
-  /**
-   * Stop the alarm countdown alert
-   */
   stopAlert() {
     if (this.alertAudio && this.isAlertPlaying) {
       try {
@@ -304,9 +268,6 @@ export class CTUAudio {
     this.isAlertPlaying = false;
   }
 
-  /**
-   * Synthetic crisis chord fallback when media is blocked or on phone
-   */
   private syntheticCrisisAlert(vol: number) {
     [440, 554, 659, 880].forEach((freq, idx) => {
       this.tone(freq, 0.32, vol * 0.9, idx * 0.06, "triangle");
@@ -314,9 +275,6 @@ export class CTUAudio {
     this.tone(110, 0.6, vol, 0, "sawtooth");
   }
 
-  /**
-   * Synthetic warning pips fallback for the countdown alert
-   */
   private syntheticWarningPips(vol: number) {
     this.tone(880, 0.12, vol * 0.8, 0, "square");
     this.tone(880, 0.12, vol * 0.8, 0.25, "square");
@@ -325,12 +283,11 @@ export class CTUAudio {
 
   /**
    * Operational tier dispatcher:
-   * tier 1 = active timer ambient tick
-   * tier 2 = countdown window (public/24 Alarm Countdown.mp3 — user reference sound)
-   * tier 3 = at zero crisis (public/24 At Zero theme.mp3)
+   * tier 1 = active timer > 10s (completely silent)
+   * tier 2 = countdown at <= 10s (plays /24 Alarm Countdown.mp3)
+   * tier 3 = at zero crisis (plays /24 At Zero theme.mp3)
    */
   tick(tier: number, settings?: AudioSettings, beat?: number) {
-    // Tolerate legacy one-argument callers: safe defaults keep the engine alive.
     const cfg: AudioSettings = settings ?? defaultAudio;
 
     if (!cfg.enabled) {
@@ -342,18 +299,15 @@ export class CTUAudio {
       // AT ZERO: 24 At Zero theme
       this.playAtZero(cfg.alarm / 100);
     } else if (tier === 2) {
-      // COUNTDOWN WINDOW: user reference alarm countdown sound
+      // COUNTDOWN AT 10 SECONDS: alarm countdown sound
       this.playAlertCountdown(cfg.countdown / 100);
     } else {
-      // TIER 1: Ambient clock tick
+      // TIER 1 (> 10s): Silence — no ambient ticking
       this.stopAtZero();
       this.stopCountdown();
       this.stopAlert();
-      const vol = cfg.ambient / 100;
-      this.tickClock(vol);
     }
 
-    // beat is retained for future signature compatibility
     void beat;
   }
 
