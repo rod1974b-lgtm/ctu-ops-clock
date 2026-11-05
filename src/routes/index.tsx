@@ -9,9 +9,9 @@ export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
       { title: "CTU Tactical Operational Command | 24 v74" },
-      { name: "description", content: "Authentic 24 TV Show CTU Tactical Mission Timer & Surveillance System." },
+      { name: "description", content: "Authentic 24 TV Show CTU Tactical Multi-Timer & Alarm System." },
       { property: "og:title", content: "CTU Tactical Operational Command" },
-      { property: "og:description", content: "Authentic 24 TV Show CTU Mission Terminal." },
+      { property: "og:description", content: "Authentic 24 TV Show CTU Multi-Timer Terminal." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
@@ -28,29 +28,77 @@ const ZERO_SOUND_LABELS: Record<ZeroSoundType, string> = {
   stinger: "STINGER CHORD",
 };
 
+export interface OperationalTimer {
+  id: string;
+  label: string;
+  durationSec: number;
+  remainingSec: number;
+  running: boolean;
+  timesUp: boolean;
+  status: string;
+}
+
+export interface OperationalAlarm {
+  id: string;
+  label: string;
+  hour: number;
+  minute: number;
+  armed: boolean;
+}
+
+const CTU_PRESETS = [
+  { id: "sprint", label: "TACTICAL SPRINT", durationSec: 25 * 60 },
+  { id: "interrogate", label: "INTERROGATION", durationSec: 15 * 60 },
+  { id: "satellite", label: "SATELLITE PASS", durationSec: 45 * 60 },
+  { id: "standdown", label: "FIELD STAND-DOWN", durationSec: 5 * 60 },
+];
+
+const DEFAULT_TIMERS: OperationalTimer[] = [
+  {
+    id: "timer-alpha",
+    label: "PRIMARY OPERATION ALPHA",
+    durationSec: 300,
+    remainingSec: 300,
+    running: false,
+    timesUp: false,
+    status: "READY - CLICK NUMBERS TO SET",
+  },
+];
+
+const DEFAULT_ALARMS: OperationalAlarm[] = [
+  {
+    id: "alarm-main",
+    label: "DAILY DEPLOYMENT ALARM",
+    hour: 19,
+    minute: 38,
+    armed: true,
+  },
+];
+
 export function CTUTerminalV74() {
   // Live clock
   const [now, setNow] = useState<Date>(() => new Date());
 
-  // Timer state
-  const [timerDuration, setTimerDuration] = useState<number>(300);
-  const [timerRemaining, setTimerRemaining] = useState<number>(300);
-  const [timerRunning, setTimerRunning] = useState<boolean>(false);
-  const [timerTimesUp, setTimerTimesUp] = useState<boolean>(false);
-  const [timerStatus, setTimerStatus] = useState<string>("READY - CLICK NUMBERS TO SET");
+  // Timers & Alarms State
+  const [timers, setTimers] = useState<OperationalTimer[]>(DEFAULT_TIMERS);
+  const [alarms, setAlarms] = useState<OperationalAlarm[]>(DEFAULT_ALARMS);
   const [timerVol, setTimerVol] = useState<number>(0.85);
 
-  // Alarm state
-  const [alarmHour, setAlarmHour] = useState<number>(19);
-  const [alarmMinute, setAlarmMinute] = useState<number>(38);
-  const [alarmArmed, setAlarmArmed] = useState<boolean>(true);
-  const alarmTriggeredRef = useRef<boolean>(false);
+  // Alarms trigger tracking
+  const triggeredAlarmsRef = useRef<Set<string>>(new Set());
 
   // Zero sound preference
   const [zeroSound, setZeroSound] = useState<ZeroSoundType>("voice");
 
-  // Samsung Time Picker Modal
-  const [modalMode, setModalMode] = useState<"timer" | "alarm" | null>(null);
+  // Modal State for Samsung Time Picker
+  type ModalTarget =
+    | { type: "timer-edit"; id: string }
+    | { type: "timer-new" }
+    | { type: "alarm-edit"; id: string }
+    | { type: "alarm-new" }
+    | null;
+
+  const [modalTarget, setModalTarget] = useState<ModalTarget>(null);
   const [pickerFocusUnit, setPickerFocusUnit] = useState<"hours" | "minutes" | "seconds">("minutes");
 
   // Video Modals
@@ -65,7 +113,7 @@ export function CTUTerminalV74() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Audio engine
+  // Audio Engine & Intervals
   const audioRef = useRef<CTUAudio | null>(null);
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const takeoverIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -86,7 +134,46 @@ export function CTUTerminalV74() {
     }, durationMs);
   }, []);
 
-  // Update live clock every 250ms
+  // Hydrate from localStorage
+  useEffect(() => {
+    try {
+      const savedTimers = localStorage.getItem("ctu-v74-timers");
+      if (savedTimers) {
+        const parsed = JSON.parse(savedTimers);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setTimers(parsed.map((t) => ({ ...t, running: false })));
+        }
+      }
+      const savedAlarms = localStorage.getItem("ctu-v74-alarms");
+      if (savedAlarms) {
+        const parsed = JSON.parse(savedAlarms);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setAlarms(parsed);
+        }
+      }
+    } catch {
+      // Ignore parse error
+    }
+  }, []);
+
+  // Sync to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem("ctu-v74-timers", JSON.stringify(timers));
+    } catch {
+      // Quota exceeded
+    }
+  }, [timers]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("ctu-v74-alarms", JSON.stringify(alarms));
+    } catch {
+      // Quota exceeded
+    }
+  }, [alarms]);
+
+  // Live clock tick
   useEffect(() => {
     const id = setInterval(() => {
       setNow(new Date());
@@ -120,7 +207,7 @@ export function CTUTerminalV74() {
       .toUpperCase();
   }, [bangkokDate]);
 
-  // Audio synth zero sounds
+  // Audio synthesis zero sounds
   const triggerZeroSound = useCallback(() => {
     try {
       const audio = getAudio();
@@ -204,7 +291,7 @@ export function CTUTerminalV74() {
     }
   }, [getAudio, zeroSound, timerVol]);
 
-  // Start 10s Takeover
+  // Takeover controls
   const startTakeover = useCallback(
     (durationSec = 10, label = "COUNTDOWN", onComplete?: () => void) => {
       if (takeoverIntervalRef.current) clearInterval(takeoverIntervalRef.current);
@@ -246,61 +333,81 @@ export function CTUTerminalV74() {
     showToast("COUNTDOWN DISARMED", 2000);
   }, [getAudio, showToast]);
 
-  // Timer Tick Interval
+  // Timers countdown ticker
   useEffect(() => {
-    if (timerRunning) {
-      timerIntervalRef.current = setInterval(() => {
-        setTimerRemaining((prev) => {
-          if (prev <= 1) {
-            if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
-            setTimerRunning(false);
-            setTimerTimesUp(true);
-            setTimerStatus("TIME'S UP");
+    const hasRunning = timers.some((t) => t.running);
+    if (!hasRunning) {
+      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+      return;
+    }
+
+    timerIntervalRef.current = setInterval(() => {
+      setTimers((prevTimers) =>
+        prevTimers.map((timer) => {
+          if (!timer.running) return timer;
+
+          if (timer.remainingSec <= 1) {
             triggerZeroSound();
-            showToast("TIME'S UP - OPERATION CONCLUDED", 4000);
-            return 0;
+            showToast(`${timer.label} — TIME'S UP!`, 4000);
+            return {
+              ...timer,
+              remainingSec: 0,
+              running: false,
+              timesUp: true,
+              status: "TIME'S UP",
+            };
           }
 
-          if (prev === 11) {
-            startTakeover(10, "TIMER EXPIRATION", () => {
-              setTimerRemaining(0);
-              setTimerRunning(false);
-              setTimerTimesUp(true);
-              setTimerStatus("TIME'S UP");
+          if (timer.remainingSec === 11) {
+            startTakeover(10, timer.label, () => {
+              setTimers((current) =>
+                current.map((t) =>
+                  t.id === timer.id
+                    ? { ...t, remainingSec: 0, running: false, timesUp: true, status: "TIME'S UP" }
+                    : t
+                )
+              );
             });
           }
 
-          return prev - 1;
-        });
-      }, 1000);
-    } else {
-      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
-    }
+          return { ...timer, remainingSec: timer.remainingSec - 1 };
+        })
+      );
+    }, 1000);
+
     return () => {
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
     };
-  }, [timerRunning, startTakeover, triggerZeroSound, showToast]);
+  }, [timers, startTakeover, triggerZeroSound, showToast]);
 
-  // Check Alarm Match
+  // Background Alarm Checker
   useEffect(() => {
-    if (!alarmArmed) return;
     const curH = bangkokDate.getHours();
     const curM = bangkokDate.getMinutes();
     const curS = bangkokDate.getSeconds();
 
-    if (curH === alarmHour && curM === alarmMinute && curS === 0 && !alarmTriggeredRef.current) {
-      alarmTriggeredRef.current = true;
-      startTakeover(10, `ALARM TARGET ${String(alarmHour).padStart(2, "0")}:${String(alarmMinute).padStart(2, "0")}`, () => {
-        showToast("ALARM TRIGGERED", 4000);
-      });
-    }
+    alarms.forEach((alarm) => {
+      const matchKey = `${alarm.id}-${curH}:${curM}`;
+      if (
+        alarm.armed &&
+        curH === alarm.hour &&
+        curM === alarm.minute &&
+        curS === 0 &&
+        !triggeredAlarmsRef.current.has(matchKey)
+      ) {
+        triggeredAlarmsRef.current.add(matchKey);
+        startTakeover(10, `ALARM TARGET: ${alarm.label}`, () => {
+          showToast(`ALARM ENGAGED: ${alarm.label}`, 4000);
+        });
+      }
+    });
 
-    if (curM !== alarmMinute) {
-      alarmTriggeredRef.current = false;
+    if (curS === 30) {
+      triggeredAlarmsRef.current.clear();
     }
-  }, [bangkokDate, alarmArmed, alarmHour, alarmMinute, startTakeover, showToast]);
+  }, [bangkokDate, alarms, startTakeover, showToast]);
 
-  // Format helpers
+  // Formatting helpers
   const formatHMS = (totalSec: number) => {
     const h = String(Math.floor(totalSec / 3600)).padStart(2, "0");
     const m = String(Math.floor((totalSec % 3600) / 60)).padStart(2, "0");
@@ -314,83 +421,198 @@ export function CTUTerminalV74() {
     return { h: hs, m: ms, text: `${hs}:${ms}` };
   };
 
-  const timerHms = useMemo(() => formatHMS(timerRemaining), [timerRemaining]);
-  const alarmHm = useMemo(() => formatHM(alarmHour, alarmMinute), [alarmHour, alarmMinute]);
-
-  // Controls
-  const startTimer = () => {
-    if (timerRemaining <= 0) {
-      showToast("SET A VALID TIME FIRST", 2000);
-      return;
-    }
-    setTimerRunning(true);
-    setTimerTimesUp(false);
-    setTimerStatus("RUNNING - TACTICAL ENGAGED");
+  // Timer Controls
+  const startTimer = (id: string) => {
+    setTimers((prev) =>
+      prev.map((t) => {
+        if (t.id !== id) return t;
+        if (t.remainingSec <= 0) {
+          showToast("SET DURATION FIRST", 2000);
+          return t;
+        }
+        return { ...t, running: true, timesUp: false, status: "RUNNING - TACTICAL ENGAGED" };
+      })
+    );
     getAudio().unlockAudio();
-    showToast("OPERATION TIMER STARTED", 2000);
+    showToast("OPERATION TIMER ENGAGED", 1500);
   };
 
-  const stopTimer = () => {
-    setTimerRunning(false);
-    setTimerStatus("PAUSED");
+  const stopTimer = (id: string) => {
+    setTimers((prev) =>
+      prev.map((t) => (t.id === id ? { ...t, running: false, status: "PAUSED" } : t))
+    );
     const audio = getAudio();
     audio.stopCountdownAlert();
     audio.stopZeroTheme();
     showToast("TIMER PAUSED", 1500);
   };
 
-  const resetTimer = () => {
-    setTimerRunning(false);
-    setTimerTimesUp(false);
-    setTimerRemaining(timerDuration);
-    setTimerStatus("READY - CLICK NUMBERS TO SET");
+  const resetTimer = (id: string) => {
+    setTimers((prev) =>
+      prev.map((t) =>
+        t.id === id
+          ? {
+              ...t,
+              running: false,
+              timesUp: false,
+              remainingSec: t.durationSec,
+              status: "READY - CLICK NUMBERS TO SET",
+            }
+          : t
+      )
+    );
     const audio = getAudio();
     audio.stopCountdownAlert();
     audio.stopZeroTheme();
     showToast("TIMER RESET TO DURATION", 1500);
   };
 
-  const armAlarm = () => {
-    setAlarmArmed(true);
+  const deleteTimer = (id: string) => {
+    setTimers((prev) => {
+      if (prev.length <= 1) {
+        showToast("AT LEAST ONE OPERATION TIMER IS REQUIRED", 2000);
+        return prev;
+      }
+      return prev.filter((t) => t.id !== id);
+    });
+    showToast("OPERATION TIMER DELETED", 1500);
+  };
+
+  const addPresetTimer = (preset: (typeof CTU_PRESETS)[0]) => {
+    const newTimer: OperationalTimer = {
+      id: `timer-${Date.now()}`,
+      label: preset.label,
+      durationSec: preset.durationSec,
+      remainingSec: preset.durationSec,
+      running: false,
+      timesUp: false,
+      status: "ARMED FROM PRESET",
+    };
+    setTimers((prev) => [newTimer, ...prev]);
+    showToast(`ARMED: ${preset.label}`, 2000);
+  };
+
+  // Alarm Controls
+  const toggleAlarmArmed = (id: string) => {
+    setAlarms((prev) =>
+      prev.map((a) => (a.id === id ? { ...a, armed: !a.armed } : a))
+    );
     getAudio().unlockAudio();
-    showToast(`ALARM ARMED: ${alarmHm.text}`, 2000);
+    showToast("ALARM STATUS UPDATED", 1500);
   };
 
-  const disarmAlarm = () => {
-    setAlarmArmed(false);
-    showToast("ALARM DISARMED", 1500);
+  const deleteAlarm = (id: string) => {
+    setAlarms((prev) => {
+      if (prev.length <= 1) {
+        showToast("AT LEAST ONE ALARM PROTOCOL IS REQUIRED", 2000);
+        return prev;
+      }
+      return prev.filter((a) => a.id !== id);
+    });
+    showToast("ALARM REMOVED", 1500);
   };
 
-  const timerProgress = useMemo(() => {
-    if (timerDuration <= 0) return 0;
-    const elapsed = timerDuration - timerRemaining;
-    return Math.min(100, Math.max(0, (elapsed / timerDuration) * 100));
-  }, [timerDuration, timerRemaining]);
+  // Ordered timers: prioritize active running timers with lowest remaining time
+  const sortedTimers = useMemo(() => {
+    return [...timers].sort((a, b) => {
+      if (a.running && !b.running) return -1;
+      if (!a.running && b.running) return 1;
+      return a.remainingSec - b.remainingSec;
+    });
+  }, [timers]);
 
-  // Handle Modal Save
+  const focusedTimer = sortedTimers[0] ?? timers[0];
+
+  // Samsung Picker Save
   const handleModalSave = useCallback(
     (values: SamsungTimePickerValues) => {
-      if (modalMode === "timer") {
+      if (!modalTarget) return;
+
+      if (modalTarget.type === "timer-edit") {
         const total = values.totalSeconds;
         if (total <= 0) {
           showToast("SET A VALID DURATION", 2000);
           return;
         }
-        setTimerDuration(total);
-        setTimerRemaining(total);
-        setTimerRunning(false);
-        setTimerTimesUp(false);
-        setTimerStatus("READY - CLICK NUMBERS TO SET");
+        setTimers((prev) =>
+          prev.map((t) =>
+            t.id === modalTarget.id
+              ? {
+                  ...t,
+                  durationSec: total,
+                  remainingSec: total,
+                  running: false,
+                  timesUp: false,
+                  status: "READY - CLICK NUMBERS TO SET",
+                }
+              : t
+          )
+        );
         showToast(`TIMER SET: ${formatHMS(total).text}`, 2000);
-      } else if (modalMode === "alarm") {
-        setAlarmHour(values.hours);
-        setAlarmMinute(values.minutes);
+      } else if (modalTarget.type === "timer-new") {
+        const total = values.totalSeconds;
+        if (total <= 0) {
+          showToast("SET A VALID DURATION", 2000);
+          return;
+        }
+        const newTimer: OperationalTimer = {
+          id: `timer-${Date.now()}`,
+          label: `TACTICAL OP ${timers.length + 1}`,
+          durationSec: total,
+          remainingSec: total,
+          running: false,
+          timesUp: false,
+          status: "READY - CLICK NUMBERS TO SET",
+        };
+        setTimers((prev) => [newTimer, ...prev]);
+        showToast(`NEW OPERATION ARMED: ${formatHMS(total).text}`, 2000);
+      } else if (modalTarget.type === "alarm-edit") {
+        setAlarms((prev) =>
+          prev.map((a) =>
+            a.id === modalTarget.id
+              ? { ...a, hour: values.hours, minute: values.minutes, armed: true }
+              : a
+          )
+        );
         showToast(`ALARM SET: ${formatHM(values.hours, values.minutes).text}`, 2000);
+      } else if (modalTarget.type === "alarm-new") {
+        const newAlarm: OperationalAlarm = {
+          id: `alarm-${Date.now()}`,
+          label: `ALARM ${alarms.length + 1}`,
+          hour: values.hours,
+          minute: values.minutes,
+          armed: true,
+        };
+        setAlarms((prev) => [...prev, newAlarm]);
+        showToast(`NEW ALARM ARMED: ${formatHM(values.hours, values.minutes).text}`, 2000);
       }
-      setModalMode(null);
+
+      setModalTarget(null);
     },
-    [modalMode, showToast]
+    [modalTarget, timers.length, alarms.length, showToast]
   );
+
+  // Initial picker values
+  const pickerInitials = useMemo(() => {
+    if (!modalTarget) return { hours: 0, minutes: 5, seconds: 0 };
+    if (modalTarget.type === "timer-edit") {
+      const t = timers.find((x) => x.id === modalTarget.id);
+      if (t) {
+        return {
+          hours: Math.floor(t.durationSec / 3600),
+          minutes: Math.floor((t.durationSec % 3600) / 60),
+          seconds: t.durationSec % 60,
+        };
+      }
+    }
+    if (modalTarget.type === "alarm-edit") {
+      const a = alarms.find((x) => x.id === modalTarget.id);
+      if (a) {
+        return { hours: a.hour, minutes: a.minute, seconds: 0 };
+      }
+    }
+    return { hours: 0, minutes: 5, seconds: 0 };
+  }, [modalTarget, timers, alarms]);
 
   return (
     <div
@@ -436,148 +658,361 @@ export function CTUTerminalV74() {
           </button>
         </div>
 
-        {/* TIMER PANEL (Segmented Clickable Numbers) */}
-        <div className="relative border-2 border-dashed border-[#ffcc00] rounded-[14px] p-3 md:p-4 bg-[#050500] min-h-[90px] flex flex-col gap-0">
-          <div className="flex justify-between items-center">
-            <span className="text-[10px] tracking-[0.25em] opacity-60">
-              OPERATION TIMER — CLICK EACH UNIT TO SET
-            </span>
-            <span
-              className={`text-[10px] px-2 py-[2px] rounded border ${
-                timerRunning
-                  ? "border-green-400 text-green-400"
-                  : timerTimesUp
-                    ? "border-[#ffcc00] text-[#ffcc00]"
-                    : "border-[#ffcc00]/40 text-[#ffcc00]/60"
-              }`}
-            >
-              {timerRunning ? "RUNNING" : timerTimesUp ? "TIME'S UP" : "IDLE"}
-            </span>
-          </div>
+        {/* ================= PRIMARY FOCUSED TIMER ================= */}
+        {focusedTimer && (
+          <div className="relative border-2 border-dashed border-[#ffcc00] rounded-[14px] p-3 md:p-4 bg-[#050500] min-h-[90px] flex flex-col gap-0 shadow-[0_0_20px_rgba(255,204,0,0.12)]">
+            <div className="flex justify-between items-center flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-black tracking-[0.25em] text-[#ffcc00]">
+                  PRIMARY FOCUS: {focusedTimer.label}
+                </span>
+                <span className="text-[9px] px-1.5 py-0.5 rounded bg-[#ffcc00]/20 text-[#ffcc00] font-bold">
+                  CLOSEST
+                </span>
+              </div>
+              <span
+                className={`text-[10px] px-2 py-[2px] rounded border ${
+                  focusedTimer.running
+                    ? "border-green-400 text-green-400"
+                    : focusedTimer.timesUp
+                      ? "border-[#ffcc00] text-[#ffcc00]"
+                      : "border-[#ffcc00]/40 text-[#ffcc00]/60"
+                }`}
+              >
+                {focusedTimer.running ? "RUNNING" : focusedTimer.timesUp ? "TIME'S UP" : "IDLE"}
+              </span>
+            </div>
 
-          {/* Segmented Clickable Time Readout (Hours, Minutes, Seconds) */}
-          <div className="mt-3 py-3 px-2 border border-[#ffcc00]/30 rounded-[10px] bg-black flex flex-col items-center">
-            <div className="flex items-center justify-center gap-1.5 md:gap-3 flex-wrap">
-              {/* Hours Block */}
+            {/* Segmented Clickable Time Readout (Hours, Minutes, Seconds) */}
+            {(() => {
+              const hms = formatHMS(focusedTimer.remainingSec);
+              return (
+                <div className="mt-3 py-3 px-2 border border-[#ffcc00]/30 rounded-[10px] bg-black flex flex-col items-center">
+                  <div className="flex items-center justify-center gap-1.5 md:gap-3 flex-wrap">
+                    {/* Hours Block */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPickerFocusUnit("hours");
+                        setModalTarget({ type: "timer-edit", id: focusedTimer.id });
+                      }}
+                      className="group flex flex-col items-center px-3 py-1.5 rounded-[8px] border border-transparent hover:border-[#ffcc00] hover:bg-[#1a1a00] active:scale-95 transition-all cursor-pointer"
+                    >
+                      <span className="text-[38px] md:text-[46px] font-black tracking-widest leading-none text-[#ffcc00] group-hover:drop-shadow-[0_0_14px_rgba(255,204,0,0.8)]">
+                        {hms.h}
+                      </span>
+                      <span className="text-[8px] md:text-[9px] tracking-widest text-[#ffcc00]/60 font-bold mt-1">
+                        HOURS
+                      </span>
+                    </button>
+
+                    <span className="text-[32px] md:text-[40px] font-black text-[#ffcc00] pb-4">:</span>
+
+                    {/* Minutes Block */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPickerFocusUnit("minutes");
+                        setModalTarget({ type: "timer-edit", id: focusedTimer.id });
+                      }}
+                      className="group flex flex-col items-center px-3 py-1.5 rounded-[8px] border border-transparent hover:border-[#ffcc00] hover:bg-[#1a1a00] active:scale-95 transition-all cursor-pointer"
+                    >
+                      <span className="text-[38px] md:text-[46px] font-black tracking-widest leading-none text-[#ffcc00] group-hover:drop-shadow-[0_0_14px_rgba(255,204,0,0.8)]">
+                        {hms.m}
+                      </span>
+                      <span className="text-[8px] md:text-[9px] tracking-widest text-[#ffcc00]/60 font-bold mt-1">
+                        MINUTES
+                      </span>
+                    </button>
+
+                    <span className="text-[32px] md:text-[40px] font-black text-[#ffcc00] pb-4">:</span>
+
+                    {/* Seconds Block */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPickerFocusUnit("seconds");
+                        setModalTarget({ type: "timer-edit", id: focusedTimer.id });
+                      }}
+                      className="group flex flex-col items-center px-3 py-1.5 rounded-[8px] border border-transparent hover:border-[#ffcc00] hover:bg-[#1a1a00] active:scale-95 transition-all cursor-pointer"
+                    >
+                      <span className="text-[38px] md:text-[46px] font-black tracking-widest leading-none text-[#ffcc00] group-hover:drop-shadow-[0_0_14px_rgba(255,204,0,0.8)]">
+                        {hms.s}
+                      </span>
+                      <span className="text-[8px] md:text-[9px] tracking-widest text-[#ffcc00]/60 font-bold mt-1">
+                        SECONDS
+                      </span>
+                    </button>
+                  </div>
+                  <div className="text-[10px] opacity-60 mt-1 tracking-widest">
+                    TAP HOURS, MINUTES, OR SECONDS TO RECONFIGURE
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Progress Bar */}
+            {(() => {
+              const elapsed = focusedTimer.durationSec - focusedTimer.remainingSec;
+              const pct =
+                focusedTimer.durationSec > 0
+                  ? Math.min(100, Math.max(0, (elapsed / focusedTimer.durationSec) * 100))
+                  : 0;
+              return (
+                <div className="mt-3 h-[6px] w-full bg-[#1a1a00] rounded overflow-hidden border border-[#ffcc00]/20">
+                  <div
+                    className="h-full bg-[#ffcc00] transition-all duration-500"
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+              );
+            })()}
+
+            {/* Status Line */}
+            <div className="mt-2 text-[11px] tracking-wide opacity-70 min-h-[18px] w-full text-left">
+              {focusedTimer.status}
+            </div>
+
+            {/* Action Buttons */}
+            <div className="grid grid-cols-4 gap-2 mt-3 w-full">
               <button
                 type="button"
-                onClick={() => {
-                  setPickerFocusUnit("hours");
-                  setModalMode("timer");
-                }}
-                className="group flex flex-col items-center px-3 py-1.5 rounded-[8px] border border-transparent hover:border-[#ffcc00] hover:bg-[#1a1a00] active:scale-95 transition-all cursor-pointer"
+                onClick={() => startTimer(focusedTimer.id)}
+                className="bg-[#00c853] text-black font-bold min-h-[44px] rounded-[6px] text-[13px] tracking-widest hover:brightness-110 active:scale-[0.98] whitespace-nowrap overflow-hidden cursor-pointer"
               >
-                <span className="text-[38px] md:text-[46px] font-black tracking-widest leading-none text-[#ffcc00] group-hover:drop-shadow-[0_0_14px_rgba(255,204,0,0.8)]">
-                  {timerHms.h}
-                </span>
-                <span className="text-[8px] md:text-[9px] tracking-widest text-[#ffcc00]/60 font-bold mt-1">
-                  HOURS
-                </span>
+                START
               </button>
-
-              <span className="text-[32px] md:text-[40px] font-black text-[#ffcc00] pb-4">:</span>
-
-              {/* Minutes Block */}
               <button
                 type="button"
-                onClick={() => {
-                  setPickerFocusUnit("minutes");
-                  setModalMode("timer");
-                }}
-                className="group flex flex-col items-center px-3 py-1.5 rounded-[8px] border border-transparent hover:border-[#ffcc00] hover:bg-[#1a1a00] active:scale-95 transition-all cursor-pointer"
+                onClick={() => stopTimer(focusedTimer.id)}
+                className="bg-black border border-[#ffcc00] text-[#ffcc00] font-bold min-h-[44px] rounded-[6px] text-[13px] tracking-widest hover:bg-[#1a1a00] active:scale-[0.98] whitespace-nowrap overflow-hidden cursor-pointer"
               >
-                <span className="text-[38px] md:text-[46px] font-black tracking-widest leading-none text-[#ffcc00] group-hover:drop-shadow-[0_0_14px_rgba(255,204,0,0.8)]">
-                  {timerHms.m}
-                </span>
-                <span className="text-[8px] md:text-[9px] tracking-widest text-[#ffcc00]/60 font-bold mt-1">
-                  MINUTES
-                </span>
+                STOP
               </button>
-
-              <span className="text-[32px] md:text-[40px] font-black text-[#ffcc00] pb-4">:</span>
-
-              {/* Seconds Block */}
               <button
                 type="button"
-                onClick={() => {
-                  setPickerFocusUnit("seconds");
-                  setModalMode("timer");
-                }}
-                className="group flex flex-col items-center px-3 py-1.5 rounded-[8px] border border-transparent hover:border-[#ffcc00] hover:bg-[#1a1a00] active:scale-95 transition-all cursor-pointer"
+                onClick={() => resetTimer(focusedTimer.id)}
+                className="bg-[#ffcc00] text-black font-bold min-h-[44px] rounded-[6px] text-[13px] tracking-widest hover:bg-[#ffcc00]/80 active:scale-[0.98] whitespace-nowrap overflow-hidden cursor-pointer"
               >
-                <span className="text-[38px] md:text-[46px] font-black tracking-widest leading-none text-[#ffcc00] group-hover:drop-shadow-[0_0_14px_rgba(255,204,0,0.8)]">
-                  {timerHms.s}
-                </span>
-                <span className="text-[8px] md:text-[9px] tracking-widest text-[#ffcc00]/60 font-bold mt-1">
-                  SECONDS
-                </span>
+                RESET
+              </button>
+              <button
+                type="button"
+                onClick={() => deleteTimer(focusedTimer.id)}
+                className="bg-red-950 border border-red-500 text-red-400 font-bold min-h-[44px] rounded-[6px] text-[11px] md:text-[12px] tracking-widest hover:bg-red-900 active:scale-[0.98] whitespace-nowrap overflow-hidden cursor-pointer"
+              >
+                DELETE
               </button>
             </div>
-            <div className="text-[10px] opacity-60 mt-1 tracking-widest">
-              TAP HOURS, MINUTES, OR SECONDS TO CHANGE
-            </div>
           </div>
+        )}
 
-          {/* Progress Bar */}
-          <div className="mt-3 h-[6px] w-full bg-[#1a1a00] rounded overflow-hidden border border-[#ffcc00]/20">
-            <div
-              className="h-full bg-[#ffcc00] transition-all duration-500"
-              style={{ width: `${timerProgress}%` }}
-            />
-          </div>
-
-          {/* Status Line */}
-          <div className="mt-2 text-[11px] tracking-wide opacity-70 min-h-[18px] w-full text-left">
-            {timerStatus}
-          </div>
-
-          {/* Action Buttons */}
-          <div className="grid grid-cols-3 gap-2 mt-3 w-full">
-            <button
-              type="button"
-              onClick={startTimer}
-              className="bg-[#00c853] text-black font-bold min-h-[44px] rounded-[6px] text-[13px] tracking-widest hover:brightness-110 active:scale-[0.98] whitespace-nowrap overflow-hidden cursor-pointer"
-            >
-              START
-            </button>
-            <button
-              type="button"
-              onClick={stopTimer}
-              className="bg-black border border-[#ffcc00] text-[#ffcc00] font-bold min-h-[44px] rounded-[6px] text-[13px] tracking-widest hover:bg-[#1a1a00] active:scale-[0.98] whitespace-nowrap overflow-hidden cursor-pointer"
-            >
-              STOP
-            </button>
-            <button
-              type="button"
-              onClick={resetTimer}
-              className="bg-[#ffcc00] text-black font-bold min-h-[44px] rounded-[6px] text-[13px] tracking-widest hover:bg-[#ffcc00]/80 active:scale-[0.98] whitespace-nowrap overflow-hidden cursor-pointer"
-            >
-              RESET
-            </button>
-          </div>
-
-          {/* Quick Countdown Trigger */}
-          <div className="grid grid-cols-1 gap-2 mt-3">
+        {/* ================= ALL OPERATIONAL TIMERS QUEUE ================= */}
+        <div className="border border-[#ffcc00]/30 rounded-[12px] p-3 bg-black/60 flex flex-col gap-3">
+          <div className="flex justify-between items-center flex-wrap gap-2">
+            <span className="text-[11px] tracking-[0.25em] font-black text-[#ffcc00]">
+              ACTIVE MISSIONS &amp; TIMERS ({timers.length})
+            </span>
             <button
               type="button"
               onClick={() => {
-                startTakeover(10, "TIMER / ALARM", () => {
-                  setTimerRemaining(0);
-                  setTimerRunning(false);
-                  setTimerTimesUp(true);
-                  setTimerStatus("TIME'S UP");
-                  showToast("TIME'S UP", 3000);
-                });
+                setPickerFocusUnit("minutes");
+                setModalTarget({ type: "timer-new" });
               }}
-              className="min-h-[44px] rounded-[6px] font-bold text-[11px] md:text-[12px] tracking-widest bg-[#ffcc00] text-black border-2 border-[#ffcc00] hover:bg-black hover:text-[#ffcc00] px-2 whitespace-normal leading-tight cursor-pointer"
+              className="bg-[#ffcc00] text-black font-black text-[11px] px-3 py-1.5 rounded tracking-widest hover:bg-white transition-colors cursor-pointer"
             >
-              TIMER / ALARM — COUNTDOWN 10→0→{ZERO_SOUND_LABELS[zeroSound]}
+              + ADD NEW TIMER
             </button>
           </div>
 
-          {/* Volume T */}
-          <div className="mt-3 flex items-center gap-3">
-            <span className="text-[10px] w-[40px] opacity-60">VOL T</span>
+          {/* Quick CTU Presets Bar */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {CTU_PRESETS.map((preset) => (
+              <button
+                key={preset.id}
+                type="button"
+                onClick={() => addPresetTimer(preset)}
+                className="px-2 py-2 rounded bg-[#111] border border-[#ffcc00]/30 hover:border-[#ffcc00] hover:bg-[#1a1a00] text-[10px] font-bold tracking-widest text-[#ffcc00] transition-colors text-left flex flex-col cursor-pointer"
+              >
+                <span className="truncate">{preset.label}</span>
+                <span className="text-[9px] opacity-60">{preset.durationSec / 60} MIN</span>
+              </button>
+            ))}
+          </div>
+
+          {/* Secondary Timers Stack */}
+          <div className="flex flex-col gap-2 mt-1">
+            {timers.map((t) => {
+              const hms = formatHMS(t.remainingSec);
+              const isFocused = t.id === focusedTimer?.id;
+              return (
+                <div
+                  key={t.id}
+                  className={`p-2.5 rounded-[8px] border transition-colors flex flex-col md:flex-row items-stretch md:items-center justify-between gap-2.5 ${
+                    isFocused
+                      ? "border-[#ffcc00] bg-[#111100]"
+                      : "border-[#ffcc00]/25 bg-black hover:border-[#ffcc00]/50"
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPickerFocusUnit("minutes");
+                        setModalTarget({ type: "timer-edit", id: t.id });
+                      }}
+                      className="flex items-center gap-1 font-black text-[22px] tracking-wider text-[#ffcc00] px-2 py-1 rounded bg-[#050500] border border-[#ffcc00]/30 hover:border-[#ffcc00] cursor-pointer"
+                    >
+                      <span>{hms.h}</span>:<span>{hms.m}</span>:<span>{hms.s}</span>
+                    </button>
+                    <div className="flex flex-col">
+                      <span className="text-[12px] font-bold tracking-wider text-white">
+                        {t.label}
+                      </span>
+                      <span className="text-[9px] tracking-widest opacity-60">
+                        {t.running ? "ACTIVE" : t.timesUp ? "TIME'S UP" : "PAUSED"} — {t.status}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 self-end md:self-auto">
+                    {t.running ? (
+                      <button
+                        type="button"
+                        onClick={() => stopTimer(t.id)}
+                        className="px-2.5 py-1 text-[11px] font-bold rounded border border-[#ffcc00] bg-black text-[#ffcc00] hover:bg-[#1a1a00] cursor-pointer"
+                      >
+                        STOP
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => startTimer(t.id)}
+                        className="px-2.5 py-1 text-[11px] font-bold rounded bg-[#00c853] text-black hover:brightness-110 cursor-pointer"
+                      >
+                        START
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => resetTimer(t.id)}
+                      className="px-2.5 py-1 text-[11px] font-bold rounded bg-[#ffcc00] text-black hover:bg-[#ffcc00]/80 cursor-pointer"
+                    >
+                      RESET
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => deleteTimer(t.id)}
+                      className="px-2 py-1 text-[11px] font-bold rounded border border-red-500/50 text-red-400 hover:bg-red-950 cursor-pointer"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* ================= MULTIPLE DAILY ALARMS PANEL ================= */}
+        <div className="relative border-2 border-dashed border-[#ffcc00] rounded-[14px] p-3 md:p-4 bg-[#050500] min-h-[90px] flex flex-col gap-3">
+          <div className="flex justify-between items-center flex-wrap gap-2">
+            <span className="text-[10px] tracking-[0.25em] opacity-80 font-black">
+              DAILY 24HR ALARMS ({alarms.length}) — BANGKOK THEATER (UTC+7)
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setPickerFocusUnit("hours");
+                setModalTarget({ type: "alarm-new" });
+              }}
+              className="bg-[#ffcc00] text-black font-black text-[11px] px-3 py-1.5 rounded tracking-widest hover:bg-white transition-colors cursor-pointer"
+            >
+              + ARM NEW ALARM
+            </button>
+          </div>
+
+          {/* Alarm Cards Stack */}
+          <div className="flex flex-col gap-2.5">
+            {alarms.map((alarm) => {
+              const hm = formatHM(alarm.hour, alarm.minute);
+              return (
+                <div
+                  key={alarm.id}
+                  className="p-3 rounded-[10px] border border-[#ffcc00]/30 bg-black flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3"
+                >
+                  <div className="flex items-center gap-3">
+                    {/* Clickable Alarm HH:MM */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPickerFocusUnit("hours");
+                        setModalTarget({ type: "alarm-edit", id: alarm.id });
+                      }}
+                      className="px-3 py-1.5 rounded bg-[#111] border border-[#ffcc00]/40 hover:border-[#ffcc00] flex items-center gap-1 font-black text-[28px] md:text-[32px] text-[#ffcc00] leading-none cursor-pointer"
+                    >
+                      <span>{hm.h}</span>:<span>{hm.m}</span>
+                    </button>
+                    <div className="flex flex-col">
+                      <span className="text-[12px] font-bold tracking-wider text-white">
+                        {alarm.label}
+                      </span>
+                      <span className="text-[9px] tracking-widest opacity-60">
+                        {alarm.armed ? "ACTIVE PROTOCOL — ENGAGED" : "STANDBY — DISARMED"}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 self-end sm:self-auto">
+                    <button
+                      type="button"
+                      onClick={() => toggleAlarmArmed(alarm.id)}
+                      className={`px-3 py-1.5 text-[11px] font-bold tracking-wider rounded cursor-pointer ${
+                        alarm.armed
+                          ? "bg-[#00c853] text-black hover:brightness-110"
+                          : "bg-black border border-[#ffcc00]/50 text-[#ffcc00]/60 hover:border-[#ffcc00]"
+                      }`}
+                    >
+                      {alarm.armed ? "ARMED" : "OFF"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => deleteAlarm(alarm.id)}
+                      className="px-2.5 py-1.5 text-[11px] font-bold rounded border border-red-500/50 text-red-400 hover:bg-red-950 cursor-pointer"
+                    >
+                      DELETE
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* ================= AUDIO & KLAXON CONFIGURATION ================= */}
+        <div className="border border-[#ffcc00]/30 rounded-[12px] p-3 bg-black/60 flex flex-col gap-3">
+          <div className="flex justify-between items-center">
+            <span className="text-[10px] tracking-[0.25em] font-bold text-[#ffcc00]">
+              TACTICAL AUDIO &amp; AT ZERO KLAXON
+            </span>
+          </div>
+
+          {/* Quick Countdown Trigger */}
+          <button
+            type="button"
+            onClick={() => {
+              startTakeover(10, "MANUAL COUNTDOWN TEST", () => {
+                showToast("TIME'S UP", 3000);
+              });
+            }}
+            className="min-h-[44px] rounded-[6px] font-bold text-[11px] md:text-[12px] tracking-widest bg-[#ffcc00] text-black border-2 border-[#ffcc00] hover:bg-black hover:text-[#ffcc00] px-2 whitespace-normal leading-tight cursor-pointer"
+          >
+            MANUAL OVERRIDE — TRIGGER 10→0 COUNTDOWN &amp; {ZERO_SOUND_LABELS[zeroSound]}
+          </button>
+
+          {/* Volume Slider */}
+          <div className="flex items-center gap-3">
+            <span className="text-[10px] w-[50px] opacity-60">VOLUME</span>
             <input
               type="range"
               min={0}
@@ -594,151 +1029,48 @@ export function CTUTerminalV74() {
             <span className="text-[11px] w-[30px] text-right">{timerVol.toFixed(2)}</span>
           </div>
 
-          {/* At Zero Play Selector */}
-          <div className="mt-4 border border-[#ffcc00]/30 rounded-[8px] p-2.5 bg-black/60">
-            <div className="text-[9px] tracking-[0.28em] opacity-60 mb-2">AT ZERO PLAY:</div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-              {(["voice", "boom", "alarm", "ctu_beep", "stinger"] as ZeroSoundType[]).map((key) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => {
-                    setZeroSound(key);
-                    showToast(`ZERO: ${ZERO_SOUND_LABELS[key]}`, 1500);
-                  }}
-                  className={`min-h-[38px] rounded-[6px] text-[10px] md:text-[11px] font-bold tracking-widest border transition-colors cursor-pointer ${
-                    zeroSound === key
-                      ? "bg-[#ffcc00] text-black border-[#ffcc00] shadow-[0_0_12px_rgba(255,204,0,0.4)]"
-                      : "bg-black text-[#ffcc00] border-[#ffcc00]/40 hover:bg-[#1a1a00]"
-                  }`}
-                >
-                  {ZERO_SOUND_LABELS[key]}
-                </button>
-              ))}
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-3">
+          {/* At Zero Selector */}
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-1.5">
+            {(["voice", "boom", "alarm", "ctu_beep", "stinger"] as ZeroSoundType[]).map((key) => (
               <button
+                key={key}
                 type="button"
                 onClick={() => {
-                  triggerZeroSound();
-                  showToast(`TESTING: ${ZERO_SOUND_LABELS[zeroSound]}`, 2000);
+                  setZeroSound(key);
+                  showToast(`ZERO: ${ZERO_SOUND_LABELS[key]}`, 1500);
                 }}
-                className="min-h-[38px] rounded-[6px] text-[11px] font-bold tracking-widest bg-[#ffcc00] text-black hover:bg-[#ffcc00]/80 transition-colors cursor-pointer"
+                className={`min-h-[38px] rounded-[6px] text-[10px] md:text-[11px] font-bold tracking-widest border transition-colors cursor-pointer ${
+                  zeroSound === key
+                    ? "bg-[#ffcc00] text-black border-[#ffcc00] shadow-[0_0_12px_rgba(255,204,0,0.4)]"
+                    : "bg-black text-[#ffcc00] border-[#ffcc00]/40 hover:bg-[#1a1a00]"
+                }`}
               >
-                TEST {ZERO_SOUND_LABELS[zeroSound]}
+                {ZERO_SOUND_LABELS[key]}
               </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const audio = getAudio();
-                  audio.stopZeroTheme();
-                  showToast("SOUND STOPPED", 1500);
-                }}
-                className="min-h-[38px] rounded-[6px] text-[11px] font-bold tracking-widest bg-black border border-[#ffcc00] text-[#ffcc00] hover:bg-[#1a1a00] transition-colors cursor-pointer"
-              >
-                STOP AUDIO
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* ALARM PANEL (Segmented Clickable Numbers) */}
-        <div className="relative border-2 border-dashed border-[#ffcc00] rounded-[14px] p-3 md:p-4 bg-[#050500] min-h-[90px] flex flex-col gap-0">
-          <div className="flex justify-between items-center">
-            <span className="text-[10px] tracking-[0.25em] opacity-60">
-              DAILY ALARM — CLICK EACH UNIT TO SET
-            </span>
-            <span
-              className={`text-[10px] px-2 py-[2px] rounded border ${
-                alarmArmed ? "border-green-400 text-green-400" : "border-[#ffcc00]/40 text-[#ffcc00]/60"
-              }`}
-            >
-              {alarmArmed ? "ARMED" : "OFF"}
-            </span>
+            ))}
           </div>
 
-          {/* Segmented Clickable Alarm Readout */}
-          <div className="mt-3 py-3 px-2 border border-[#ffcc00]/30 rounded-[10px] bg-black flex flex-col items-center">
-            <div className="flex items-center justify-center gap-2 md:gap-3 flex-wrap">
-              {/* Hours Block */}
-              <button
-                type="button"
-                onClick={() => {
-                  setPickerFocusUnit("hours");
-                  setModalMode("alarm");
-                }}
-                className="group flex flex-col items-center px-3 py-1.5 rounded-[8px] border border-transparent hover:border-[#ffcc00] hover:bg-[#1a1a00] active:scale-95 transition-all cursor-pointer"
-              >
-                <span className="text-[38px] md:text-[46px] font-black tracking-widest leading-none text-[#ffcc00] group-hover:drop-shadow-[0_0_14px_rgba(255,204,0,0.8)]">
-                  {alarmHm.h}
-                </span>
-                <span className="text-[8px] md:text-[9px] tracking-widest text-[#ffcc00]/60 font-bold mt-1">
-                  HOURS (24HR)
-                </span>
-              </button>
-
-              <span className="text-[32px] md:text-[40px] font-black text-[#ffcc00] pb-4">:</span>
-
-              {/* Minutes Block */}
-              <button
-                type="button"
-                onClick={() => {
-                  setPickerFocusUnit("minutes");
-                  setModalMode("alarm");
-                }}
-                className="group flex flex-col items-center px-3 py-1.5 rounded-[8px] border border-transparent hover:border-[#ffcc00] hover:bg-[#1a1a00] active:scale-95 transition-all cursor-pointer"
-              >
-                <span className="text-[38px] md:text-[46px] font-black tracking-widest leading-none text-[#ffcc00] group-hover:drop-shadow-[0_0_14px_rgba(255,204,0,0.8)]">
-                  {alarmHm.m}
-                </span>
-                <span className="text-[8px] md:text-[9px] tracking-widest text-[#ffcc00]/60 font-bold mt-1">
-                  MINUTES
-                </span>
-              </button>
-
-              <div className="ml-3 flex flex-col items-center justify-center pl-3 border-l border-[#ffcc00]/30">
-                <span
-                  className={`text-[12px] font-black tracking-widest px-2 py-1 rounded border ${
-                    alarmArmed ? "border-green-400 text-green-400" : "border-[#ffcc00]/40 text-[#ffcc00]/60"
-                  }`}
-                >
-                  {alarmArmed ? "ARMED" : "OFF"}
-                </span>
-              </div>
-            </div>
-            <div className="text-[10px] opacity-60 mt-1 tracking-widest">
-              TAP HOURS OR MINUTES TO CHANGE ALARM
-            </div>
-          </div>
-
-          {/* Alarm Action Buttons */}
-          <div className="grid grid-cols-3 gap-2 mt-3 w-full">
+          <div className="grid grid-cols-2 gap-2 mt-1">
             <button
               type="button"
-              onClick={armAlarm}
-              className="bg-[#00c853] text-black font-bold min-h-[44px] rounded-[6px] text-[12px] tracking-widest hover:brightness-110 whitespace-nowrap overflow-hidden cursor-pointer"
+              onClick={() => {
+                triggerZeroSound();
+                showToast(`TESTING: ${ZERO_SOUND_LABELS[zeroSound]}`, 2000);
+              }}
+              className="min-h-[38px] rounded-[6px] text-[11px] font-bold tracking-widest bg-[#ffcc00] text-black hover:bg-[#ffcc00]/80 transition-colors cursor-pointer"
             >
-              ARM 24HR
-            </button>
-            <button
-              type="button"
-              onClick={disarmAlarm}
-              className="bg-black border border-[#ffcc00] text-[#ffcc00] font-bold min-h-[44px] rounded-[6px] text-[12px] tracking-widest hover:bg-[#1a1a00] whitespace-nowrap overflow-hidden cursor-pointer"
-            >
-              DISARM
+              TEST {ZERO_SOUND_LABELS[zeroSound]}
             </button>
             <button
               type="button"
               onClick={() => {
                 const audio = getAudio();
                 audio.stopZeroTheme();
-                disarmAlarm();
-                showToast("ALARM STOPPED", 2000);
+                showToast("SOUND STOPPED", 1500);
               }}
-              className="bg-[#ff1744] text-white font-bold min-h-[44px] rounded-[6px] text-[12px] tracking-widest hover:brightness-110 whitespace-nowrap overflow-hidden cursor-pointer"
+              className="min-h-[38px] rounded-[6px] text-[11px] font-bold tracking-widest bg-black border border-[#ffcc00] text-[#ffcc00] hover:bg-[#1a1a00] transition-colors cursor-pointer"
             >
-              STOP
+              STOP AUDIO
             </button>
           </div>
         </div>
@@ -796,16 +1128,16 @@ export function CTUTerminalV74() {
       )}
 
       {/* SAMSUNG GALAXY SLIDE DRUM PICKER MODAL */}
-      {modalMode && (
+      {modalTarget && (
         <div className="fixed inset-0 z-[10000] bg-black/75 backdrop-blur-[3px] flex items-center justify-center p-3">
           <SamsungTimePicker
-            mode={modalMode}
-            initialHours={modalMode === "timer" ? Math.floor(timerDuration / 3600) : alarmHour}
-            initialMinutes={modalMode === "timer" ? Math.floor((timerDuration % 3600) / 60) : alarmMinute}
-            initialSeconds={modalMode === "timer" ? timerDuration % 60 : 0}
+            mode={modalTarget.type.startsWith("timer") ? "timer" : "alarm"}
+            initialHours={pickerInitials.hours}
+            initialMinutes={pickerInitials.minutes}
+            initialSeconds={pickerInitials.seconds}
             initialFocus={pickerFocusUnit}
             onSave={handleModalSave}
-            onCancel={() => setModalMode(null)}
+            onCancel={() => setModalTarget(null)}
           />
         </div>
       )}
