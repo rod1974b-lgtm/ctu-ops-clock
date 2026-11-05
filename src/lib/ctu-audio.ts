@@ -75,21 +75,67 @@ export class CTUAudio {
     }
   }
 
-  public playCountdownAlert() {
+  /**
+   * Escalating Countdown Alert:
+   * - intensity 1 (10s to 6s): Standard rate (1.0x) + base warning pip
+   * - intensity 2 (5s to 4s): DOUBLE SOUND -> rate 1.18x + 1.5x volume boost + double-pip klaxon
+   * - intensity 3 (3s to 1s): TRIPLE SOUND -> rate 1.35x + 2.0x volume peak + urgent triple-pip klaxon
+   */
+  public playCountdownAlert(intensity: 1 | 2 | 3 = 1) {
     this.unlock();
+
+    // 1. Play & Escalate Background MP3 Alert
     if (this.countdownAudio) {
       try {
-        this.countdownAudio.currentTime = 0;
-        this.countdownAudio.volume = this.volume;
-        this.countdownAudio.play().catch(() => {
-          this.fallbackCrisisSynth();
-        });
+        const rate = intensity === 3 ? 1.35 : intensity === 2 ? 1.18 : 1.0;
+        const volMultiplier = intensity === 3 ? 1.0 : intensity === 2 ? Math.min(1.0, this.volume * 1.35) : this.volume;
+
+        this.countdownAudio.playbackRate = rate;
+        this.countdownAudio.volume = volMultiplier;
+
+        if (this.countdownAudio.paused) {
+          this.countdownAudio.currentTime = 0;
+          this.countdownAudio.play().catch(() => {
+            this.fallbackCrisisSynth();
+          });
+        }
       } catch {
         this.fallbackCrisisSynth();
       }
     } else {
       this.fallbackCrisisSynth();
     }
+
+    // 2. Layer Synthesizer Klaxon Pulses (Double at 5s, Triple at 3s)
+    this.layerCrisisPulse(intensity);
+  }
+
+  private layerCrisisPulse(intensity: 1 | 2 | 3) {
+    if (!this.ctx || !this.masterGain) return;
+    try {
+      const now = this.ctx.currentTime + 0.01;
+      const count = intensity; // 1 pip at 10-6s, 2 pips at 5-4s, 3 pips at 3-1s
+      const baseFreq = intensity === 3 ? 1800 : intensity === 2 ? 1500 : 1200;
+
+      for (let i = 0; i < count; i++) {
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        const startTime = now + i * 0.12;
+
+        osc.type = intensity === 3 ? "sawtooth" : "square";
+        osc.frequency.setValueAtTime(baseFreq + i * 150, startTime);
+
+        gain.gain.setValueAtTime(0.0001, startTime);
+        gain.gain.exponentialRampToValueAtTime(0.5 * this.volume, startTime + 0.005);
+        gain.gain.exponentialRampToValueAtTime(0.0001, startTime + 0.09);
+
+        osc.connect(gain);
+        gain.connect(this.masterGain);
+
+        osc.start(startTime);
+        osc.stop(startTime + 0.1);
+      }
+    } catch {}
   }
 
   public stopCountdownAlert() {
@@ -97,13 +143,35 @@ export class CTUAudio {
       try {
         this.countdownAudio.pause();
         this.countdownAudio.currentTime = 0;
+        this.countdownAudio.playbackRate = 1.0;
       } catch {}
     }
   }
 
-  public playZeroTheme() {
+  /**
+   * Spoken Voice + 24 At Zero Theme:
+   * Speaks "Zero" loudly and clearly using browser SpeechSynthesis,
+   * while simultaneously engaging the 24 Zero Crisis music loop.
+   */
+  public playZeroVoiceAndTheme() {
     this.unlock();
     this.stopCountdownAlert();
+
+    // 1. Spoken Tactical Announcement: "Zero"
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      try {
+        window.speechSynthesis.cancel(); // Clear any queued utterances
+        const utter = new SpeechSynthesisUtterance("Zero");
+        utter.rate = 1.05;
+        utter.pitch = 0.9;
+        utter.volume = Math.max(0.6, this.volume);
+        window.speechSynthesis.speak(utter);
+      } catch (err) {
+        console.warn("SpeechSynthesis error:", err);
+      }
+    }
+
+    // 2. Play 24 At Zero Theme MP3
     if (this.zeroAudio) {
       try {
         this.zeroAudio.currentTime = 0;
@@ -119,6 +187,10 @@ export class CTUAudio {
     }
   }
 
+  public playZeroTheme() {
+    this.playZeroVoiceAndTheme();
+  }
+
   public stopZeroTheme() {
     if (this.zeroAudio) {
       try {
@@ -126,62 +198,16 @@ export class CTUAudio {
         this.zeroAudio.currentTime = 0;
       } catch {}
     }
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      try {
+        window.speechSynthesis.cancel();
+      } catch {}
+    }
   }
 
-  /**
-   * Tiered Clock Ticks:
-   * Tier 1 (Normal >10s): SILENT
-   * Tier 2 (Countdown 10s-4s): High-priority CTU warning pulse
-   * Tier 3 (Crisis <=3s): Urgent double-staccato pip
-   */
-  public tick(tier: 1 | 2 | 3) {
-    if (tier === 1) return;
-
-    this.unlock();
-    if (!this.ctx || !this.masterGain) return;
-
-    try {
-      const now = this.ctx.currentTime + 0.01;
-
-      if (tier === 2) {
-        const osc = this.ctx.createOscillator();
-        const gain = this.ctx.createGain();
-        osc.type = "square";
-        osc.frequency.setValueAtTime(1400, now);
-
-        gain.gain.setValueAtTime(0.0001, now);
-        gain.gain.exponentialRampToValueAtTime(0.4 * this.volume, now + 0.005);
-        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.08);
-
-        osc.connect(gain);
-        gain.connect(this.masterGain);
-
-        osc.start(now);
-        osc.stop(now + 0.09);
-      } else if (tier === 3) {
-        const osc1 = this.ctx.createOscillator();
-        const osc2 = this.ctx.createOscillator();
-        const gain = this.ctx.createGain();
-
-        osc1.type = "square";
-        osc2.type = "sawtooth";
-        osc1.frequency.setValueAtTime(1800, now);
-        osc2.frequency.setValueAtTime(900, now);
-
-        gain.gain.setValueAtTime(0.0001, now);
-        gain.gain.exponentialRampToValueAtTime(0.6 * this.volume, now + 0.004);
-        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.1);
-
-        osc1.connect(gain);
-        osc2.connect(gain);
-        gain.connect(this.masterGain);
-
-        osc1.start(now);
-        osc2.start(now);
-        osc1.stop(now + 0.11);
-        osc2.stop(now + 0.11);
-      }
-    } catch {}
+  public stopAll() {
+    this.stopCountdownAlert();
+    this.stopZeroTheme();
   }
 
   private fallbackCrisisSynth() {
