@@ -1,335 +1,156 @@
 // src/lib/ctu-audio.ts
 export type AudioSettings = {
   enabled: boolean;
-  ambient: number;
-  countdown: number;
-  alarm: number;
-  media: number;
-  window: number;
-  phone: boolean;
-  snooze: number;
+  volume: number;
 };
-
-export const defaultAudio: AudioSettings = {
-  enabled: true,
-  ambient: 70,
-  countdown: 85,
-  alarm: 100,
-  media: 70,
-  window: 10, // Default 10-second countdown alert window
-  phone: false,
-  snooze: 5,
-};
-
-const ZERO_THEME_URL = encodeURI("/24 At Zero theme.mp3");
-const COUNTDOWN_MEDIA_URL = encodeURI("/24 Countdown.mp4");
-const ALARM_COUNTDOWN_URL = encodeURI("/24 Alarm Countdown.mp3");
 
 export class CTUAudio {
-  private context: AudioContext | null = null;
+  private ctx: AudioContext | null = null;
+  private masterGain: GainNode | null = null;
   private zeroAudio: HTMLAudioElement | null = null;
-  private countdownAudio: HTMLAudioElement | null = null;
-  private alertAudio: HTMLAudioElement | null = null;
-  private isZeroPlaying = false;
-  private isCountdownPlaying = false;
-  private isAlertPlaying = false;
+  private volume: number = 0.85;
 
   constructor() {
-    if (typeof window !== "undefined") {
-      const AudioCtx =
-        window.AudioContext ||
-        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      if (AudioCtx) {
-        try {
-          this.context = new AudioCtx();
-        } catch {
-          /* delayed initialization */
-        }
-      }
-      this.initMediaElements();
-    }
+    this.initContext();
   }
 
-  private initMediaElements() {
+  private initContext() {
     if (typeof window === "undefined") return;
+    try {
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (AudioCtx && !this.ctx) {
+        this.ctx = new AudioCtx();
+        this.masterGain = this.ctx.createGain();
+        this.masterGain.gain.setValueAtTime(this.volume, this.ctx.currentTime);
+        this.masterGain.connect(this.ctx.destination);
+      }
+    } catch {}
 
-    if (!this.zeroAudio) {
+    if (!this.zeroAudio && typeof Audio !== "undefined") {
       try {
-        this.zeroAudio = new Audio(ZERO_THEME_URL);
+        this.zeroAudio = new Audio("/24 At Zero theme.mp3");
         this.zeroAudio.preload = "auto";
         this.zeroAudio.loop = true;
-      } catch {
-        /* audio element blocked */
-      }
-    }
-
-    if (!this.countdownAudio) {
-      try {
-        this.countdownAudio = new Audio(COUNTDOWN_MEDIA_URL);
-        this.countdownAudio.preload = "auto";
-        this.countdownAudio.loop = true;
-      } catch {
-        /* audio element blocked */
-      }
-    }
-
-    if (!this.alertAudio) {
-      try {
-        this.alertAudio = new Audio(ALARM_COUNTDOWN_URL);
-        this.alertAudio.preload = "auto";
-        this.alertAudio.loop = true;
-      } catch {
-        /* audio element blocked */
-      }
+      } catch {}
     }
   }
 
-  unlock(): boolean {
-    if (typeof window === "undefined") return false;
-    this.initMediaElements();
-
-    if (!this.context) {
-      const AudioCtx =
-        window.AudioContext ||
-        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      if (AudioCtx) {
-        try {
-          this.context = new AudioCtx();
-        } catch {
-          return false;
-        }
-      }
-    }
-
-    if (this.context && this.context.state === "suspended") {
-      void this.context.resume();
-    }
-
-    if (this.zeroAudio) this.zeroAudio.load();
-    if (this.countdownAudio) this.countdownAudio.load();
-    if (this.alertAudio) this.alertAudio.load();
-
-    return !!this.context && this.context.state === "running";
-  }
-
-  tone(
-    frequency: number,
-    duration: number,
-    volume: number,
-    offset = 0,
-    type: OscillatorType = "sine",
-  ) {
-    if (!this.context || volume <= 0) return;
-
-    try {
-      if (this.context.state === "suspended") {
-        void this.context.resume();
-      }
-
-      const osc = this.context.createOscillator();
-      const gain = this.context.createGain();
-      const start = this.context.currentTime + offset;
-
-      osc.type = type;
-      osc.frequency.setValueAtTime(frequency, start);
-
-      gain.gain.setValueAtTime(0.0001, start);
-      const peak = Math.min(1, volume * 0.7);
-      gain.gain.linearRampToValueAtTime(peak, start + 0.012);
-      gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
-
-      osc.connect(gain);
-      gain.connect(this.context.destination);
-
-      osc.start(start);
-      osc.stop(start + duration + 0.03);
-    } catch {
-      /* Audio context error */
+  public unlock() {
+    this.initContext();
+    if (this.ctx && this.ctx.state === "suspended") {
+      this.ctx.resume().catch(() => {});
     }
   }
 
-  tickClock(volume = 0.6) {
-    this.tone(1400, 0.045, volume * 0.9, 0, "square");
-    this.tone(240, 0.065, volume * 0.75, 0, "triangle");
-  }
-
-  chirp(volume = 0.7) {
-    this.tone(1200, 0.06, volume, 0, "triangle");
-    this.tone(1800, 0.1, volume, 0.05, "sine");
-  }
-
-  playAtZero(volume = 1.0) {
-    this.stopCountdown();
-    this.stopAlert();
-    this.initMediaElements();
-
-    const targetVolume = Math.max(0, Math.min(1, volume));
-
+  public setVolume(vol: number) {
+    this.volume = Math.max(0, Math.min(1, vol));
+    if (this.masterGain && this.ctx) {
+      this.masterGain.gain.setValueAtTime(this.volume, this.ctx.currentTime);
+    }
     if (this.zeroAudio) {
-      this.zeroAudio.volume = targetVolume;
-      if (!this.isZeroPlaying) {
-        this.zeroAudio.currentTime = 0;
-        this.zeroAudio
-          .play()
-          .then(() => {
-            this.isZeroPlaying = true;
-          })
-          .catch(() => {
-            this.syntheticCrisisAlert(targetVolume);
-          });
-      }
-    } else {
-      this.syntheticCrisisAlert(targetVolume);
+      this.zeroAudio.volume = this.volume;
     }
-  }
-
-  stopAtZero() {
-    if (this.zeroAudio && this.isZeroPlaying) {
-      try {
-        this.zeroAudio.pause();
-        this.zeroAudio.currentTime = 0;
-      } catch {
-        /* ignore */
-      }
-    }
-    this.isZeroPlaying = false;
-  }
-
-  playCountdown(volume = 0.85) {
-    this.stopAtZero();
-    this.stopAlert();
-    this.initMediaElements();
-
-    const targetVolume = Math.max(0, Math.min(1, volume));
-
-    if (this.countdownAudio) {
-      this.countdownAudio.volume = targetVolume;
-      if (!this.isCountdownPlaying) {
-        this.countdownAudio
-          .play()
-          .then(() => {
-            this.isCountdownPlaying = true;
-          })
-          .catch(() => {
-            this.tickClock(targetVolume);
-          });
-      }
-    } else {
-      this.tickClock(targetVolume);
-    }
-  }
-
-  stopCountdown() {
-    if (this.countdownAudio && this.isCountdownPlaying) {
-      try {
-        this.countdownAudio.pause();
-        this.countdownAudio.currentTime = 0;
-      } catch {
-        /* ignore */
-      }
-    }
-    this.isCountdownPlaying = false;
-  }
-
-  playAlertCountdown(volume = 0.9) {
-    this.stopAtZero();
-    this.stopCountdown();
-    this.initMediaElements();
-
-    const targetVolume = Math.max(0, Math.min(1, volume));
-
-    if (this.alertAudio) {
-      this.alertAudio.volume = targetVolume;
-      if (!this.isAlertPlaying) {
-        this.alertAudio.currentTime = 0;
-        this.alertAudio
-          .play()
-          .then(() => {
-            this.isAlertPlaying = true;
-          })
-          .catch(() => {
-            this.syntheticWarningPips(targetVolume);
-          });
-      }
-    } else {
-      this.syntheticWarningPips(targetVolume);
-    }
-  }
-
-  stopAlert() {
-    if (this.alertAudio && this.isAlertPlaying) {
-      try {
-        this.alertAudio.pause();
-        this.alertAudio.currentTime = 0;
-      } catch {
-        /* ignore */
-      }
-    }
-    this.isAlertPlaying = false;
-  }
-
-  private syntheticCrisisAlert(vol: number) {
-    [440, 554, 659, 880].forEach((freq, idx) => {
-      this.tone(freq, 0.32, vol * 0.9, idx * 0.06, "triangle");
-    });
-    this.tone(110, 0.6, vol, 0, "sawtooth");
-  }
-
-  private syntheticWarningPips(vol: number) {
-    this.tone(880, 0.12, vol * 0.8, 0, "square");
-    this.tone(880, 0.12, vol * 0.8, 0.25, "square");
-    this.tone(660, 0.2, vol * 0.9, 0.5, "square");
   }
 
   /**
-   * Operational tier dispatcher:
-   * tier 1 = active timer > 10s (completely silent)
-   * tier 2 = countdown at <= 10s (plays /24 Alarm Countdown.mp3)
-   * tier 3 = at zero crisis (plays /24 At Zero theme.mp3)
+   * Tiered Clock Ticks:
+   * Tier 1 (Normal >10s): SILENT (returns immediately)
+   * Tier 2 (Countdown 10s-4s): High-priority CTU warning pulse
+   * Tier 3 (Crisis <=3s): Urgent double-staccato pip
    */
-  tick(tier: number, settings?: AudioSettings, beat?: number) {
-    const cfg: AudioSettings = settings ?? defaultAudio;
+  public tick(tier: 1 | 2 | 3) {
+    // Keep normal operations completely silent as requested
+    if (tier === 1) return;
 
-    if (!cfg.enabled) {
-      this.stopAll();
-      return;
-    }
+    this.unlock();
+    if (!this.ctx || !this.masterGain) return;
 
-    if (tier === 3) {
-      // AT ZERO: 24 At Zero theme
-      this.playAtZero(cfg.alarm / 100);
-    } else if (tier === 2) {
-      // COUNTDOWN AT 10 SECONDS: alarm countdown sound
-      this.playAlertCountdown(cfg.countdown / 100);
-    } else {
-      // TIER 1 (> 10s): Silence — no ambient ticking
-      this.stopAtZero();
-      this.stopCountdown();
-      this.stopAlert();
-    }
-
-    void beat;
-  }
-
-  stopAll() {
-    this.stopAtZero();
-    this.stopCountdown();
-    this.stopAlert();
-  }
-
-  async mute() {
-    this.stopAll();
-    if (this.context && this.context.state === "running") {
-      await this.context.suspend();
-    }
-  }
-
-  close() {
-    this.stopAll();
     try {
-      void this.context?.close();
-    } catch {
-      /* ignore */
+      const now = this.ctx.currentTime + 0.01;
+
+      if (tier === 2) {
+        // High-priority 24 countdown tick
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = "square";
+        osc.frequency.setValueAtTime(1400, now);
+
+        gain.gain.setValueAtTime(0.0001, now);
+        gain.gain.exponentialRampToValueAtTime(0.4 * this.volume, now + 0.005);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.08);
+
+        osc.connect(gain);
+        gain.connect(this.masterGain);
+
+        osc.start(now);
+        osc.stop(now + 0.09);
+      } else if (tier === 3) {
+        // Urgent dual-tone crisis pip
+        const osc1 = this.ctx.createOscillator();
+        const osc2 = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+
+        osc1.type = "square";
+        osc2.type = "sawtooth";
+        osc1.frequency.setValueAtTime(1800, now);
+        osc2.frequency.setValueAtTime(900, now);
+
+        gain.gain.setValueAtTime(0.0001, now);
+        gain.gain.exponentialRampToValueAtTime(0.6 * this.volume, now + 0.004);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.1);
+
+        osc1.connect(gain);
+        osc2.connect(gain);
+        gain.connect(this.masterGain);
+
+        osc1.start(now);
+        osc2.start(now);
+        osc1.stop(now + 0.11);
+        osc2.stop(now + 0.11);
+      }
+    } catch {}
+  }
+
+  public playZeroTheme() {
+    this.unlock();
+    if (this.zeroAudio) {
+      this.zeroAudio.currentTime = 0;
+      this.zeroAudio.volume = this.volume;
+      this.zeroAudio.play().catch(() => {
+        this.fallbackCrisisSynth();
+      });
+    } else {
+      this.fallbackCrisisSynth();
     }
+  }
+
+  public stopZeroTheme() {
+    if (this.zeroAudio) {
+      try {
+        this.zeroAudio.pause();
+        this.zeroAudio.currentTime = 0;
+      } catch {}
+    }
+  }
+
+  private fallbackCrisisSynth() {
+    if (!this.ctx || !this.masterGain) return;
+    try {
+      const now = this.ctx.currentTime + 0.01;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = "sawtooth";
+      osc.frequency.setValueAtTime(440, now);
+      osc.frequency.exponentialRampToValueAtTime(880, now + 0.4);
+
+      gain.gain.setValueAtTime(0.001, now);
+      gain.gain.linearRampToValueAtTime(0.5 * this.volume, now + 0.05);
+      gain.gain.linearRampToValueAtTime(0.0001, now + 0.4);
+
+      osc.connect(gain);
+      gain.connect(this.masterGain);
+      osc.start(now);
+      osc.stop(now + 0.45);
+    } catch {}
   }
 }
