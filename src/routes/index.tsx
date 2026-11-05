@@ -8,11 +8,12 @@ export const Route = createFileRoute("/")({
   component: CTUTerminalV74,
   head: () => ({
     meta: [
-      { title: "CTU OPERATIONAL TERMINAL • 24" },
-      {
-        name: "description",
-        content: "Counter Terrorist Unit tactical mission timer and 24-hour operations terminal.",
-      },
+      { title: "CTU Tactical Operational Command | 24 v74" },
+      { name: "description", content: "Authentic 24 TV Show CTU Tactical Mission Timer & Surveillance System." },
+      { property: "og:title", content: "CTU Tactical Operational Command" },
+      { property: "og:description", content: "Authentic 24 TV Show CTU Mission Terminal." },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
     ],
   }),
 });
@@ -20,322 +21,351 @@ export const Route = createFileRoute("/")({
 type ZeroSoundType = "voice" | "boom" | "alarm" | "ctu_beep" | "stinger";
 
 const ZERO_SOUND_LABELS: Record<ZeroSoundType, string> = {
-  voice: "24 VOICE - 6AM-7AM LOOP",
-  boom: "BOOM",
-  alarm: "ALARM",
+  voice: "VOICE: 0 AT ZERO",
+  boom: "BOOM IMPACT",
+  alarm: "ALARM KLAXON",
   ctu_beep: "CTU BEEP",
-  stinger: "STINGER",
+  stinger: "STINGER CHORD",
 };
 
-function formatHMS(seconds: number): string {
-  const safe = Math.max(0, Math.floor(seconds));
-  const h = Math.floor(safe / 3600);
-  const m = Math.floor((safe % 3600) / 60);
-  const s = safe % 60;
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${pad(h)}:${pad(m)}:${pad(s)}`;
-}
-
-function formatHM(hours: number, minutes: number): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${pad(hours)}:${pad(minutes)}`;
-}
-
 export function CTUTerminalV74() {
-  // Audio Engine instance
-  const audioRef = useRef<CTUAudio | null>(null);
+  // Live clock
+  const [now, setNow] = useState<Date>(() => new Date());
 
-  // Live Local Clock State
-  const [liveTime, setLiveTime] = useState<string>("00:00:00");
-  const [liveDay, setLiveDay] = useState<string>("THURSDAY");
-  const [liveDate, setLiveDate] = useState<string>("05 NOV 2026 - 24HR MIDNIGHT ROLLOVER OK");
-
-  // Timer State
-  const [timerDuration, setTimerDuration] = useState<number>(300); // 5 mins default
+  // Timer state
+  const [timerDuration, setTimerDuration] = useState<number>(300);
   const [timerRemaining, setTimerRemaining] = useState<number>(300);
   const [timerRunning, setTimerRunning] = useState<boolean>(false);
   const [timerTimesUp, setTimerTimesUp] = useState<boolean>(false);
-  const [timerStatus, setTimerStatus] = useState<string>("READY");
-  const [timerVol, setTimerVol] = useState<number>(0.75);
+  const [timerStatus, setTimerStatus] = useState<string>("READY - CLICK NUMBERS TO SET");
+  const [timerVol, setTimerVol] = useState<number>(0.85);
 
-  // Alarm State
-  const [alarmHour, setAlarmHour] = useState<number>(7);
-  const [alarmMinute, setAlarmMinute] = useState<number>(0);
-  const [alarmArmed, setAlarmArmed] = useState<boolean>(false);
-  const [alarmStatus, setAlarmStatus] = useState<string>("ALARM OFF");
-  const [alarmVol, setAlarmVol] = useState<number>(0.9);
+  // Alarm state
+  const [alarmHour, setAlarmHour] = useState<number>(19);
+  const [alarmMinute, setAlarmMinute] = useState<number>(38);
+  const [alarmArmed, setAlarmArmed] = useState<boolean>(true);
+  const alarmTriggeredRef = useRef<boolean>(false);
 
-  // Selected Zero Alert
+  // Zero sound preference
   const [zeroSound, setZeroSound] = useState<ZeroSoundType>("voice");
 
-  // Fullscreen 10-Second Takeover Overlay
-  const [takeoverActive, setTakeoverActive] = useState<boolean>(false);
-  const [takeoverCount, setTakeoverCount] = useState<number>(10);
-  const [takeoverTitle, setTakeoverTitle] = useState<string>("TIMER / ALARM");
-  const [isTakeoverCrisis, setIsTakeoverCrisis] = useState<boolean>(false);
-  const takeoverTimerRef = useRef<number | null>(null);
-  const takeoverInitialCountRef = useRef<number>(10);
-  const takeoverOnCompleteRef = useRef<(() => void) | null>(null);
+  // Samsung Time Picker Modal
+  const [modalMode, setModalMode] = useState<"timer" | "alarm" | null>(null);
+  const [pickerFocusUnit, setPickerFocusUnit] = useState<"hours" | "minutes" | "seconds">("minutes");
 
-  // Video Feeds (24 Opening & Ending Credits)
+  // Video Modals
   const [activeVideoModal, setActiveVideoModal] = useState<"opening" | "credits" | null>(null);
 
-  // Drum Picker Modal State
-  const [modalMode, setModalMode] = useState<"timer" | "alarm" | null>(null);
+  // Fullscreen Countdown Takeover
+  const [takeoverActive, setTakeoverActive] = useState<boolean>(false);
+  const [takeoverRemaining, setTakeoverRemaining] = useState<number>(10);
+  const [takeoverLabel, setTakeoverLabel] = useState<string>("PRIMARY OPERATION");
 
-  // Toast / Quote Banner
-  const [toastMessage, setToastMessage] = useState<string>("");
-  const toastTimeoutRef = useRef<number | null>(null);
+  // Toast
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const toastTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  const showToast = useCallback((msg: string, durationMs = 2500) => {
-    setToastMessage(msg);
-    if (toastTimeoutRef.current) window.clearTimeout(toastTimeoutRef.current);
-    toastTimeoutRef.current = window.setTimeout(() => {
-      setToastMessage("");
-    }, durationMs);
-  }, []);
+  // Audio engine
+  const audioRef = useRef<CTUAudio | null>(null);
+  const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const takeoverIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const takeoverCallbackRef = useRef<(() => void) | null>(null);
 
-  // Initialize and ensure audio
   const getAudio = useCallback(() => {
     if (!audioRef.current) {
       audioRef.current = new CTUAudio();
     }
-    audioRef.current.unlock();
     return audioRef.current;
   }, []);
 
-  // Live Local Clock Ticker
-  useEffect(() => {
-    const updateClock = () => {
-      const now = new Date();
-      const pad = (n: number) => String(n).padStart(2, "0");
-      setLiveTime(`${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`);
-
-      const days = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"];
-      setLiveDay(days[now.getDay()] ?? "THURSDAY");
-
-      const months = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
-      const d = pad(now.getDate());
-      const m = months[now.getMonth()];
-      const y = now.getFullYear();
-      setLiveDate(`${d} ${m} ${y} - 24HR MIDNIGHT ROLLOVER OK`);
-    };
-
-    updateClock();
-    const interval = window.setInterval(updateClock, 1000);
-    return () => window.clearInterval(interval);
+  const showToast = useCallback((msg: string, durationMs = 2500) => {
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    setToastMessage(msg);
+    toastTimeoutRef.current = setTimeout(() => {
+      setToastMessage(null);
+    }, durationMs);
   }, []);
 
-  // Trigger sound only at zero climax
+  // Update live clock every 250ms
+  useEffect(() => {
+    const id = setInterval(() => {
+      setNow(new Date());
+    }, 250);
+    return () => clearInterval(id);
+  }, []);
+
+  // Format Bangkok time
+  const bangkokDate = useMemo(() => {
+    return new Date(now.toLocaleString("en-US", { timeZone: "Asia/Bangkok" }));
+  }, [now]);
+
+  const liveTime = useMemo(() => {
+    const h = String(bangkokDate.getHours()).padStart(2, "0");
+    const m = String(bangkokDate.getMinutes()).padStart(2, "0");
+    const s = String(bangkokDate.getSeconds()).padStart(2, "0");
+    return `${h}:${m}:${s}`;
+  }, [bangkokDate]);
+
+  const liveDay = useMemo(() => {
+    return bangkokDate.toLocaleDateString("en-US", { weekday: "short" }).toUpperCase();
+  }, [bangkokDate]);
+
+  const liveDate = useMemo(() => {
+    return bangkokDate.toLocaleDateString("en-US", {
+      month: "short",
+      day: "2-digit",
+      year: "numeric",
+    }).toUpperCase();
+  }, [bangkokDate]);
+
+  // Audio synth zero sounds
   const triggerZeroSound = useCallback(() => {
-    const audio = getAudio();
-    audio.playZeroTheme();
-  }, [getAudio]);
-
-  // Cancel Countdown Takeover
-  const cancelTakeover = useCallback(() => {
-    if (takeoverTimerRef.current) {
-      window.clearInterval(takeoverTimerRef.current);
-      takeoverTimerRef.current = null;
-    }
-    const audio = getAudio();
-    audio.stopZeroTheme();
-    setTakeoverActive(false);
-    setTimerStatus("READY");
-    showToast("COUNTDOWN CANCELLED", 2000);
-  }, [getAudio, showToast]);
-
-  // Start 10-Second Takeover
-  const startTakeover = useCallback(
-    (count: number, title: string, onComplete?: () => void) => {
+    try {
       const audio = getAudio();
       audio.setVolume(timerVol);
+      const ctx = audio.getAudioContext();
+      if (!ctx) return;
+      const t = ctx.currentTime;
 
-      if (takeoverTimerRef.current) {
-        window.clearInterval(takeoverTimerRef.current);
-        takeoverTimerRef.current = null;
+      if (zeroSound === "voice") {
+        audio.playZeroTheme();
+        return;
       }
 
-      setTimerRunning(false);
-      setTimerStatus(`PAUSED • ${formatHMS(timerRemaining)}`);
+      if (zeroSound === "boom") {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(140, t);
+        osc.frequency.exponentialRampToValueAtTime(32, t + 1.2);
+        gain.gain.setValueAtTime(timerVol * 1.2, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 1.4);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(t);
+        osc.stop(t + 1.5);
+        return;
+      }
 
-      takeoverInitialCountRef.current = count;
-      takeoverOnCompleteRef.current = onComplete ?? null;
-      setTakeoverCount(count);
-      setTakeoverTitle(title);
-      setIsTakeoverCrisis(count <= 3);
-      setTakeoverActive(true);
-
-      // Play tick only during countdown
-      audio.tick(count <= 3 ? 3 : 2);
-
-      let current = count;
-      takeoverTimerRef.current = window.setInterval(() => {
-        current -= 1;
-        if (current < 0) {
-          if (takeoverTimerRef.current) {
-            window.clearInterval(takeoverTimerRef.current);
-            takeoverTimerRef.current = null;
-          }
-          setTakeoverActive(false);
-          triggerZeroSound();
-          if (takeoverOnCompleteRef.current) {
-            takeoverOnCompleteRef.current();
-          }
-          return;
+      if (zeroSound === "alarm") {
+        for (let i = 0; i < 4; i++) {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          const st = t + i * 0.28;
+          osc.type = "sawtooth";
+          osc.frequency.setValueAtTime(880, st);
+          osc.frequency.exponentialRampToValueAtTime(440, st + 0.2);
+          gain.gain.setValueAtTime(timerVol * 0.8, st);
+          gain.gain.exponentialRampToValueAtTime(0.001, st + 0.24);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(st);
+          osc.stop(st + 0.25);
         }
+        return;
+      }
 
-        setTakeoverCount(current);
-        setIsTakeoverCrisis(current <= 3);
-        audio.tick(current <= 3 ? 3 : 2);
+      if (zeroSound === "ctu_beep") {
+        for (let i = 0; i < 3; i++) {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          const st = t + i * 0.18;
+          osc.type = "sine";
+          osc.frequency.setValueAtTime(1760, st);
+          gain.gain.setValueAtTime(timerVol * 0.9, st);
+          gain.gain.exponentialRampToValueAtTime(0.001, st + 0.12);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(st);
+          osc.stop(st + 0.14);
+        }
+        return;
+      }
+
+      if (zeroSound === "stinger") {
+        const freqs = [220, 277.18, 329.63, 415.3];
+        freqs.forEach((f) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = "triangle";
+          osc.frequency.setValueAtTime(f, t);
+          gain.gain.setValueAtTime((timerVol * 0.7) / freqs.length, t);
+          gain.gain.exponentialRampToValueAtTime(0.001, t + 1.8);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(t);
+          osc.stop(t + 1.9);
+        });
+      }
+    } catch (e) {
+      console.warn("Zero sound error:", e);
+    }
+  }, [getAudio, zeroSound, timerVol]);
+
+  // Start 10s Takeover
+  const startTakeover = useCallback(
+    (durationSec = 10, label = "COUNTDOWN", onComplete?: () => void) => {
+      if (takeoverIntervalRef.current) clearInterval(takeoverIntervalRef.current);
+      setTakeoverActive(true);
+      setTakeoverRemaining(durationSec);
+      setTakeoverLabel(label);
+      takeoverCallbackRef.current = onComplete ?? null;
+
+      const audio = getAudio();
+      audio.setVolume(timerVol);
+      audio.playCountdownAlert();
+
+      takeoverIntervalRef.current = setInterval(() => {
+        setTakeoverRemaining((prev) => {
+          if (prev <= 1) {
+            if (takeoverIntervalRef.current) clearInterval(takeoverIntervalRef.current);
+            setTakeoverActive(false);
+            audio.stopCountdownAlert();
+            triggerZeroSound();
+            if (takeoverCallbackRef.current) {
+              takeoverCallbackRef.current();
+              takeoverCallbackRef.current = null;
+            }
+            return 0;
+          }
+          return prev - 1;
+        });
       }, 1000);
     },
-    [getAudio, timerRemaining, timerVol, triggerZeroSound]
+    [getAudio, timerVol, triggerZeroSound]
   );
 
-  // Main Timer Interval
-  const timerIntervalRef = useRef<number | null>(null);
-
-  const startTimer = useCallback(() => {
-    getAudio();
-
-    if (timerRemaining <= 0) {
-      showToast("SET TIME FIRST", 2000);
-      return;
-    }
-
-    if (timerRemaining <= 10) {
-      startTakeover(timerRemaining, "TIMER / ALARM", () => {
-        setTimerRemaining(0);
-        setTimerRunning(false);
-        setTimerTimesUp(true);
-        setTimerStatus("TIME'S UP");
-        showToast("TIME'S UP", 4000);
-      });
-      return;
-    }
-
-    setTimerRunning(true);
-    setTimerTimesUp(false);
-    setTimerStatus(`RUNNING • ${formatHMS(timerRemaining)}`);
-  }, [getAudio, timerRemaining, startTakeover, showToast]);
-
-  const stopTimer = useCallback(() => {
-    setTimerRunning(false);
-    setTimerStatus(`PAUSED • ${formatHMS(timerRemaining)}`);
-    showToast(`PAUSED • ${formatHMS(timerRemaining)}`, 2000);
-  }, [timerRemaining, showToast]);
-
-  const resetTimer = useCallback(() => {
-    setTimerRunning(false);
-    setTimerRemaining(timerDuration);
-    setTimerTimesUp(false);
-    setTimerStatus("READY");
+  const cancelTakeover = useCallback(() => {
+    if (takeoverIntervalRef.current) clearInterval(takeoverIntervalRef.current);
+    setTakeoverActive(false);
     const audio = getAudio();
+    audio.stopCountdownAlert();
     audio.stopZeroTheme();
-  }, [getAudio, timerDuration]);
+    showToast("COUNTDOWN DISARMED", 2000);
+  }, [getAudio, showToast]);
 
-  // Timer Countdown Heartbeat
+  // Timer Tick Interval
   useEffect(() => {
-    if (!timerRunning) {
-      if (timerIntervalRef.current) {
-        window.clearInterval(timerIntervalRef.current);
-        timerIntervalRef.current = null;
-      }
-      return;
-    }
-
-    timerIntervalRef.current = window.setInterval(() => {
-      setTimerRemaining((prev) => {
-        const next = prev - 1;
-
-        // At 10 seconds: trigger tactical takeover sequence with audio
-        if (next === 10) {
-          if (timerIntervalRef.current) {
-            window.clearInterval(timerIntervalRef.current);
-            timerIntervalRef.current = null;
+    if (timerRunning) {
+      timerIntervalRef.current = setInterval(() => {
+        setTimerRemaining((prev) => {
+          if (prev <= 1) {
+            if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+            setTimerRunning(false);
+            setTimerTimesUp(true);
+            setTimerStatus("TIME'S UP");
+            triggerZeroSound();
+            showToast("TIME'S UP - OPERATION CONCLUDED", 4000);
+            return 0;
           }
-          window.setTimeout(() => {
-            startTakeover(10, "TIMER / ALARM", () => {
+
+          if (prev === 11) {
+            startTakeover(10, "TIMER EXPIRATION", () => {
               setTimerRemaining(0);
               setTimerRunning(false);
               setTimerTimesUp(true);
               setTimerStatus("TIME'S UP");
-              showToast("TIME'S UP", 4000);
             });
-          }, 50);
-          return 10;
-        }
-
-        if (next <= 0) {
-          if (timerIntervalRef.current) {
-            window.clearInterval(timerIntervalRef.current);
-            timerIntervalRef.current = null;
           }
-          setTimerRunning(false);
-          setTimerTimesUp(true);
-          setTimerStatus("TIME'S UP");
-          triggerZeroSound();
-          showToast("TIME'S UP", 4000);
-          return 0;
-        }
 
-        setTimerStatus(`RUNNING • ${formatHMS(next)}`);
-        return next;
-      });
-    }, 1000);
-
+          return prev - 1;
+        });
+      }, 1000);
+    } else {
+      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+    }
     return () => {
-      if (timerIntervalRef.current) {
-        window.clearInterval(timerIntervalRef.current);
-        timerIntervalRef.current = null;
-      }
+      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
     };
   }, [timerRunning, startTakeover, triggerZeroSound, showToast]);
 
-  // Alarm Arming & Check Heartbeat
-  const armAlarm = useCallback(() => {
-    getAudio();
-    setAlarmArmed(true);
-    const targetStr = formatHM(alarmHour, alarmMinute);
-    setAlarmStatus(`ARMED FOR ${targetStr}`);
-    showToast(`ALARM ARMED FOR ${targetStr}`, 2500);
-  }, [getAudio, alarmHour, alarmMinute, showToast]);
-
-  const disarmAlarm = useCallback(() => {
-    setAlarmArmed(false);
-    setAlarmStatus("ALARM OFF");
-    const audio = getAudio();
-    audio.stopZeroTheme();
-    showToast("ALARM DISARMED", 2000);
-  }, [getAudio, showToast]);
-
+  // Check Alarm Match
   useEffect(() => {
     if (!alarmArmed) return;
+    const curH = bangkokDate.getHours();
+    const curM = bangkokDate.getMinutes();
+    const curS = bangkokDate.getSeconds();
 
-    const checkAlarm = () => {
-      const now = new Date();
-      if (now.getHours() === alarmHour && now.getMinutes() === alarmMinute && now.getSeconds() === 0) {
-        setAlarmArmed(false);
-        setAlarmStatus("ALARM TRIGGERED");
-        startTakeover(10, "ALARM IMMINENT", () => {
-          showToast("ALARM RINGING", 5000);
-        });
-      }
-    };
+    if (curH === alarmHour && curM === alarmMinute && curS === 0 && !alarmTriggeredRef.current) {
+      alarmTriggeredRef.current = true;
+      startTakeover(10, `ALARM TARGET ${String(alarmHour).padStart(2, "0")}:${String(alarmMinute).padStart(2, "0")}`, () => {
+        showToast("ALARM TRIGGERED", 4000);
+      });
+    }
 
-    const interval = window.setInterval(checkAlarm, 1000);
-    return () => window.clearInterval(interval);
-  }, [alarmArmed, alarmHour, alarmMinute, startTakeover, showToast]);
+    if (curM !== alarmMinute) {
+      alarmTriggeredRef.current = false;
+    }
+  }, [bangkokDate, alarmArmed, alarmHour, alarmMinute, startTakeover, showToast]);
 
-  // Progress Bar Percentage
+  // Format helpers
+  const formatHMS = (totalSec: number) => {
+    const h = String(Math.floor(totalSec / 3600)).padStart(2, "0");
+    const m = String(Math.floor((totalSec % 3600) / 60)).padStart(2, "0");
+    const s = String(totalSec % 60).padStart(2, "0");
+    return { h, m, s, text: `${h}:${m}:${s}` };
+  };
+
+  const formatHM = (h: number, m: number) => {
+    const hs = String(h).padStart(2, "0");
+    const ms = String(m).padStart(2, "0");
+    return { h: hs, m: ms, text: `${hs}:${ms}` };
+  };
+
+  const timerHms = useMemo(() => formatHMS(timerRemaining), [timerRemaining]);
+  const alarmHm = useMemo(() => formatHM(alarmHour, alarmMinute), [alarmHour, alarmMinute]);
+
+  // Controls
+  const startTimer = () => {
+    if (timerRemaining <= 0) {
+      showToast("SET A VALID TIME FIRST", 2000);
+      return;
+    }
+    setTimerRunning(true);
+    setTimerTimesUp(false);
+    setTimerStatus("RUNNING - TACTICAL ENGAGED");
+    getAudio().unlockAudio();
+    showToast("OPERATION TIMER STARTED", 2000);
+  };
+
+  const stopTimer = () => {
+    setTimerRunning(false);
+    setTimerStatus("PAUSED");
+    const audio = getAudio();
+    audio.stopCountdownAlert();
+    audio.stopZeroTheme();
+    showToast("TIMER PAUSED", 1500);
+  };
+
+  const resetTimer = () => {
+    setTimerRunning(false);
+    setTimerTimesUp(false);
+    setTimerRemaining(timerDuration);
+    setTimerStatus("READY - CLICK NUMBERS TO SET");
+    const audio = getAudio();
+    audio.stopCountdownAlert();
+    audio.stopZeroTheme();
+    showToast("TIMER RESET TO DURATION", 1500);
+  };
+
+  const armAlarm = () => {
+    setAlarmArmed(true);
+    getAudio().unlockAudio();
+    showToast(`ALARM ARMED: ${alarmHm.text}`, 2000);
+  };
+
+  const disarmAlarm = () => {
+    setAlarmArmed(false);
+    showToast("ALARM DISARMED", 1500);
+  };
+
   const timerProgress = useMemo(() => {
     if (timerDuration <= 0) return 0;
     const elapsed = timerDuration - timerRemaining;
     return Math.min(100, Math.max(0, (elapsed / timerDuration) * 100));
   }, [timerDuration, timerRemaining]);
 
-  // Handle Drum Modal Save
+  // Handle Modal Save
   const handleModalSave = useCallback(
     (values: SamsungTimePickerValues) => {
       if (modalMode === "timer") {
@@ -348,12 +378,12 @@ export function CTUTerminalV74() {
         setTimerRemaining(total);
         setTimerRunning(false);
         setTimerTimesUp(false);
-        setTimerStatus("READY");
-        showToast(`TIMER SET: ${formatHMS(total)}`, 2000);
+        setTimerStatus("READY - CLICK NUMBERS TO SET");
+        showToast(`TIMER SET: ${formatHMS(total).text}`, 2000);
       } else if (modalMode === "alarm") {
         setAlarmHour(values.hours);
         setAlarmMinute(values.minutes);
-        showToast(`ALARM SET: ${formatHM(values.hours, values.minutes)}`, 2000);
+        showToast(`ALARM SET: ${formatHM(values.hours, values.minutes).text}`, 2000);
       }
       setModalMode(null);
     },
@@ -386,7 +416,7 @@ export function CTUTerminalV74() {
 
       {/* MAIN OPERATIONS VIEWPORT */}
       <main className="max-w-[980px] mx-auto px-3 py-4 flex flex-col gap-4">
-        {/* DUAL CINEMATIC BUTTONS: 24 OPENING & ENDING CREDITS */}
+        {/* DUAL CINEMATIC BUTTONS */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
           <button
             type="button"
@@ -404,10 +434,12 @@ export function CTUTerminalV74() {
           </button>
         </div>
 
-        {/* TIMER PANEL (V74 DASHED CARD) */}
+        {/* TIMER PANEL (Segmented Clickable Numbers) */}
         <div className="relative border-2 border-dashed border-[#ffcc00] rounded-[14px] p-3 md:p-4 bg-[#050500] min-h-[90px] flex flex-col gap-0">
           <div className="flex justify-between items-center">
-            <span className="text-[10px] tracking-[0.25em] opacity-60">TIMER - CLICK TO SET</span>
+            <span className="text-[10px] tracking-[0.25em] opacity-60">
+              OPERATION TIMER — CLICK EACH UNIT TO SET
+            </span>
             <span
               className={`text-[10px] px-2 py-[2px] rounded border ${
                 timerRunning
@@ -421,15 +453,67 @@ export function CTUTerminalV74() {
             </span>
           </div>
 
-          {/* Centered Clickable Time Readout */}
-          <div
-            onClick={() => setModalMode("timer")}
-            className="mt-3 cursor-pointer select-none text-center py-3 border border-[#ffcc00]/30 rounded-[10px] bg-black hover:bg-[#111100] transition-colors"
-          >
-            <div className="text-[40px] md:text-[44px] font-black tracking-widest leading-none text-[#ffcc00]">
-              {formatHMS(timerRemaining)}
+          {/* Segmented Clickable Time Readout (Hours, Minutes, Seconds) */}
+          <div className="mt-3 py-3 px-2 border border-[#ffcc00]/30 rounded-[10px] bg-black flex flex-col items-center">
+            <div className="flex items-center justify-center gap-1.5 md:gap-3 flex-wrap">
+              {/* Hours Block */}
+              <button
+                type="button"
+                onClick={() => {
+                  setPickerFocusUnit("hours");
+                  setModalMode("timer");
+                }}
+                className="group flex flex-col items-center px-3 py-1.5 rounded-[8px] border border-transparent hover:border-[#ffcc00] hover:bg-[#1a1a00] active:scale-95 transition-all cursor-pointer"
+              >
+                <span className="text-[38px] md:text-[46px] font-black tracking-widest leading-none text-[#ffcc00] group-hover:drop-shadow-[0_0_14px_rgba(255,204,0,0.8)]">
+                  {timerHms.h}
+                </span>
+                <span className="text-[8px] md:text-[9px] tracking-widest text-[#ffcc00]/60 font-bold mt-1">
+                  HOURS
+                </span>
+              </button>
+
+              <span className="text-[32px] md:text-[40px] font-black text-[#ffcc00] pb-4">:</span>
+
+              {/* Minutes Block */}
+              <button
+                type="button"
+                onClick={() => {
+                  setPickerFocusUnit("minutes");
+                  setModalMode("timer");
+                }}
+                className="group flex flex-col items-center px-3 py-1.5 rounded-[8px] border border-transparent hover:border-[#ffcc00] hover:bg-[#1a1a00] active:scale-95 transition-all cursor-pointer"
+              >
+                <span className="text-[38px] md:text-[46px] font-black tracking-widest leading-none text-[#ffcc00] group-hover:drop-shadow-[0_0_14px_rgba(255,204,0,0.8)]">
+                  {timerHms.m}
+                </span>
+                <span className="text-[8px] md:text-[9px] tracking-widest text-[#ffcc00]/60 font-bold mt-1">
+                  MINUTES
+                </span>
+              </button>
+
+              <span className="text-[32px] md:text-[40px] font-black text-[#ffcc00] pb-4">:</span>
+
+              {/* Seconds Block */}
+              <button
+                type="button"
+                onClick={() => {
+                  setPickerFocusUnit("seconds");
+                  setModalMode("timer");
+                }}
+                className="group flex flex-col items-center px-3 py-1.5 rounded-[8px] border border-transparent hover:border-[#ffcc00] hover:bg-[#1a1a00] active:scale-95 transition-all cursor-pointer"
+              >
+                <span className="text-[38px] md:text-[46px] font-black tracking-widest leading-none text-[#ffcc00] group-hover:drop-shadow-[0_0_14px_rgba(255,204,0,0.8)]">
+                  {timerHms.s}
+                </span>
+                <span className="text-[8px] md:text-[9px] tracking-widest text-[#ffcc00]/60 font-bold mt-1">
+                  SECONDS
+                </span>
+              </button>
             </div>
-            <div className="text-[10px] opacity-50 mt-1 tracking-widest">TAP TO EDIT - HH:MM:SS</div>
+            <div className="text-[10px] opacity-60 mt-1 tracking-widest">
+              TAP HOURS, MINUTES, OR SECONDS TO CHANGE
+            </div>
           </div>
 
           {/* Progress Bar */}
@@ -485,7 +569,7 @@ export function CTUTerminalV74() {
               }}
               className="min-h-[44px] rounded-[6px] font-bold text-[11px] md:text-[12px] tracking-widest bg-[#ffcc00] text-black border-2 border-[#ffcc00] hover:bg-black hover:text-[#ffcc00] px-2 whitespace-normal leading-tight"
             >
-              TIMER / ALARM - COUNTDOWN 10→0→{ZERO_SOUND_LABELS[zeroSound]}
+              TIMER / ALARM — COUNTDOWN 10→0→{ZERO_SOUND_LABELS[zeroSound]}
             </button>
           </div>
 
@@ -557,11 +641,11 @@ export function CTUTerminalV74() {
           </div>
         </div>
 
-        {/* ALARM PANEL (V74 DASHED CARD) */}
+        {/* ALARM PANEL (Segmented Clickable Numbers) */}
         <div className="relative border-2 border-dashed border-[#ffcc00] rounded-[14px] p-3 md:p-4 bg-[#050500] min-h-[90px] flex flex-col gap-0">
           <div className="flex justify-between items-center">
             <span className="text-[10px] tracking-[0.25em] opacity-60">
-              ALARM - CLICK TO SET - {alarmArmed ? "ARMED" : "OFF"}
+              DAILY ALARM — CLICK EACH UNIT TO SET
             </span>
             <span
               className={`text-[10px] px-2 py-[2px] rounded border ${
@@ -572,15 +656,58 @@ export function CTUTerminalV74() {
             </span>
           </div>
 
-          {/* Centered Clickable Alarm Readout */}
-          <div
-            onClick={() => setModalMode("alarm")}
-            className="mt-3 cursor-pointer select-none text-center py-3 border border-[#ffcc00]/30 rounded-[10px] bg-black hover:bg-[#111100] transition-colors"
-          >
-            <div className="text-[40px] md:text-[44px] font-black tracking-widest leading-none text-[#ffcc00]">
-              {formatHM(alarmHour, alarmMinute)} {alarmArmed ? "ARMED" : "OFF"}
+          {/* Segmented Clickable Alarm Readout */}
+          <div className="mt-3 py-3 px-2 border border-[#ffcc00]/30 rounded-[10px] bg-black flex flex-col items-center">
+            <div className="flex items-center justify-center gap-2 md:gap-3 flex-wrap">
+              {/* Hours Block */}
+              <button
+                type="button"
+                onClick={() => {
+                  setPickerFocusUnit("hours");
+                  setModalMode("alarm");
+                }}
+                className="group flex flex-col items-center px-3 py-1.5 rounded-[8px] border border-transparent hover:border-[#ffcc00] hover:bg-[#1a1a00] active:scale-95 transition-all cursor-pointer"
+              >
+                <span className="text-[38px] md:text-[46px] font-black tracking-widest leading-none text-[#ffcc00] group-hover:drop-shadow-[0_0_14px_rgba(255,204,0,0.8)]">
+                  {alarmHm.h}
+                </span>
+                <span className="text-[8px] md:text-[9px] tracking-widest text-[#ffcc00]/60 font-bold mt-1">
+                  HOURS (24HR)
+                </span>
+              </button>
+
+              <span className="text-[32px] md:text-[40px] font-black text-[#ffcc00] pb-4">:</span>
+
+              {/* Minutes Block */}
+              <button
+                type="button"
+                onClick={() => {
+                  setPickerFocusUnit("minutes");
+                  setModalMode("alarm");
+                }}
+                className="group flex flex-col items-center px-3 py-1.5 rounded-[8px] border border-transparent hover:border-[#ffcc00] hover:bg-[#1a1a00] active:scale-95 transition-all cursor-pointer"
+              >
+                <span className="text-[38px] md:text-[46px] font-black tracking-widest leading-none text-[#ffcc00] group-hover:drop-shadow-[0_0_14px_rgba(255,204,0,0.8)]">
+                  {alarmHm.m}
+                </span>
+                <span className="text-[8px] md:text-[9px] tracking-widest text-[#ffcc00]/60 font-bold mt-1">
+                  MINUTES
+                </span>
+              </button>
+
+              <div className="ml-3 flex flex-col items-center justify-center pl-3 border-l border-[#ffcc00]/30">
+                <span
+                  className={`text-[12px] font-black tracking-widest px-2 py-1 rounded border ${
+                    alarmArmed ? "border-green-400 text-green-400" : "border-[#ffcc00]/40 text-[#ffcc00]/60"
+                  }`}
+                >
+                  {alarmArmed ? "ARMED" : "OFF"}
+                </span>
+              </div>
             </div>
-            <div className="text-[10px] opacity-50 mt-1 tracking-widest">TAP TO EDIT - HH:MM</div>
+            <div className="text-[10px] opacity-60 mt-1 tracking-widest">
+              TAP HOURS OR MINUTES TO CHANGE ALARM
+            </div>
           </div>
 
           {/* Alarm Action Buttons */}
@@ -609,125 +736,112 @@ export function CTUTerminalV74() {
               }}
               className="bg-[#ff1744] text-white font-bold min-h-[44px] rounded-[6px] text-[12px] tracking-widest hover:brightness-110 whitespace-nowrap overflow-hidden"
             >
-              STOP ALARM
+              STOP
             </button>
           </div>
-
-          {/* Volume A */}
-          <div className="mt-3 flex items-center gap-3">
-            <span className="text-[10px] w-[40px] opacity-60">VOL A</span>
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.02}
-              value={alarmVol}
-              onChange={(e) => setAlarmVol(parseFloat(e.target.value))}
-              className="flex-1"
-            />
-            <span className="text-[11px] w-[30px] text-right">{alarmVol.toFixed(2)}</span>
-          </div>
-
-          {/* Status Line */}
-          <div className="mt-2 text-[11px] tracking-wide opacity-70 min-h-[18px] w-full text-left">
-            {alarmStatus}
-          </div>
         </div>
-
-        {/* FOOTER */}
-        <footer className="mt-6 text-center text-[10px] opacity-40 tracking-widest py-4">
-          © {new Date().getFullYear()} CTU • ALL SECONDS ACCOUNTED FOR
-        </footer>
       </main>
 
-      {/* FULLSCREEN 10-SECOND COUNTDOWN TAKEOVER OVERLAY */}
+      {/* FULLSCREEN 10-TO-0 TAKEOVER OVERLAY */}
       {takeoverActive && (
         <div
-          className="fixed inset-0 z-[9999] bg-black flex flex-col items-center justify-center cursor-pointer select-none"
-          style={{
-            background: "rgba(0,0,0,0.97)",
-            borderLeft: `10px solid ${isTakeoverCrisis ? "#ff0000" : "#ffcc00"}`,
-          }}
-          onClick={cancelTakeover}
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-[99999] bg-black/95 flex flex-col items-center justify-between p-4 md:p-8 select-none"
         >
-          <div
-            className="glow font-black leading-none"
-            style={{
-              fontSize: "clamp(90px, 26vw, 240px)",
-              color: isTakeoverCrisis ? "#ff4444" : "#ffcc00",
-              textShadow: isTakeoverCrisis ? "0 0 20px #f00" : "0 0 20px #ffcc00",
-            }}
-          >
-            {takeoverCount}
+          {/* Header */}
+          <div className="w-full max-w-[800px] flex justify-between items-center border-b border-[#ffcc00]/30 pb-3">
+            <span className="text-[12px] tracking-[0.3em] font-black text-[#ffcc00]">
+              CRITICAL TIMING PROTOCOL
+            </span>
+            <span className="text-[11px] px-2 py-1 rounded bg-[#ffcc00] text-black font-black tracking-widest">
+              {takeoverLabel}
+            </span>
           </div>
-          <div className="mt-4 text-[18px] tracking-[0.35em] text-center">{takeoverTitle}</div>
-          <div className="mt-2 text-[12px] opacity-60 tracking-widest">TAP TO CANCEL</div>
-          <div className="mt-8 h-[10px] w-[70%] max-w-[400px] bg-[#1a1a00] rounded overflow-hidden border border-[#ffcc00]/20">
+
+          {/* Giant Countdown Digit */}
+          <div className="flex flex-col items-center justify-center my-auto">
+            <div className="text-[14px] md:text-[18px] tracking-[0.4em] font-bold text-[#ffcc00]/70 mb-2">
+              SECONDS TO ZERO
+            </div>
             <div
-              className="h-full transition-all duration-1000"
-              style={{
-                width: `${
-                  ((takeoverInitialCountRef.current - takeoverCount + 1) /
-                    (takeoverInitialCountRef.current + 1)) *
-                  100
-                }%`,
-                background: isTakeoverCrisis ? "#f00" : "#ffcc00",
-              }}
-            />
+              className={`font-black leading-none tracking-tight select-none ${
+                takeoverRemaining <= 3 ? "text-red-500" : "text-[#ffcc00] glow"
+              }`}
+              style={{ fontSize: "clamp(120px, 28vw, 240px)", lineHeight: "0.85" }}
+            >
+              {String(takeoverRemaining).padStart(2, "0")}
+            </div>
+            <div className="text-[11px] tracking-[0.3em] opacity-60 mt-4 text-[#ffcc00]">
+              TACTICAL KLAXON ACTIVE
+            </div>
+          </div>
+
+          {/* Disarm Button */}
+          <div className="w-full max-w-[420px] flex flex-col gap-3">
+            <button
+              type="button"
+              onClick={cancelTakeover}
+              className="w-full bg-red-600 hover:bg-red-500 text-white font-black text-[16px] tracking-[0.2em] py-4 rounded-[8px] active:scale-[0.98] transition-all shadow-[0_0_30px_rgba(255,0,0,0.5)]"
+            >
+              ABORT &amp; DISARM
+            </button>
+            <div className="text-center text-[9px] tracking-widest text-[#ffcc00]/40">
+              DISARM CLEARS TAKEOVER AUDIO &amp; RESETS MONITOR
+            </div>
           </div>
         </div>
       )}
 
       {/* SAMSUNG GALAXY SLIDE DRUM PICKER MODAL */}
       {modalMode && (
-        <div className="fixed inset-0 z-[10000] bg-black/70 backdrop-blur-[2px] flex items-center justify-center p-3">
+        <div className="fixed inset-0 z-[10000] bg-black/75 backdrop-blur-[3px] flex items-center justify-center p-3">
           <SamsungTimePicker
             mode={modalMode}
             initialHours={modalMode === "timer" ? Math.floor(timerDuration / 3600) : alarmHour}
             initialMinutes={modalMode === "timer" ? Math.floor((timerDuration % 3600) / 60) : alarmMinute}
             initialSeconds={modalMode === "timer" ? timerDuration % 60 : 0}
+            initialFocus={pickerFocusUnit}
             onSave={handleModalSave}
             onCancel={() => setModalMode(null)}
           />
         </div>
       )}
 
-      {/* FULLSCREEN VIDEO MODAL (OPENING & CREDITS) */}
+      {/* FULLSCREEN VIDEO MODALS */}
       {activeVideoModal && (
-        <div className="fixed inset-0 z-[10001] bg-black/90 flex flex-col items-center justify-center p-4">
-          <div className="relative w-full max-w-[800px] bg-black border-2 border-[#ffcc00] rounded-[12px] overflow-hidden shadow-[0_0_30px_rgba(255,204,0,0.4)]">
-            <div className="flex justify-between items-center px-4 py-2 bg-[#1a1a00] border-b border-[#ffcc00]/40">
-              <span className="text-[12px] font-bold tracking-widest text-[#ffcc00]">
-                {activeVideoModal === "opening" ? "CTU BROADCAST • 24 OPENING" : "CTU ARCHIVE • ENDING CREDITS"}
+        <div className="fixed inset-0 z-[9999] bg-black/95 flex flex-col items-center justify-center p-4">
+          <div className="w-full max-w-[900px] flex flex-col gap-3">
+            <div className="flex justify-between items-center text-[#ffcc00]">
+              <span className="text-[13px] tracking-widest font-bold">
+                {activeVideoModal === "opening" ? "24 SEASON OPENING SEQUENCE" : "24 CLOSING CREDITS"}
               </span>
               <button
                 type="button"
                 onClick={() => setActiveVideoModal(null)}
-                className="text-[11px] font-bold tracking-widest text-[#ffcc00] hover:text-white px-2 py-1"
+                className="px-3 py-1 bg-black border border-[#ffcc00] text-[#ffcc00] font-bold text-[12px] hover:bg-[#ffcc00] hover:text-black rounded"
               >
-                [CLOSE ✕]
+                CLOSE [ESC]
               </button>
             </div>
-            <video
-              src={activeVideoModal === "opening" ? "/24 Opening.mp4" : "/24 Closing.mp4"}
-              controls
-              autoPlay
-              playsInline
-              className="w-full aspect-video bg-black"
-            />
+            <div className="aspect-video w-full bg-black border-2 border-[#ffcc00] rounded-[10px] overflow-hidden">
+              <video
+                src={activeVideoModal === "opening" ? "/24 Countdown.mp4" : "/24 At Zero theme.mp3"}
+                controls
+                autoPlay
+                className="w-full h-full object-contain"
+              />
+            </div>
           </div>
         </div>
       )}
 
-      {/* TOAST NOTIFICATION */}
-      <div
-        className={`fixed left-1/2 -translate-x-1/2 bottom-[30px] z-[80] bg-black border border-[#ffcc00] text-[#ffcc00] px-4 py-2 rounded-[8px] text-[12px] tracking-wide shadow-[0_0_20px_rgba(255,204,0,0.4)] transition-all duration-300 ${
-          toastMessage ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4 pointer-events-none"
-        }`}
-        style={{ maxWidth: "90vw", whiteSpace: "nowrap" }}
-      >
-        {toastMessage}
-      </div>
+      {/* TOAST POPUP */}
+      {toastMessage && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[20000] bg-black border-2 border-[#ffcc00] text-[#ffcc00] px-5 py-2.5 rounded-full font-black text-[12px] tracking-[0.2em] shadow-[0_0_24px_rgba(255,204,0,0.5)]">
+          {toastMessage}
+        </div>
+      )}
     </div>
   );
 }
