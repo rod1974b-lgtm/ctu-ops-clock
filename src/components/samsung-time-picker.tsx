@@ -53,7 +53,7 @@ function DrumColumn({
   const vPlus1 = wrap(value + 1);
   const vPlus2 = wrap(value + 2);
 
-  // Allow dragging only when touching the background drum, not on buttons or inputs
+  // Allow drag scrolling only when touching the background drum, never on buttons/inputs
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (disabled || isInlineEditing) return;
     const target = e.target as HTMLElement;
@@ -113,7 +113,7 @@ function DrumColumn({
     }
   };
 
-  // Keyboard navigation when this column is selected
+  // Physical keyboard arrows and number entry when this drum column is active
   useEffect(() => {
     if (!isSelected || disabled) return;
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -215,7 +215,7 @@ function DrumColumn({
             {pad(vMinus1)}
           </button>
 
-          {/* Center Active Value (Direct Click/Tap to Edit) */}
+          {/* Center Active Value (Direct Tap or Click to Change) */}
           <div className="my-[2px] relative z-30">
             {isInlineEditing ? (
               <input
