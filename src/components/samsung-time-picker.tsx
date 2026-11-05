@@ -1,465 +1,224 @@
-import { useCallback, useEffect, useState } from "react";
-import { ChevronDown, ChevronUp } from "lucide-react";
+// src/components/samsung-time-picker.tsx
+import React, { useRef, useState, useCallback } from "react";
+
+export type SamsungTimePickerValues = {
+  hours: number;
+  minutes: number;
+  seconds: number;
+  totalSeconds: number;
+};
+
+export interface SamsungTimePickerProps {
+  mode: "timer" | "alarm";
+  initialHours?: number;
+  initialMinutes?: number;
+  initialSeconds?: number;
+  onSave: (values: SamsungTimePickerValues) => void;
+  onCancel: () => void;
+}
 
 interface DrumColumnProps {
-  label: string;
   value: number;
   max: number;
-  min?: number;
-  step?: number;
-  pad?: number;
+  label: string;
+  disabled?: boolean;
   onChange: (val: number) => void;
 }
 
-function DrumColumn({ label, value, max, min = 0, step = 1, pad = 2, onChange }: DrumColumnProps) {
-  const rangeSize = max - min + 1;
+function DrumColumn({ value, max, label, disabled = false, onChange }: DrumColumnProps) {
+  const range = max + 1;
+  const dragRef = useRef({ y: 0, val: 0, dragging: false });
 
-  // Up button & top slot: INCREMENTS (+step)
-  const incVal = value + step > max ? min + ((value + step - max - 1) % rangeSize) : value + step;
-  // Down button & bottom slot: DECREMENTS (-step)
-  const decVal = value - step < min ? max - ((min - (value - step) - 1) % rangeSize) : value - step;
+  const wrap = (n: number) => ((n % range) + range) % range;
+  const pad = (n: number) => String(n).padStart(2, "0");
 
-  const [isFocused, setIsFocused] = useState(false);
-  const [inputValue, setInputValue] = useState(String(value).padStart(pad, "0"));
+  const vMinus2 = wrap(value - 2);
+  const vMinus1 = wrap(value - 1);
+  const vPlus1 = wrap(value + 1);
+  const vPlus2 = wrap(value + 2);
 
-  useEffect(() => {
-    if (!isFocused) {
-      setInputValue(String(value).padStart(pad, "0"));
-    }
-  }, [value, pad, isFocused]);
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (disabled) return;
+    e.preventDefault();
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {}
+    dragRef.current = { y: e.clientY, val: value, dragging: true };
+  };
 
-  const handleWheel = useCallback(
-    (e: React.WheelEvent) => {
-      e.preventDefault();
-      if (e.deltaY < 0) {
-        onChange(incVal);
-      } else if (e.deltaY > 0) {
-        onChange(decVal);
-      }
-    },
-    [incVal, decVal, onChange]
-  );
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (disabled || !dragRef.current.dragging) return;
+    const deltaY = dragRef.current.y - e.clientY;
+    const steps = Math.round(deltaY / 32);
+    const next = wrap(dragRef.current.val + steps);
+    if (next !== value) onChange(next);
+  };
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragRef.current.dragging) return;
+    dragRef.current.dragging = false;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {}
+  };
+
+  const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    if (disabled) return;
+    e.preventDefault();
+    const dir = e.deltaY < 0 ? 1 : -1;
+    onChange(wrap(value + dir));
+  };
 
   return (
-    <div className="samsung-drum-column" onWheel={handleWheel}>
-      <span className="drum-column-label">{label}</span>
+    <div
+      className={`relative flex flex-col items-center select-none ${
+        disabled ? "opacity-20 pointer-events-none" : ""
+      }`}
+    >
+      {/* Top Stepper */}
       <button
         type="button"
-        className="drum-step-btn"
-        onClick={() => onChange(incVal)}
-        aria-label={`Increase ${label}`}
+        onClick={() => !disabled && onChange(wrap(value + 1))}
+        className="w-[92px] h-[32px] rounded-t-[10px] bg-black border border-b-0 border-[#ffcc00]/30 text-[#ffcc00]/70 hover:text-[#ffcc00] hover:bg-[#1a1a00] text-[12px] tracking-widest font-bold active:scale-[0.97] transition-colors"
       >
-        <ChevronUp className="h-4 w-4" />
+        ▲ {pad(vPlus1)}
       </button>
 
-      <div className="drum-barrel">
-        {/* Top slot (incremented value) */}
-        <button
-          type="button"
-          tabIndex={-1}
-          className="drum-slot drum-slot-neighbor"
-          onClick={() => onChange(incVal)}
-          title={`Set ${label} to ${String(incVal).padStart(pad, "0")}`}
-        >
-          {String(incVal).padStart(pad, "0")}
-        </button>
+      {/* Drum Body */}
+      <div
+        className="relative w-[92px] h-[200px] bg-[#151525] border-x-2 border-[#ffcc00]/70 overflow-hidden touch-none cursor-grab active:cursor-grabbing"
+        style={{ touchAction: "none" }}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        onWheel={handleWheel}
+      >
+        {/* Top & Bottom Ambient Vignette Fade */}
+        <div className="absolute inset-x-0 top-0 h-[64px] bg-gradient-to-b from-black via-black/80 to-transparent pointer-events-none z-20" />
+        <div className="absolute inset-x-0 bottom-0 h-[64px] bg-gradient-to-t from-black via-black/80 to-transparent pointer-events-none z-20" />
 
-        {/* Center active slot: direct editable input */}
-        <div className="drum-slot drum-slot-active">
-          <input
-            type="text"
-            inputMode="numeric"
-            pattern="[0-9]*"
-            maxLength={Math.max(pad, String(max).length)}
-            value={inputValue}
-            onFocus={(e) => {
-              setIsFocused(true);
-              e.target.select();
-            }}
-            onBlur={() => {
-              setIsFocused(false);
-              const num = parseInt(inputValue, 10);
-              if (isNaN(num)) {
-                setInputValue(String(value).padStart(pad, "0"));
-              } else {
-                const clamped = Math.min(max, Math.max(min, num));
-                onChange(clamped);
-                setInputValue(String(clamped).padStart(pad, "0"));
-              }
-            }}
-            onChange={(e) => {
-              const cleaned = e.target.value.replace(/\D/g, "");
-              setInputValue(cleaned);
-              if (cleaned.length > 0) {
-                const num = parseInt(cleaned, 10);
-                if (!isNaN(num) && num <= max && num >= min) {
-                  onChange(num);
-                }
-              }
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                (e.target as HTMLInputElement).blur();
-              } else if (e.key === "ArrowUp") {
-                e.preventDefault();
-                onChange(incVal);
-              } else if (e.key === "ArrowDown") {
-                e.preventDefault();
-                onChange(decVal);
-              }
-            }}
-            style={{
-              background: isFocused ? "color-mix(in oklch, var(--primary) 12%, transparent)" : "transparent",
-              color: "var(--primary)",
-              border: isFocused ? "1px solid var(--primary)" : "1px solid transparent",
-              borderRadius: "4px",
-              outline: "none",
-              textAlign: "center",
-              width: "72px",
-              fontSize: "44px",
-              fontFamily: "var(--font-mono)",
-              lineHeight: "1.1",
-              fontVariantNumeric: "tabular-nums",
-              textShadow: "0 0 12px color-mix(in oklch, var(--primary) 50%, transparent)",
-              cursor: isFocused ? "text" : "pointer",
-            }}
-            aria-label={`${label} numeric entry`}
-          />
+        {/* Center Glowing Target Pill */}
+        <div className="absolute left-2 right-2 top-1/2 -translate-y-1/2 h-[52px] bg-[#ffcc00]/[0.11] border-y border-[#ffcc00]/40 rounded-[10px] z-10 pointer-events-none shadow-[inset_0_0_14px_rgba(255,204,0,0.15)]" />
+
+        {/* Digit Stack */}
+        <div className="absolute inset-0 flex flex-col items-center justify-center z-10 pointer-events-none">
+          <div className="text-[12px] font-bold tracking-[0.18em] text-white/15">{pad(vMinus2)}</div>
+          <div className="text-[15px] font-bold tracking-[0.18em] text-white/35 mt-3">{pad(vMinus1)}</div>
+          <div className="my-[10px] text-[36px] font-black tracking-[0.18em] text-white drop-shadow-[0_0_14px_rgba(255,204,0,0.7)] leading-none">
+            {pad(value)}
+          </div>
+          <div className="text-[15px] font-bold tracking-[0.18em] text-white/35">{pad(vPlus1)}</div>
+          <div className="text-[12px] font-bold tracking-[0.18em] text-white/15 mt-3">{pad(vPlus2)}</div>
         </div>
 
-        {/* Bottom slot (decremented value) */}
-        <button
-          type="button"
-          tabIndex={-1}
-          className="drum-slot drum-slot-neighbor"
-          onClick={() => onChange(decVal)}
-          title={`Set ${label} to ${String(decVal).padStart(pad, "0")}`}
-        >
-          {String(decVal).padStart(pad, "0")}
-        </button>
+        {/* Column Label */}
+        <div className="absolute bottom-[6px] left-0 right-0 text-center text-[9px] tracking-[0.22em] text-[#ffcc00]/50 font-bold z-20 pointer-events-none">
+          {label}
+        </div>
       </div>
 
+      {/* Bottom Stepper */}
       <button
         type="button"
-        className="drum-step-btn"
-        onClick={() => onChange(decVal)}
-        aria-label={`Decrease ${label}`}
+        onClick={() => !disabled && onChange(wrap(value - 1))}
+        className="w-[92px] h-[32px] rounded-b-[10px] bg-black border border-t-0 border-[#ffcc00]/30 text-[#ffcc00]/70 hover:text-[#ffcc00] hover:bg-[#1a1a00] text-[12px] tracking-widest font-bold active:scale-[0.97] transition-colors"
       >
-        <ChevronDown className="h-4 w-4" />
+        ▼ {pad(vMinus1)}
       </button>
     </div>
   );
 }
 
-export interface SamsungTimerValues {
-  hours: number;
-  minutes: number;
-  seconds: number;
-  totalSeconds: number;
-}
-
-export interface SamsungTimePickerProps {
-  mode: "countdown" | "timer" | "alarm";
-  timerValues?: SamsungTimerValues;
-  values?: SamsungTimerValues;
-  onTimerChange?: (values: SamsungTimerValues) => void;
-  onChange?: (values: SamsungTimerValues) => void;
-  alarmTime?: string;
-  onAlarmChange?: (timeStr: string) => void;
-}
-
 export function SamsungTimePicker({
   mode,
-  timerValues,
-  values,
-  onTimerChange,
-  onChange,
-  alarmTime = "09:00:00",
-  onAlarmChange,
+  initialHours = 0,
+  initialMinutes = 5,
+  initialSeconds = 0,
+  onSave,
+  onCancel,
 }: SamsungTimePickerProps) {
-  const isCountdown = mode === "countdown" || mode === "timer";
+  const [hours, setHours] = useState<number>(initialHours);
+  const [minutes, setMinutes] = useState<number>(initialMinutes);
+  const [seconds, setSeconds] = useState<number>(initialSeconds);
 
-  const resolvedTimerValues = timerValues ?? values ?? {
-    hours: 0,
-    minutes: 25,
-    seconds: 0,
-    totalSeconds: 1500,
-  };
-  const fireTimerChange = onTimerChange ?? onChange;
+  const pad = (n: number) => String(n).padStart(2, "0");
 
-  const hours = resolvedTimerValues.hours;
-  const minutes = resolvedTimerValues.minutes;
-  const seconds = resolvedTimerValues.seconds;
-
-  const [use12Hour, setUse12Hour] = useState(false);
-  const [alarmPeriod, setAlarmPeriod] = useState<"AM" | "PM">("AM");
-
-  const parseAlarm = useCallback((str: string) => {
-    const parts = str.split(":").map((n) => Number(n) || 0);
-    return {
-      h: parts[0] ?? 9,
-      m: parts[1] ?? 0,
-      s: parts[2] ?? 0,
-    };
-  }, []);
-
-  const [alarmH, setAlarmH] = useState(() => parseAlarm(alarmTime).h);
-  const [alarmM, setAlarmM] = useState(() => parseAlarm(alarmTime).m);
-  const [alarmS, setAlarmS] = useState(() => parseAlarm(alarmTime).s);
-
-  useEffect(() => {
-    const p = parseAlarm(alarmTime);
-    setAlarmH(p.h);
-    setAlarmM(p.m);
-    setAlarmS(p.s);
-    if (p.h >= 12) {
-      setAlarmPeriod("PM");
-    } else {
-      setAlarmPeriod("AM");
-    }
-  }, [alarmTime, parseAlarm]);
-
-  const emitAlarm = (h: number, m: number, s: number) => {
-    const formatted = [
-      String(h).padStart(2, "0"),
-      String(m).padStart(2, "0"),
-      String(s).padStart(2, "0"),
-    ].join(":");
-    onAlarmChange?.(formatted);
-  };
-
-  const handleCountdownChange = (newH: number, newM: number, newS: number) => {
-    const total = newH * 3600 + newM * 60 + newS;
-    fireTimerChange?.({
-      hours: newH,
-      minutes: newM,
-      seconds: newS,
+  const handleConfirm = useCallback(() => {
+    const total = hours * 3600 + minutes * 60 + (mode === "alarm" ? 0 : seconds);
+    onSave({
+      hours,
+      minutes,
+      seconds: mode === "alarm" ? 0 : seconds,
       totalSeconds: total,
     });
-  };
-
-  const addSecondsToCountdown = (deltaSec: number) => {
-    const currentTotal = hours * 3600 + minutes * 60 + seconds;
-    const nextTotal = Math.min(359999, Math.max(0, currentTotal + deltaSec));
-    const h = Math.floor(nextTotal / 3600);
-    const m = Math.floor((nextTotal % 3600) / 60);
-    const s = nextTotal % 60;
-    handleCountdownChange(h, m, s);
-  };
-
-  const display12H = alarmH % 12 === 0 ? 12 : alarmH % 12;
-
-  const handle12HourChange = (new12H: number) => {
-    let military = new12H;
-    if (alarmPeriod === "AM") {
-      military = new12H === 12 ? 0 : new12H;
-    } else {
-      military = new12H === 12 ? 12 : new12H + 12;
-    }
-    setAlarmH(military);
-    emitAlarm(military, alarmM, alarmS);
-  };
-
-  const togglePeriod = (p: "AM" | "PM") => {
-    setAlarmPeriod(p);
-    let military = alarmH;
-    if (p === "AM" && military >= 12) {
-      military -= 12;
-    } else if (p === "PM" && military < 12) {
-      military += 12;
-    }
-    setAlarmH(military);
-    emitAlarm(military, alarmM, alarmS);
-  };
-
-  if (isCountdown) {
-    return (
-      <div className="samsung-picker-container">
-        <div className="samsung-picker-drums">
-          <DrumColumn
-            label="HOURS"
-            value={hours}
-            max={99}
-            min={0}
-            onChange={(h) => handleCountdownChange(h, minutes, seconds)}
-          />
-          <span className="samsung-drum-colon">:</span>
-          <DrumColumn
-            label="MINUTES"
-            value={minutes}
-            max={59}
-            min={0}
-            onChange={(m) => handleCountdownChange(hours, m, seconds)}
-          />
-          <span className="samsung-drum-colon">:</span>
-          <DrumColumn
-            label="SECONDS"
-            value={seconds}
-            max={59}
-            min={0}
-            onChange={(s) => handleCountdownChange(hours, minutes, s)}
-          />
-        </div>
-
-        {/* Quick-Add Chips */}
-        <div className="samsung-quick-chips">
-          <button
-            type="button"
-            className="tactical-chip"
-            onClick={() => addSecondsToCountdown(3600)}
-          >
-            +1h
-          </button>
-          <button
-            type="button"
-            className="tactical-chip"
-            onClick={() => addSecondsToCountdown(900)}
-          >
-            +15m
-          </button>
-          <button
-            type="button"
-            className="tactical-chip"
-            onClick={() => addSecondsToCountdown(300)}
-          >
-            +5m
-          </button>
-          <button
-            type="button"
-            className="tactical-chip"
-            onClick={() => addSecondsToCountdown(60)}
-          >
-            +1m
-          </button>
-          <button
-            type="button"
-            className="tactical-chip"
-            onClick={() => addSecondsToCountdown(30)}
-          >
-            +30s
-          </button>
-          <button
-            type="button"
-            className="tactical-chip chip-clear"
-            onClick={() => handleCountdownChange(0, 0, 0)}
-          >
-            CLEAR
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // Daily Alarm Mode
-  const now = new Date();
-  const target = new Date(now);
-  target.setHours(alarmH, alarmM, alarmS, 0);
-  if (target.getTime() <= now.getTime()) {
-    target.setDate(target.getDate() + 1);
-  }
-  const diffSec = Math.floor((target.getTime() - now.getTime()) / 1000);
-  const diffH = Math.floor(diffSec / 3600);
-  const diffM = Math.floor((diffSec % 3600) / 60);
-  const diffS = diffSec % 60;
+  }, [hours, minutes, seconds, mode, onSave]);
 
   return (
-    <div className="samsung-picker-container">
-      <div className="samsung-format-bar">
-        <div className="format-toggle-group">
-          <button
-            type="button"
-            className={`format-btn ${!use12Hour ? "active" : ""}`}
-            onClick={() => setUse12Hour(false)}
-          >
-            24-HOUR
-          </button>
-          <button
-            type="button"
-            className={`format-btn ${use12Hour ? "active" : ""}`}
-            onClick={() => setUse12Hour(true)}
-          >
-            12-HOUR
-          </button>
+    <div className="border-2 border-[#ffcc00] rounded-[24px] bg-[#0a0a14] p-5 w-full max-w-[380px] shadow-[0_0_40px_rgba(255,204,0,0.28)]">
+      {/* Header */}
+      <div className="text-center text-[14px] tracking-[0.25em] font-bold text-[#ffcc00]">
+        {mode === "alarm" ? "ALARM • SLIDE WHEEL" : "TIMER • SLIDE WHEEL"}
+      </div>
+      <div className="text-center text-[9px] tracking-[0.22em] opacity-40 mt-1 text-[#ffcc00]">
+        DRAG UP/DOWN • 32px = 1 STEP • WRAPS • SILENT
+      </div>
+
+      {/* Drums Row */}
+      <div className="mt-4 flex justify-center gap-3">
+        <DrumColumn
+          value={hours}
+          max={mode === "alarm" ? 23 : 99}
+          label="HOUR"
+          onChange={setHours}
+        />
+        <DrumColumn
+          value={minutes}
+          max={59}
+          label="MIN"
+          onChange={setMinutes}
+        />
+        <DrumColumn
+          value={seconds}
+          max={59}
+          label="SEC"
+          disabled={mode === "alarm"}
+          onChange={setSeconds}
+        />
+      </div>
+
+      {/* Pill Display */}
+      <div className="mt-5 flex justify-center">
+        <div className="inline-flex items-center gap-3 px-5 py-2.5 bg-black border border-[#ffcc00]/30 rounded-full shadow-[0_0_18px_rgba(255,204,0,0.15)]">
+          <span className="text-[24px] font-black tracking-[0.2em] text-white">
+            {pad(hours)}:{pad(minutes)}:{mode === "alarm" ? "--" : pad(seconds)}
+          </span>
+          <span className="text-[9px] tracking-[0.2em] opacity-50 text-[#ffcc00]">
+            {mode === "alarm" ? "24HR" : "HH:MM:SS"}
+          </span>
         </div>
-
-        {use12Hour && (
-          <div className="period-toggle-group">
-            <button
-              type="button"
-              className={`period-btn ${alarmPeriod === "AM" ? "active" : ""}`}
-              onClick={() => togglePeriod("AM")}
-            >
-              AM
-            </button>
-            <button
-              type="button"
-              className={`period-btn ${alarmPeriod === "PM" ? "active" : ""}`}
-              onClick={() => togglePeriod("PM")}
-            >
-              PM
-            </button>
-          </div>
-        )}
       </div>
 
-      <div className="samsung-picker-drums">
-        {use12Hour ? (
-          <DrumColumn
-            label="HOURS (1-12)"
-            value={display12H}
-            max={12}
-            min={1}
-            pad={2}
-            onChange={handle12HourChange}
-          />
-        ) : (
-          <DrumColumn
-            label="HOURS (00-23)"
-            value={alarmH}
-            max={23}
-            min={0}
-            pad={2}
-            onChange={(h) => {
-              setAlarmH(h);
-              emitAlarm(h, alarmM, alarmS);
-            }}
-          />
-        )}
-        <span className="samsung-drum-colon">:</span>
-        <DrumColumn
-          label="MINUTES"
-          value={alarmM}
-          max={59}
-          min={0}
-          pad={2}
-          onChange={(m) => {
-            setAlarmM(m);
-            emitAlarm(alarmH, m, alarmS);
-          }}
-        />
-        <span className="samsung-drum-colon">:</span>
-        <DrumColumn
-          label="SECONDS"
-          value={alarmS}
-          max={59}
-          min={0}
-          pad={2}
-          onChange={(s) => {
-            setAlarmS(s);
-            emitAlarm(alarmH, alarmM, s);
-          }}
-        />
+      <div className="mt-2 text-center text-[9px] opacity-30 tracking-widest">
+        SLIDE SET • SILENT
       </div>
 
-      <div className="samsung-alarm-summary">
-        <span className="summary-icon">⏱</span>
-        <span>
-          Alarm sounds in{" "}
-          <strong>
-            {diffH > 0 && `${diffH} hr `}
-            {diffM} min {diffS} sec
-          </strong>
-        </span>
+      {/* Modal Actions */}
+      <div className="grid grid-cols-2 gap-3 mt-5">
+        <button
+          type="button"
+          onClick={handleConfirm}
+          className="bg-[#ffcc00] text-black font-black text-[14px] tracking-widest min-h-[44px] rounded-[8px] hover:bg-[#ffcc00]/80 transition-colors"
+        >
+          SET
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="bg-black border border-[#ffcc00] text-[#ffcc00] font-black text-[14px] tracking-widest min-h-[44px] rounded-[8px] hover:bg-[#1a1a00] transition-colors"
+        >
+          CANCEL
+        </button>
       </div>
     </div>
   );
