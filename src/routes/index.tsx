@@ -94,7 +94,7 @@ export function CTUTerminalV74() {
     return () => clearInterval(id);
   }, []);
 
-  // Format Bangkok time
+  // Format Bangkok time (UTC+7)
   const bangkokDate = useMemo(() => {
     return new Date(now.toLocaleString("en-US", { timeZone: "Asia/Bangkok" }));
   }, [now]);
@@ -111,11 +111,13 @@ export function CTUTerminalV74() {
   }, [bangkokDate]);
 
   const liveDate = useMemo(() => {
-    return bangkokDate.toLocaleDateString("en-US", {
-      month: "short",
-      day: "2-digit",
-      year: "numeric",
-    }).toUpperCase();
+    return bangkokDate
+      .toLocaleDateString("en-US", {
+        month: "short",
+        day: "2-digit",
+        year: "numeric",
+      })
+      .toUpperCase();
   }, [bangkokDate]);
 
   // Audio synth zero sounds
@@ -421,14 +423,14 @@ export function CTUTerminalV74() {
           <button
             type="button"
             onClick={() => setActiveVideoModal("opening")}
-            className="w-full bg-[#ffcc00] text-black font-black tracking-[0.14em] text-[17px] md:text-[18px] rounded-[8px] border-2 border-[#ffcc00] hover:bg-black hover:text-[#ffcc00] transition-colors min-h-[44px] py-3 shadow-[0_0_18px_rgba(255,204,0,0.35)]"
+            className="w-full bg-[#ffcc00] text-black font-black tracking-[0.14em] text-[17px] md:text-[18px] rounded-[8px] border-2 border-[#ffcc00] hover:bg-black hover:text-[#ffcc00] transition-colors min-h-[44px] py-3 shadow-[0_0_18px_rgba(255,204,0,0.35)] cursor-pointer"
           >
             START 24 OPENING
           </button>
           <button
             type="button"
             onClick={() => setActiveVideoModal("credits")}
-            className="w-full bg-black text-[#ffcc00] font-black tracking-[0.14em] text-[17px] md:text-[18px] rounded-[8px] border-2 border-[#ffcc00] hover:bg-[#ffcc00] hover:text-black transition-colors min-h-[44px] py-3 shadow-[0_0_14px_rgba(255,204,0,0.25)]"
+            className="w-full bg-black text-[#ffcc00] font-black tracking-[0.14em] text-[17px] md:text-[18px] rounded-[8px] border-2 border-[#ffcc00] hover:bg-[#ffcc00] hover:text-black transition-colors min-h-[44px] py-3 shadow-[0_0_14px_rgba(255,204,0,0.25)] cursor-pointer"
           >
             ENDING CREDITS
           </button>
@@ -534,21 +536,21 @@ export function CTUTerminalV74() {
             <button
               type="button"
               onClick={startTimer}
-              className="bg-[#00c853] text-black font-bold min-h-[44px] rounded-[6px] text-[13px] tracking-widest hover:brightness-110 active:scale-[0.98] whitespace-nowrap overflow-hidden"
+              className="bg-[#00c853] text-black font-bold min-h-[44px] rounded-[6px] text-[13px] tracking-widest hover:brightness-110 active:scale-[0.98] whitespace-nowrap overflow-hidden cursor-pointer"
             >
               START
             </button>
             <button
               type="button"
               onClick={stopTimer}
-              className="bg-black border border-[#ffcc00] text-[#ffcc00] font-bold min-h-[44px] rounded-[6px] text-[13px] tracking-widest hover:bg-[#1a1a00] active:scale-[0.98] whitespace-nowrap overflow-hidden"
+              className="bg-black border border-[#ffcc00] text-[#ffcc00] font-bold min-h-[44px] rounded-[6px] text-[13px] tracking-widest hover:bg-[#1a1a00] active:scale-[0.98] whitespace-nowrap overflow-hidden cursor-pointer"
             >
               STOP
             </button>
             <button
               type="button"
               onClick={resetTimer}
-              className="bg-[#ffcc00] text-black font-bold min-h-[44px] rounded-[6px] text-[13px] tracking-widest hover:bg-[#ffcc00]/80 active:scale-[0.98] whitespace-nowrap overflow-hidden"
+              className="bg-[#ffcc00] text-black font-bold min-h-[44px] rounded-[6px] text-[13px] tracking-widest hover:bg-[#ffcc00]/80 active:scale-[0.98] whitespace-nowrap overflow-hidden cursor-pointer"
             >
               RESET
             </button>
@@ -567,7 +569,7 @@ export function CTUTerminalV74() {
                   showToast("TIME'S UP", 3000);
                 });
               }}
-              className="min-h-[44px] rounded-[6px] font-bold text-[11px] md:text-[12px] tracking-widest bg-[#ffcc00] text-black border-2 border-[#ffcc00] hover:bg-black hover:text-[#ffcc00] px-2 whitespace-normal leading-tight"
+              className="min-h-[44px] rounded-[6px] font-bold text-[11px] md:text-[12px] tracking-widest bg-[#ffcc00] text-black border-2 border-[#ffcc00] hover:bg-black hover:text-[#ffcc00] px-2 whitespace-normal leading-tight cursor-pointer"
             >
               TIMER / ALARM — COUNTDOWN 10→0→{ZERO_SOUND_LABELS[zeroSound]}
             </button>
@@ -587,7 +589,7 @@ export function CTUTerminalV74() {
                 setTimerVol(val);
                 if (audioRef.current) audioRef.current.setVolume(val);
               }}
-              className="flex-1"
+              className="flex-1 cursor-pointer"
             />
             <span className="text-[11px] w-[30px] text-right">{timerVol.toFixed(2)}</span>
           </div>
@@ -604,7 +606,7 @@ export function CTUTerminalV74() {
                     setZeroSound(key);
                     showToast(`ZERO: ${ZERO_SOUND_LABELS[key]}`, 1500);
                   }}
-                  className={`min-h-[38px] rounded-[6px] text-[10px] md:text-[11px] font-bold tracking-widest border transition-colors ${
+                  className={`min-h-[38px] rounded-[6px] text-[10px] md:text-[11px] font-bold tracking-widest border transition-colors cursor-pointer ${
                     zeroSound === key
                       ? "bg-[#ffcc00] text-black border-[#ffcc00] shadow-[0_0_12px_rgba(255,204,0,0.4)]"
                       : "bg-black text-[#ffcc00] border-[#ffcc00]/40 hover:bg-[#1a1a00]"
@@ -622,7 +624,7 @@ export function CTUTerminalV74() {
                   triggerZeroSound();
                   showToast(`TESTING: ${ZERO_SOUND_LABELS[zeroSound]}`, 2000);
                 }}
-                className="min-h-[38px] rounded-[6px] text-[11px] font-bold tracking-widest bg-[#ffcc00] text-black hover:bg-[#ffcc00]/80 transition-colors"
+                className="min-h-[38px] rounded-[6px] text-[11px] font-bold tracking-widest bg-[#ffcc00] text-black hover:bg-[#ffcc00]/80 transition-colors cursor-pointer"
               >
                 TEST {ZERO_SOUND_LABELS[zeroSound]}
               </button>
@@ -633,7 +635,7 @@ export function CTUTerminalV74() {
                   audio.stopZeroTheme();
                   showToast("SOUND STOPPED", 1500);
                 }}
-                className="min-h-[38px] rounded-[6px] text-[11px] font-bold tracking-widest bg-black border border-[#ffcc00] text-[#ffcc00] hover:bg-[#1a1a00] transition-colors"
+                className="min-h-[38px] rounded-[6px] text-[11px] font-bold tracking-widest bg-black border border-[#ffcc00] text-[#ffcc00] hover:bg-[#1a1a00] transition-colors cursor-pointer"
               >
                 STOP AUDIO
               </button>
@@ -715,14 +717,14 @@ export function CTUTerminalV74() {
             <button
               type="button"
               onClick={armAlarm}
-              className="bg-[#00c853] text-black font-bold min-h-[44px] rounded-[6px] text-[12px] tracking-widest hover:brightness-110 whitespace-nowrap overflow-hidden"
+              className="bg-[#00c853] text-black font-bold min-h-[44px] rounded-[6px] text-[12px] tracking-widest hover:brightness-110 whitespace-nowrap overflow-hidden cursor-pointer"
             >
               ARM 24HR
             </button>
             <button
               type="button"
               onClick={disarmAlarm}
-              className="bg-black border border-[#ffcc00] text-[#ffcc00] font-bold min-h-[44px] rounded-[6px] text-[12px] tracking-widest hover:bg-[#1a1a00] whitespace-nowrap overflow-hidden"
+              className="bg-black border border-[#ffcc00] text-[#ffcc00] font-bold min-h-[44px] rounded-[6px] text-[12px] tracking-widest hover:bg-[#1a1a00] whitespace-nowrap overflow-hidden cursor-pointer"
             >
               DISARM
             </button>
@@ -734,7 +736,7 @@ export function CTUTerminalV74() {
                 disarmAlarm();
                 showToast("ALARM STOPPED", 2000);
               }}
-              className="bg-[#ff1744] text-white font-bold min-h-[44px] rounded-[6px] text-[12px] tracking-widest hover:brightness-110 whitespace-nowrap overflow-hidden"
+              className="bg-[#ff1744] text-white font-bold min-h-[44px] rounded-[6px] text-[12px] tracking-widest hover:brightness-110 whitespace-nowrap overflow-hidden cursor-pointer"
             >
               STOP
             </button>
@@ -782,7 +784,7 @@ export function CTUTerminalV74() {
             <button
               type="button"
               onClick={cancelTakeover}
-              className="w-full bg-red-600 hover:bg-red-500 text-white font-black text-[16px] tracking-[0.2em] py-4 rounded-[8px] active:scale-[0.98] transition-all shadow-[0_0_30px_rgba(255,0,0,0.5)]"
+              className="w-full bg-red-600 hover:bg-red-500 text-white font-black text-[16px] tracking-[0.2em] py-4 rounded-[8px] active:scale-[0.98] transition-all shadow-[0_0_30px_rgba(255,0,0,0.5)] cursor-pointer"
             >
               ABORT &amp; DISARM
             </button>
@@ -819,24 +821,24 @@ export function CTUTerminalV74() {
               <button
                 type="button"
                 onClick={() => setActiveVideoModal(null)}
-                className="px-3 py-1 bg-black border border-[#ffcc00] text-[#ffcc00] font-bold text-[12px] hover:bg-[#ffcc00] hover:text-black rounded"
+                className="px-3 py-1 bg-black border border-[#ffcc00] text-[#ffcc00] font-bold text-[12px] hover:bg-[#ffcc00] hover:text-black rounded cursor-pointer"
               >
                 CLOSE [ESC]
               </button>
             </div>
             <div className="aspect-video w-full bg-black border-2 border-[#ffcc00] rounded-[10px] overflow-hidden">
               <video
-                src={activeVideoModal === "opening" ? "/24 Countdown.mp4" : "/24 At Zero theme.mp3"}
+                src={activeVideoModal === "opening" ? "/24 Opening.mp4" : "/24 Closing.mp4"}
                 controls
                 autoPlay
-                className="w-full h-full object-contain"
+                className="w-full h-full object-cover"
               />
             </div>
           </div>
         </div>
       )}
 
-      {/* TOAST POPUP */}
+      {/* TOAST NOTIFICATION */}
       {toastMessage && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[20000] bg-black border-2 border-[#ffcc00] text-[#ffcc00] px-5 py-2.5 rounded-full font-black text-[12px] tracking-[0.2em] shadow-[0_0_24px_rgba(255,204,0,0.5)]">
           {toastMessage}
