@@ -1,5 +1,5 @@
 // src/components/samsung-time-picker.tsx
-import React, { useRef, useState, useCallback } from "react";
+import React, { useRef, useState, useCallback, useEffect } from "react";
 
 export type SamsungTimePickerValues = {
   hours: number;
@@ -13,21 +13,37 @@ export interface SamsungTimePickerProps {
   initialHours?: number;
   initialMinutes?: number;
   initialSeconds?: number;
+  initialFocus?: "hours" | "minutes" | "seconds";
   onSave: (values: SamsungTimePickerValues) => void;
   onCancel: () => void;
 }
 
 interface DrumColumnProps {
+  unit: "hours" | "minutes" | "seconds";
   value: number;
   max: number;
   label: string;
   disabled?: boolean;
+  isSelected: boolean;
+  onSelect: () => void;
   onChange: (val: number) => void;
 }
 
-function DrumColumn({ value, max, label, disabled = false, onChange }: DrumColumnProps) {
+function DrumColumn({
+  unit,
+  value,
+  max,
+  label,
+  disabled = false,
+  isSelected,
+  onSelect,
+  onChange,
+}: DrumColumnProps) {
   const range = max + 1;
-  const dragRef = useRef({ y: 0, val: 0, dragging: false });
+  const dragRef = useRef({ y: 0, val: value, dragging: false });
+  const [isInlineEditing, setIsInlineEditing] = useState(false);
+  const [typedValue, setTypedValue] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const wrap = (n: number) => ((n % range) + range) % range;
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -38,18 +54,18 @@ function DrumColumn({ value, max, label, disabled = false, onChange }: DrumColum
   const vPlus2 = wrap(value + 2);
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (disabled) return;
-    e.preventDefault();
+    if (disabled || isInlineEditing) return;
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
     } catch {}
     dragRef.current = { y: e.clientY, val: value, dragging: true };
+    onSelect();
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (disabled || !dragRef.current.dragging) return;
     const deltaY = dragRef.current.y - e.clientY;
-    const steps = Math.round(deltaY / 32);
+    const steps = Math.round(deltaY / 28);
     const next = wrap(dragRef.current.val + steps);
     if (next !== value) onChange(next);
   };
@@ -69,51 +85,183 @@ function DrumColumn({ value, max, label, disabled = false, onChange }: DrumColum
     onChange(wrap(value + dir));
   };
 
+  const startInlineEdit = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (disabled) return;
+    onSelect();
+    setIsInlineEditing(true);
+    setTypedValue(pad(value));
+  };
+
+  useEffect(() => {
+    if (isInlineEditing && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [isInlineEditing]);
+
+  const commitInlineEdit = () => {
+    setIsInlineEditing(false);
+    const num = parseInt(typedValue, 10);
+    if (!isNaN(num)) {
+      onChange(Math.min(max, Math.max(0, num)));
+    }
+  };
+
   return (
     <div
-      className={`relative flex flex-col items-center select-none ${
+      className={`relative flex flex-col items-center select-none transition-all ${
         disabled ? "opacity-20 pointer-events-none" : ""
       }`}
     >
       {/* Top Stepper */}
       <button
         type="button"
-        onClick={() => !disabled && onChange(wrap(value + 1))}
-        className="w-[92px] h-[32px] rounded-t-[10px] bg-black border border-b-0 border-[#ffcc00]/30 text-[#ffcc00]/70 hover:text-[#ffcc00] hover:bg-[#1a1a00] text-[12px] tracking-widest font-bold active:scale-[0.97] transition-colors"
+        onClick={(e) => {
+          e.stopPropagation();
+          onSelect();
+          if (!disabled) onChange(wrap(value + 1));
+        }}
+        className={`w-[96px] h-[32px] rounded-t-[10px] bg-black border border-b-0 text-[12px] tracking-widest font-bold active:scale-[0.97] transition-all flex items-center justify-center gap-1 ${
+          isSelected
+            ? "border-[#ffcc00] text-[#ffcc00] bg-[#1a1a00]"
+            : "border-[#ffcc00]/30 text-[#ffcc00]/70 hover:text-[#ffcc00]"
+        }`}
       >
-        ▲ {pad(vPlus1)}
+        ▲ <span className="opacity-60">{pad(vPlus1)}</span>
       </button>
 
       {/* Drum Body */}
       <div
-        className="relative w-[92px] h-[200px] bg-[#151525] border-x-2 border-[#ffcc00]/70 overflow-hidden touch-none cursor-grab active:cursor-grabbing"
+        className={`relative w-[96px] h-[200px] overflow-hidden touch-none transition-all ${
+          isSelected
+            ? "bg-[#18182c] border-x-2 border-[#ffcc00] shadow-[0_0_20px_rgba(255,204,0,0.2)]"
+            : "bg-[#111120] border-x-2 border-[#ffcc00]/50"
+        }`}
         style={{ touchAction: "none" }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
         onWheel={handleWheel}
+        onClick={onSelect}
       >
         {/* Top & Bottom Ambient Vignette Fade */}
-        <div className="absolute inset-x-0 top-0 h-[64px] bg-gradient-to-b from-black via-black/80 to-transparent pointer-events-none z-20" />
-        <div className="absolute inset-x-0 bottom-0 h-[64px] bg-gradient-to-t from-black via-black/80 to-transparent pointer-events-none z-20" />
+        <div className="absolute inset-x-0 top-0 h-[60px] bg-gradient-to-b from-black via-black/80 to-transparent pointer-events-none z-20" />
+        <div className="absolute inset-x-0 bottom-0 h-[60px] bg-gradient-to-t from-black via-black/80 to-transparent pointer-events-none z-20" />
 
         {/* Center Glowing Target Pill */}
-        <div className="absolute left-2 right-2 top-1/2 -translate-y-1/2 h-[52px] bg-[#ffcc00]/[0.11] border-y border-[#ffcc00]/40 rounded-[10px] z-10 pointer-events-none shadow-[inset_0_0_14px_rgba(255,204,0,0.15)]" />
+        <div
+          className={`absolute left-1.5 right-1.5 top-1/2 -translate-y-1/2 h-[52px] rounded-[10px] z-10 pointer-events-none border transition-all ${
+            isSelected
+              ? "bg-[#ffcc00]/[0.18] border-[#ffcc00] shadow-[inset_0_0_18px_rgba(255,204,0,0.3)]"
+              : "bg-[#ffcc00]/[0.08] border-[#ffcc00]/30"
+          }`}
+        />
 
-        {/* Digit Stack */}
-        <div className="absolute inset-0 flex flex-col items-center justify-center z-10 pointer-events-none">
-          <div className="text-[12px] font-bold tracking-[0.18em] text-white/15">{pad(vMinus2)}</div>
-          <div className="text-[15px] font-bold tracking-[0.18em] text-white/35 mt-3">{pad(vMinus1)}</div>
-          <div className="my-[10px] text-[36px] font-black tracking-[0.18em] text-white drop-shadow-[0_0_14px_rgba(255,204,0,0.7)] leading-none">
-            {pad(value)}
+        {/* Digit Stack (Clickable numbers) */}
+        <div className="absolute inset-0 flex flex-col items-center justify-center z-15">
+          {/* -2 Value */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onSelect();
+              onChange(vMinus2);
+            }}
+            className="text-[12px] font-bold tracking-[0.18em] text-white/30 hover:text-[#ffcc00] hover:scale-110 transition-all cursor-pointer py-1"
+          >
+            {pad(vMinus2)}
+          </button>
+
+          {/* -1 Value */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onSelect();
+              onChange(vMinus1);
+            }}
+            className="text-[15px] font-bold tracking-[0.18em] text-white/50 hover:text-[#ffcc00] hover:scale-110 transition-all cursor-pointer py-1"
+          >
+            {pad(vMinus1)}
+          </button>
+
+          {/* Center Active Value */}
+          <div className="my-[4px] relative z-20">
+            {isInlineEditing ? (
+              <input
+                ref={inputRef}
+                type="number"
+                min={0}
+                max={max}
+                value={typedValue}
+                onChange={(e) => setTypedValue(e.target.value.slice(0, 2))}
+                onBlur={commitInlineEdit}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") commitInlineEdit();
+                  if (e.key === "Escape") setIsInlineEditing(false);
+                }}
+                className="w-[80px] h-[46px] bg-black border-2 border-[#ffcc00] text-center text-[34px] font-black text-[#ffcc00] rounded-[8px] focus:outline-none shadow-[0_0_16px_rgba(255,204,0,0.8)]"
+              />
+            ) : (
+              <button
+                type="button"
+                onClick={startInlineEdit}
+                title="Click to type or edit number"
+                className={`group px-2 py-1 rounded-[8px] transition-all cursor-pointer flex flex-col items-center ${
+                  isSelected
+                    ? "text-[#ffcc00] scale-105"
+                    : "text-white hover:text-[#ffcc00]"
+                }`}
+              >
+                <span className="text-[36px] font-black tracking-[0.16em] drop-shadow-[0_0_16px_rgba(255,204,0,0.8)] leading-none">
+                  {pad(value)}
+                </span>
+                <span className="text-[7px] tracking-widest text-[#ffcc00]/60 opacity-0 group-hover:opacity-100 transition-opacity">
+                  CLICK TO EDIT
+                </span>
+              </button>
+            )}
           </div>
-          <div className="text-[15px] font-bold tracking-[0.18em] text-white/35">{pad(vPlus1)}</div>
-          <div className="text-[12px] font-bold tracking-[0.18em] text-white/15 mt-3">{pad(vPlus2)}</div>
+
+          {/* +1 Value */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onSelect();
+              onChange(vPlus1);
+            }}
+            className="text-[15px] font-bold tracking-[0.18em] text-white/50 hover:text-[#ffcc00] hover:scale-110 transition-all cursor-pointer py-1"
+          >
+            {pad(vPlus1)}
+          </button>
+
+          {/* +2 Value */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onSelect();
+              onChange(vPlus2);
+            }}
+            className="text-[12px] font-bold tracking-[0.18em] text-white/30 hover:text-[#ffcc00] hover:scale-110 transition-all cursor-pointer py-1"
+          >
+            {pad(vPlus2)}
+          </button>
         </div>
 
         {/* Column Label */}
-        <div className="absolute bottom-[6px] left-0 right-0 text-center text-[9px] tracking-[0.22em] text-[#ffcc00]/50 font-bold z-20 pointer-events-none">
+        <div
+          onClick={(e) => {
+            e.stopPropagation();
+            onSelect();
+          }}
+          className={`absolute bottom-[6px] left-0 right-0 text-center text-[9px] tracking-[0.25em] font-black z-25 cursor-pointer ${
+            isSelected ? "text-[#ffcc00]" : "text-[#ffcc00]/60 hover:text-[#ffcc00]"
+          }`}
+        >
           {label}
         </div>
       </div>
@@ -121,10 +269,18 @@ function DrumColumn({ value, max, label, disabled = false, onChange }: DrumColum
       {/* Bottom Stepper */}
       <button
         type="button"
-        onClick={() => !disabled && onChange(wrap(value - 1))}
-        className="w-[92px] h-[32px] rounded-b-[10px] bg-black border border-t-0 border-[#ffcc00]/30 text-[#ffcc00]/70 hover:text-[#ffcc00] hover:bg-[#1a1a00] text-[12px] tracking-widest font-bold active:scale-[0.97] transition-colors"
+        onClick={(e) => {
+          e.stopPropagation();
+          onSelect();
+          if (!disabled) onChange(wrap(value - 1));
+        }}
+        className={`w-[96px] h-[32px] rounded-b-[10px] bg-black border border-t-0 text-[12px] tracking-widest font-bold active:scale-[0.97] transition-all flex items-center justify-center gap-1 ${
+          isSelected
+            ? "border-[#ffcc00] text-[#ffcc00] bg-[#1a1a00]"
+            : "border-[#ffcc00]/30 text-[#ffcc00]/70 hover:text-[#ffcc00]"
+        }`}
       >
-        ▼ {pad(vMinus1)}
+        ▼ <span className="opacity-60">{pad(vMinus1)}</span>
       </button>
     </div>
   );
@@ -135,12 +291,16 @@ export function SamsungTimePicker({
   initialHours = 0,
   initialMinutes = 5,
   initialSeconds = 0,
+  initialFocus = "minutes",
   onSave,
   onCancel,
 }: SamsungTimePickerProps) {
   const [hours, setHours] = useState<number>(initialHours);
   const [minutes, setMinutes] = useState<number>(initialMinutes);
   const [seconds, setSeconds] = useState<number>(initialSeconds);
+  const [activeUnit, setActiveUnit] = useState<"hours" | "minutes" | "seconds">(initialFocus);
+  const [keypadBuffer, setKeypadBuffer] = useState<string>("");
+  const [showKeypad, setShowKeypad] = useState<boolean>(true);
 
   const pad = (n: number) => String(n).padStart(2, "0");
 
@@ -154,68 +314,252 @@ export function SamsungTimePicker({
     });
   }, [hours, minutes, seconds, mode, onSave]);
 
+  const handleKeypadPress = (digit: string) => {
+    const nextBuf = keypadBuffer + digit;
+    const num = parseInt(nextBuf, 10);
+
+    if (activeUnit === "hours") {
+      const maxH = mode === "alarm" ? 23 : 99;
+      const validVal = Math.min(maxH, num);
+      setHours(validVal);
+      if (nextBuf.length >= 2 || num * 10 > maxH) {
+        setKeypadBuffer("");
+        setActiveUnit("minutes");
+      } else {
+        setKeypadBuffer(nextBuf);
+      }
+    } else if (activeUnit === "minutes") {
+      const validVal = Math.min(59, num);
+      setMinutes(validVal);
+      if (nextBuf.length >= 2 || num >= 6) {
+        setKeypadBuffer("");
+        if (mode === "timer") setActiveUnit("seconds");
+      } else {
+        setKeypadBuffer(nextBuf);
+      }
+    } else if (activeUnit === "seconds" && mode === "timer") {
+      const validVal = Math.min(59, num);
+      setSeconds(validVal);
+      if (nextBuf.length >= 2 || num >= 6) {
+        setKeypadBuffer("");
+      } else {
+        setKeypadBuffer(nextBuf);
+      }
+    }
+  };
+
+  const handleBackspace = () => {
+    setKeypadBuffer("");
+    if (activeUnit === "hours") setHours(0);
+    else if (activeUnit === "minutes") setMinutes(0);
+    else if (activeUnit === "seconds") setSeconds(0);
+  };
+
   return (
-    <div className="border-2 border-[#ffcc00] rounded-[24px] bg-[#0a0a14] p-5 w-full max-w-[380px] shadow-[0_0_40px_rgba(255,204,0,0.28)]">
+    <div className="border-2 border-[#ffcc00] rounded-[24px] bg-[#0a0a14] p-4 md:p-5 w-full max-w-[420px] shadow-[0_0_45px_rgba(255,204,0,0.35)] select-none">
       {/* Header */}
-      <div className="text-center text-[14px] tracking-[0.25em] font-bold text-[#ffcc00]">
-        {mode === "alarm" ? "ALARM • SLIDE WHEEL" : "TIMER • SLIDE WHEEL"}
+      <div className="text-center text-[15px] tracking-[0.25em] font-black text-[#ffcc00] flex items-center justify-center gap-2">
+        <span>{mode === "alarm" ? "ALARM TIME SETTER" : "OPERATION TIMER SETTER"}</span>
       </div>
-      <div className="text-center text-[9px] tracking-[0.22em] opacity-40 mt-1 text-[#ffcc00]">
-        DRAG UP/DOWN • 32px = 1 STEP • WRAPS • SILENT
+      <div className="text-center text-[9px] tracking-[0.22em] text-[#ffcc00]/60 mt-1">
+        CLICK ANY NUMBER TO CHANGE • TAP DIGITS OR DRAG
       </div>
 
       {/* Drums Row */}
-      <div className="mt-4 flex justify-center gap-3">
+      <div className="mt-4 flex justify-center gap-2.5">
         <DrumColumn
+          unit="hours"
           value={hours}
           max={mode === "alarm" ? 23 : 99}
-          label="HOUR"
+          label="HOURS"
+          isSelected={activeUnit === "hours"}
+          onSelect={() => {
+            setActiveUnit("hours");
+            setKeypadBuffer("");
+          }}
           onChange={setHours}
         />
         <DrumColumn
+          unit="minutes"
           value={minutes}
           max={59}
-          label="MIN"
+          label="MINS"
+          isSelected={activeUnit === "minutes"}
+          onSelect={() => {
+            setActiveUnit("minutes");
+            setKeypadBuffer("");
+          }}
           onChange={setMinutes}
         />
         <DrumColumn
+          unit="seconds"
           value={seconds}
           max={59}
-          label="SEC"
+          label="SECS"
           disabled={mode === "alarm"}
+          isSelected={activeUnit === "seconds"}
+          onSelect={() => {
+            setActiveUnit("seconds");
+            setKeypadBuffer("");
+          }}
           onChange={setSeconds}
         />
       </div>
 
-      {/* Pill Display */}
-      <div className="mt-5 flex justify-center">
-        <div className="inline-flex items-center gap-3 px-5 py-2.5 bg-black border border-[#ffcc00]/30 rounded-full shadow-[0_0_18px_rgba(255,204,0,0.15)]">
-          <span className="text-[24px] font-black tracking-[0.2em] text-white">
-            {pad(hours)}:{pad(minutes)}:{mode === "alarm" ? "--" : pad(seconds)}
+      {/* Segmented Clickable Readout Pill */}
+      <div className="mt-4 flex flex-col items-center">
+        <div className="inline-flex items-center gap-1.5 px-4 py-2 bg-black border-2 border-[#ffcc00]/40 rounded-full shadow-[0_0_20px_rgba(255,204,0,0.18)]">
+          {/* Hours button */}
+          <button
+            type="button"
+            onClick={() => {
+              setActiveUnit("hours");
+              setKeypadBuffer("");
+            }}
+            className={`px-2 py-0.5 rounded font-black text-[22px] tracking-widest transition-all ${
+              activeUnit === "hours"
+                ? "bg-[#ffcc00] text-black shadow-[0_0_10px_rgba(255,204,0,0.6)]"
+                : "text-white hover:text-[#ffcc00]"
+            }`}
+          >
+            {pad(hours)}
+          </button>
+          <span className="text-[#ffcc00] text-[20px] font-black">:</span>
+
+          {/* Minutes button */}
+          <button
+            type="button"
+            onClick={() => {
+              setActiveUnit("minutes");
+              setKeypadBuffer("");
+            }}
+            className={`px-2 py-0.5 rounded font-black text-[22px] tracking-widest transition-all ${
+              activeUnit === "minutes"
+                ? "bg-[#ffcc00] text-black shadow-[0_0_10px_rgba(255,204,0,0.6)]"
+                : "text-white hover:text-[#ffcc00]"
+            }`}
+          >
+            {pad(minutes)}
+          </button>
+          <span className="text-[#ffcc00] text-[20px] font-black">:</span>
+
+          {/* Seconds button */}
+          <button
+            type="button"
+            disabled={mode === "alarm"}
+            onClick={() => {
+              if (mode === "timer") {
+                setActiveUnit("seconds");
+                setKeypadBuffer("");
+              }
+            }}
+            className={`px-2 py-0.5 rounded font-black text-[22px] tracking-widest transition-all ${
+              mode === "alarm"
+                ? "text-white/20 cursor-not-allowed"
+                : activeUnit === "seconds"
+                  ? "bg-[#ffcc00] text-black shadow-[0_0_10px_rgba(255,204,0,0.6)]"
+                  : "text-white hover:text-[#ffcc00]"
+            }`}
+          >
+            {mode === "alarm" ? "--" : pad(seconds)}
+          </button>
+
+          <span className="text-[10px] tracking-widest font-bold text-[#ffcc00]/70 ml-2 border-l border-[#ffcc00]/30 pl-2">
+            {activeUnit.toUpperCase()}
           </span>
-          <span className="text-[9px] tracking-[0.2em] opacity-50 text-[#ffcc00]">
-            {mode === "alarm" ? "24HR" : "HH:MM:SS"}
-          </span>
+        </div>
+
+        <div className="flex items-center gap-2 mt-2">
+          <button
+            type="button"
+            onClick={() => setShowKeypad(!showKeypad)}
+            className="text-[10px] tracking-widest text-[#ffcc00] hover:underline opacity-80"
+          >
+            {showKeypad ? "▲ HIDE KEYPAD" : "▼ SHOW NUMBER KEYPAD"}
+          </button>
         </div>
       </div>
 
-      <div className="mt-2 text-center text-[9px] opacity-30 tracking-widest">
-        SLIDE SET • SILENT
-      </div>
+      {/* Samsung Quick Number Pad */}
+      {showKeypad && (
+        <div className="mt-3 bg-black/90 border border-[#ffcc00]/30 rounded-[14px] p-2.5">
+          <div className="flex justify-between items-center mb-1.5 px-1">
+            <span className="text-[9px] tracking-widest text-[#ffcc00]/70 font-bold">
+              TAP NUMBERS FOR [{activeUnit.toUpperCase()}]:
+            </span>
+            <div className="flex gap-1">
+              <button
+                type="button"
+                onClick={() => {
+                  if (activeUnit === "minutes") setMinutes((m) => Math.min(59, m + 5));
+                  else if (activeUnit === "seconds") setSeconds((s) => Math.min(59, s + 5));
+                  else setHours((h) => Math.min(23, h + 1));
+                }}
+                className="text-[9px] px-1.5 py-0.5 bg-[#1a1a00] border border-[#ffcc00]/40 text-[#ffcc00] rounded hover:bg-[#ffcc00] hover:text-black"
+              >
+                +5
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (activeUnit === "minutes") setMinutes((m) => Math.min(59, m + 15));
+                  else if (activeUnit === "seconds") setSeconds((s) => Math.min(59, s + 15));
+                  else setHours((h) => Math.min(23, h + 5));
+                }}
+                className="text-[9px] px-1.5 py-0.5 bg-[#1a1a00] border border-[#ffcc00]/40 text-[#ffcc00] rounded hover:bg-[#ffcc00] hover:text-black"
+              >
+                +15
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-4 gap-1.5">
+            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 0].map((digit) => (
+              <button
+                key={digit}
+                type="button"
+                onClick={() => handleKeypadPress(String(digit))}
+                className="min-h-[38px] rounded-[6px] bg-[#121220] border border-[#ffcc00]/30 text-[#ffcc00] font-black text-[16px] hover:bg-[#ffcc00] hover:text-black active:scale-95 transition-all"
+              >
+                {digit}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => {
+                if (activeUnit === "hours") setHours(0);
+                if (activeUnit === "minutes") setMinutes(0);
+                if (activeUnit === "seconds") setSeconds(0);
+                setKeypadBuffer("");
+              }}
+              className="min-h-[38px] rounded-[6px] bg-[#1a1010] border border-red-500/40 text-red-400 font-bold text-[11px] tracking-wider hover:bg-red-500 hover:text-black active:scale-95 transition-all"
+            >
+              ZERO
+            </button>
+            <button
+              type="button"
+              onClick={handleBackspace}
+              className="min-h-[38px] rounded-[6px] bg-[#201a00] border border-[#ffcc00]/50 text-[#ffcc00] font-bold text-[12px] hover:bg-[#ffcc00] hover:text-black active:scale-95 transition-all"
+            >
+              DEL
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Modal Actions */}
-      <div className="grid grid-cols-2 gap-3 mt-5">
+      <div className="grid grid-cols-2 gap-3 mt-4">
         <button
           type="button"
           onClick={handleConfirm}
-          className="bg-[#ffcc00] text-black font-black text-[14px] tracking-widest min-h-[44px] rounded-[8px] hover:bg-[#ffcc00]/80 transition-colors"
+          className="bg-[#ffcc00] text-black font-black text-[15px] tracking-widest min-h-[44px] rounded-[8px] hover:bg-[#ffcc00]/80 active:scale-[0.98] transition-all shadow-[0_0_20px_rgba(255,204,0,0.3)]"
         >
-          SET
+          CONFIRM
         </button>
         <button
           type="button"
           onClick={onCancel}
-          className="bg-black border border-[#ffcc00] text-[#ffcc00] font-black text-[14px] tracking-widest min-h-[44px] rounded-[8px] hover:bg-[#1a1a00] transition-colors"
+          className="bg-black border border-[#ffcc00] text-[#ffcc00] font-black text-[15px] tracking-widest min-h-[44px] rounded-[8px] hover:bg-[#1a1a00] active:scale-[0.98] transition-all"
         >
           CANCEL
         </button>
