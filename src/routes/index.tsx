@@ -207,19 +207,20 @@ export function CTUTerminalV74() {
       .toUpperCase();
   }, [bangkokDate]);
 
-  // Audio synthesis zero sounds
+  // Zero Sound Trigger (Speaks voice at 0 when zeroSound === "voice")
   const triggerZeroSound = useCallback(() => {
     try {
       const audio = getAudio();
       audio.setVolume(timerVol);
+
+      if (zeroSound === "voice") {
+        audio.playZeroVoiceAndTheme();
+        return;
+      }
+
       const ctx = audio.getAudioContext();
       if (!ctx) return;
       const t = ctx.currentTime;
-
-      if (zeroSound === "voice") {
-        audio.playZeroTheme();
-        return;
-      }
 
       if (zeroSound === "boom") {
         const osc = ctx.createOscillator();
@@ -291,7 +292,7 @@ export function CTUTerminalV74() {
     }
   }, [getAudio, zeroSound, timerVol]);
 
-  // Takeover controls
+  // Takeover controls with tiered intensity (1x at 10s, 2x at 5s, 3x at 3s)
   const startTakeover = useCallback(
     (durationSec = 10, label = "COUNTDOWN", onComplete?: () => void) => {
       if (takeoverIntervalRef.current) clearInterval(takeoverIntervalRef.current);
@@ -302,7 +303,10 @@ export function CTUTerminalV74() {
 
       const audio = getAudio();
       audio.setVolume(timerVol);
-      audio.playCountdownAlert();
+
+      // Determine starting intensity
+      const initialIntensity: 1 | 2 | 3 = durationSec <= 3 ? 3 : durationSec <= 5 ? 2 : 1;
+      audio.playCountdownAlert(initialIntensity);
 
       takeoverIntervalRef.current = setInterval(() => {
         setTakeoverRemaining((prev) => {
@@ -317,7 +321,13 @@ export function CTUTerminalV74() {
             }
             return 0;
           }
-          return prev - 1;
+
+          const nextSec = prev - 1;
+          // Apply tiered escalation: double sound at 5, triple sound at 3
+          const currentIntensity: 1 | 2 | 3 = nextSec <= 3 ? 3 : nextSec <= 5 ? 2 : 1;
+          audio.playCountdownAlert(currentIntensity);
+
+          return nextSec;
         });
       }, 1000);
     },
@@ -328,12 +338,11 @@ export function CTUTerminalV74() {
     if (takeoverIntervalRef.current) clearInterval(takeoverIntervalRef.current);
     setTakeoverActive(false);
     const audio = getAudio();
-    audio.stopCountdownAlert();
-    audio.stopZeroTheme();
+    audio.stopAll();
     showToast("COUNTDOWN DISARMED", 2000);
   }, [getAudio, showToast]);
 
-  // Timers countdown ticker
+  // Timers countdown ticker: starts alert at 10s, doubles at 5s, triples at 3s, speaks voice at 0
   useEffect(() => {
     const hasRunning = timers.some((t) => t.running);
     if (!hasRunning) {
@@ -346,6 +355,7 @@ export function CTUTerminalV74() {
         prevTimers.map((timer) => {
           if (!timer.running) return timer;
 
+          // Expiration at zero
           if (timer.remainingSec <= 1) {
             triggerZeroSound();
             showToast(`${timer.label} — TIME'S UP!`, 4000);
@@ -358,7 +368,10 @@ export function CTUTerminalV74() {
             };
           }
 
-          if (timer.remainingSec === 11) {
+          const nextRemaining = timer.remainingSec - 1;
+
+          // Engage countdown at 10 seconds (or if started <= 10 seconds)
+          if (nextRemaining === 10 && !takeoverActive) {
             startTakeover(10, timer.label, () => {
               setTimers((current) =>
                 current.map((t) =>
@@ -370,7 +383,13 @@ export function CTUTerminalV74() {
             });
           }
 
-          return { ...timer, remainingSec: timer.remainingSec - 1 };
+          // Escalate audio if takeover is not fullscreen
+          if (!takeoverActive && nextRemaining <= 10 && nextRemaining > 0) {
+            const intensity: 1 | 2 | 3 = nextRemaining <= 3 ? 3 : nextRemaining <= 5 ? 2 : 1;
+            getAudio().playCountdownAlert(intensity);
+          }
+
+          return { ...timer, remainingSec: nextRemaining };
         })
       );
     }, 1000);
@@ -378,7 +397,7 @@ export function CTUTerminalV74() {
     return () => {
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
     };
-  }, [timers, startTakeover, triggerZeroSound, showToast]);
+  }, [timers, takeoverActive, startTakeover, triggerZeroSound, getAudio, showToast]);
 
   // Background Alarm Checker
   useEffect(() => {
@@ -423,17 +442,35 @@ export function CTUTerminalV74() {
 
   // Timer Controls
   const startTimer = (id: string) => {
+    const target = timers.find((t) => t.id === id);
+    if (!target) return;
+
+    if (target.remainingSec <= 0) {
+      showToast("SET DURATION FIRST", 2000);
+      return;
+    }
+
     setTimers((prev) =>
       prev.map((t) => {
         if (t.id !== id) return t;
-        if (t.remainingSec <= 0) {
-          showToast("SET DURATION FIRST", 2000);
-          return t;
-        }
         return { ...t, running: true, timesUp: false, status: "RUNNING - TACTICAL ENGAGED" };
       })
     );
     getAudio().unlockAudio();
+
+    // If started at <= 10 seconds, immediately engage takeover & audio countdown
+    if (target.remainingSec <= 10 && target.remainingSec > 0) {
+      startTakeover(target.remainingSec, target.label, () => {
+        setTimers((current) =>
+          current.map((t) =>
+            t.id === id
+              ? { ...t, remainingSec: 0, running: false, timesUp: true, status: "TIME'S UP" }
+              : t
+          )
+        );
+      });
+    }
+
     showToast("OPERATION TIMER ENGAGED", 1500);
   };
 
@@ -441,9 +478,7 @@ export function CTUTerminalV74() {
     setTimers((prev) =>
       prev.map((t) => (t.id === id ? { ...t, running: false, status: "PAUSED" } : t))
     );
-    const audio = getAudio();
-    audio.stopCountdownAlert();
-    audio.stopZeroTheme();
+    getAudio().stopAll();
     showToast("TIMER PAUSED", 1500);
   };
 
@@ -461,9 +496,7 @@ export function CTUTerminalV74() {
           : t
       )
     );
-    const audio = getAudio();
-    audio.stopCountdownAlert();
-    audio.stopZeroTheme();
+    getAudio().stopAll();
     showToast("TIMER RESET TO DURATION", 1500);
   };
 
@@ -683,12 +716,15 @@ export function CTUTerminalV74() {
               </span>
             </div>
 
-            {/* Segmented Clickable Time Readout (Hours, Minutes, Seconds) */}
+            {/* Segmented Clickable Time Readout (Hours, Minutes, Seconds) - Shakes at <= 3 Seconds */}
             {(() => {
               const hms = formatHMS(focusedTimer.remainingSec);
+              const isUrgent = focusedTimer.running && focusedTimer.remainingSec <= 3 && focusedTimer.remainingSec > 0;
+              const shakeClass = isUrgent ? "ctu-shake-intense text-red-500 drop-shadow-[0_0_18px_rgba(255,0,0,0.85)]" : "text-[#ffcc00]";
+
               return (
                 <div className="mt-3 py-3 px-2 border border-[#ffcc00]/30 rounded-[10px] bg-black flex flex-col items-center">
-                  <div className="flex items-center justify-center gap-1.5 md:gap-3 flex-wrap">
+                  <div className={`flex items-center justify-center gap-1.5 md:gap-3 flex-wrap ${shakeClass}`}>
                     {/* Hours Block */}
                     <button
                       type="button"
@@ -698,15 +734,15 @@ export function CTUTerminalV74() {
                       }}
                       className="group flex flex-col items-center px-3 py-1.5 rounded-[8px] border border-transparent hover:border-[#ffcc00] hover:bg-[#1a1a00] active:scale-95 transition-all cursor-pointer"
                     >
-                      <span className="text-[38px] md:text-[46px] font-black tracking-widest leading-none text-[#ffcc00] group-hover:drop-shadow-[0_0_14px_rgba(255,204,0,0.8)]">
+                      <span className="text-[38px] md:text-[46px] font-black tracking-widest leading-none group-hover:drop-shadow-[0_0_14px_rgba(255,204,0,0.8)]">
                         {hms.h}
                       </span>
-                      <span className="text-[8px] md:text-[9px] tracking-widest text-[#ffcc00]/60 font-bold mt-1">
+                      <span className="text-[8px] md:text-[9px] tracking-widest opacity-60 font-bold mt-1">
                         HOURS
                       </span>
                     </button>
 
-                    <span className="text-[32px] md:text-[40px] font-black text-[#ffcc00] pb-4">:</span>
+                    <span className="text-[32px] md:text-[40px] font-black pb-4">:</span>
 
                     {/* Minutes Block */}
                     <button
@@ -717,15 +753,15 @@ export function CTUTerminalV74() {
                       }}
                       className="group flex flex-col items-center px-3 py-1.5 rounded-[8px] border border-transparent hover:border-[#ffcc00] hover:bg-[#1a1a00] active:scale-95 transition-all cursor-pointer"
                     >
-                      <span className="text-[38px] md:text-[46px] font-black tracking-widest leading-none text-[#ffcc00] group-hover:drop-shadow-[0_0_14px_rgba(255,204,0,0.8)]">
+                      <span className="text-[38px] md:text-[46px] font-black tracking-widest leading-none group-hover:drop-shadow-[0_0_14px_rgba(255,204,0,0.8)]">
                         {hms.m}
                       </span>
-                      <span className="text-[8px] md:text-[9px] tracking-widest text-[#ffcc00]/60 font-bold mt-1">
+                      <span className="text-[8px] md:text-[9px] tracking-widest opacity-60 font-bold mt-1">
                         MINUTES
                       </span>
                     </button>
 
-                    <span className="text-[32px] md:text-[40px] font-black text-[#ffcc00] pb-4">:</span>
+                    <span className="text-[32px] md:text-[40px] font-black pb-4">:</span>
 
                     {/* Seconds Block */}
                     <button
@@ -736,10 +772,10 @@ export function CTUTerminalV74() {
                       }}
                       className="group flex flex-col items-center px-3 py-1.5 rounded-[8px] border border-transparent hover:border-[#ffcc00] hover:bg-[#1a1a00] active:scale-95 transition-all cursor-pointer"
                     >
-                      <span className="text-[38px] md:text-[46px] font-black tracking-widest leading-none text-[#ffcc00] group-hover:drop-shadow-[0_0_14px_rgba(255,204,0,0.8)]">
+                      <span className="text-[38px] md:text-[46px] font-black tracking-widest leading-none group-hover:drop-shadow-[0_0_14px_rgba(255,204,0,0.8)]">
                         {hms.s}
                       </span>
-                      <span className="text-[8px] md:text-[9px] tracking-widest text-[#ffcc00]/60 font-bold mt-1">
+                      <span className="text-[8px] md:text-[9px] tracking-widest opacity-60 font-bold mt-1">
                         SECONDS
                       </span>
                     </button>
@@ -880,7 +916,7 @@ export function CTUTerminalV74() {
                       <button
                         type="button"
                         onClick={() => stopTimer(t.id)}
-                        className="px-2.5 py-1 text-[11px] font-bold rounded border border-[#ffcc00] bg-black text-[#ffcc00] hover:bg-[#1a1a00] cursor-pointer"
+                        className="px-3 py-1.5 rounded bg-black border border-[#ffcc00] text-[#ffcc00] text-[11px] font-bold tracking-widest hover:bg-[#1a1a00] cursor-pointer"
                       >
                         STOP
                       </button>
@@ -888,7 +924,7 @@ export function CTUTerminalV74() {
                       <button
                         type="button"
                         onClick={() => startTimer(t.id)}
-                        className="px-2.5 py-1 text-[11px] font-bold rounded bg-[#00c853] text-black hover:brightness-110 cursor-pointer"
+                        className="px-3 py-1.5 rounded bg-[#00c853] text-black text-[11px] font-bold tracking-widest hover:brightness-110 cursor-pointer"
                       >
                         START
                       </button>
@@ -896,14 +932,14 @@ export function CTUTerminalV74() {
                     <button
                       type="button"
                       onClick={() => resetTimer(t.id)}
-                      className="px-2.5 py-1 text-[11px] font-bold rounded bg-[#ffcc00] text-black hover:bg-[#ffcc00]/80 cursor-pointer"
+                      className="px-3 py-1.5 rounded bg-[#ffcc00] text-black text-[11px] font-bold tracking-widest hover:bg-[#ffcc00]/80 cursor-pointer"
                     >
                       RESET
                     </button>
                     <button
                       type="button"
                       onClick={() => deleteTimer(t.id)}
-                      className="px-2 py-1 text-[11px] font-bold rounded border border-red-500/50 text-red-400 hover:bg-red-950 cursor-pointer"
+                      className="px-2 py-1.5 rounded bg-red-950 border border-red-500 text-red-400 text-[11px] font-bold hover:bg-red-900 cursor-pointer"
                     >
                       ✕
                     </button>
@@ -914,11 +950,11 @@ export function CTUTerminalV74() {
           </div>
         </div>
 
-        {/* ================= MULTIPLE DAILY ALARMS PANEL ================= */}
-        <div className="relative border-2 border-dashed border-[#ffcc00] rounded-[14px] p-3 md:p-4 bg-[#050500] min-h-[90px] flex flex-col gap-3">
+        {/* ================= ALL OPERATIONAL ALARMS QUEUE ================= */}
+        <div className="border border-[#ffcc00]/30 rounded-[12px] p-3 bg-black/60 flex flex-col gap-3">
           <div className="flex justify-between items-center flex-wrap gap-2">
-            <span className="text-[10px] tracking-[0.25em] opacity-80 font-black">
-              DAILY 24HR ALARMS ({alarms.length}) — BANGKOK THEATER (UTC+7)
+            <span className="text-[11px] tracking-[0.25em] font-black text-[#ffcc00]">
+              DAILY TACTICAL ALARMS ({alarms.length})
             </span>
             <button
               type="button"
@@ -928,59 +964,57 @@ export function CTUTerminalV74() {
               }}
               className="bg-[#ffcc00] text-black font-black text-[11px] px-3 py-1.5 rounded tracking-widest hover:bg-white transition-colors cursor-pointer"
             >
-              + ARM NEW ALARM
+              + ADD NEW ALARM
             </button>
           </div>
 
-          {/* Alarm Cards Stack */}
-          <div className="flex flex-col gap-2.5">
-            {alarms.map((alarm) => {
-              const hm = formatHM(alarm.hour, alarm.minute);
+          <div className="flex flex-col gap-2">
+            {alarms.map((a) => {
+              const hm = formatHM(a.hour, a.minute);
               return (
                 <div
-                  key={alarm.id}
-                  className="p-3 rounded-[10px] border border-[#ffcc00]/30 bg-black flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3"
+                  key={a.id}
+                  className="p-2.5 rounded-[8px] border border-[#ffcc00]/25 bg-black flex flex-col md:flex-row items-stretch md:items-center justify-between gap-2.5"
                 >
                   <div className="flex items-center gap-3">
-                    {/* Clickable Alarm HH:MM */}
                     <button
                       type="button"
                       onClick={() => {
                         setPickerFocusUnit("hours");
-                        setModalTarget({ type: "alarm-edit", id: alarm.id });
+                        setModalTarget({ type: "alarm-edit", id: a.id });
                       }}
-                      className="px-3 py-1.5 rounded bg-[#111] border border-[#ffcc00]/40 hover:border-[#ffcc00] flex items-center gap-1 font-black text-[28px] md:text-[32px] text-[#ffcc00] leading-none cursor-pointer"
+                      className="flex items-center gap-1 font-black text-[24px] tracking-wider text-[#ffcc00] px-2.5 py-1 rounded bg-[#050500] border border-[#ffcc00]/30 hover:border-[#ffcc00] cursor-pointer"
                     >
                       <span>{hm.h}</span>:<span>{hm.m}</span>
                     </button>
                     <div className="flex flex-col">
                       <span className="text-[12px] font-bold tracking-wider text-white">
-                        {alarm.label}
+                        {a.label}
                       </span>
                       <span className="text-[9px] tracking-widest opacity-60">
-                        {alarm.armed ? "ACTIVE PROTOCOL — ENGAGED" : "STANDBY — DISARMED"}
+                        {a.armed ? "ARMED — BANGKOK DEPLOYMENT TARGET" : "DISARMED"}
                       </span>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2 self-end sm:self-auto">
+                  <div className="flex items-center gap-2 self-end md:self-auto">
                     <button
                       type="button"
-                      onClick={() => toggleAlarmArmed(alarm.id)}
-                      className={`px-3 py-1.5 text-[11px] font-bold tracking-wider rounded cursor-pointer ${
-                        alarm.armed
+                      onClick={() => toggleAlarmArmed(a.id)}
+                      className={`px-3 py-1.5 rounded text-[11px] font-bold tracking-widest transition-colors cursor-pointer ${
+                        a.armed
                           ? "bg-[#00c853] text-black hover:brightness-110"
-                          : "bg-black border border-[#ffcc00]/50 text-[#ffcc00]/60 hover:border-[#ffcc00]"
+                          : "bg-black border border-[#ffcc00]/40 text-[#ffcc00]/60 hover:text-[#ffcc00]"
                       }`}
                     >
-                      {alarm.armed ? "ARMED" : "OFF"}
+                      {a.armed ? "ARMED" : "DISARMED"}
                     </button>
                     <button
                       type="button"
-                      onClick={() => deleteAlarm(alarm.id)}
-                      className="px-2.5 py-1.5 text-[11px] font-bold rounded border border-red-500/50 text-red-400 hover:bg-red-950 cursor-pointer"
+                      onClick={() => deleteAlarm(a.id)}
+                      className="px-2 py-1.5 rounded bg-red-950 border border-red-500 text-red-400 text-[11px] font-bold hover:bg-red-900 cursor-pointer"
                     >
-                      DELETE
+                      ✕
                     </button>
                   </div>
                 </div>
@@ -989,60 +1023,49 @@ export function CTUTerminalV74() {
           </div>
         </div>
 
-        {/* ================= AUDIO & KLAXON CONFIGURATION ================= */}
-        <div className="border border-[#ffcc00]/30 rounded-[12px] p-3 bg-black/60 flex flex-col gap-3">
-          <div className="flex justify-between items-center">
-            <span className="text-[10px] tracking-[0.25em] font-bold text-[#ffcc00]">
-              TACTICAL AUDIO &amp; AT ZERO KLAXON
+        {/* ================= AUDIO SETTINGS & ZERO-SOUND SELECTOR ================= */}
+        <div className="border border-[#ffcc00]/30 rounded-[12px] p-3 bg-black flex flex-col gap-3">
+          <div className="flex justify-between items-center flex-wrap gap-2">
+            <span className="text-[11px] tracking-[0.25em] font-black text-[#ffcc00]">
+              TACTICAL AUDIO &amp; ZERO-SOUND DISPATCH
+            </span>
+            <span className="text-[10px] text-[#ffcc00]/60">
+              VOLUME: {Math.round(timerVol * 100)}%
             </span>
           </div>
 
-          {/* Quick Countdown Trigger */}
-          <button
-            type="button"
-            onClick={() => {
-              startTakeover(10, "MANUAL COUNTDOWN TEST", () => {
-                showToast("TIME'S UP", 3000);
-              });
-            }}
-            className="min-h-[44px] rounded-[6px] font-bold text-[11px] md:text-[12px] tracking-widest bg-[#ffcc00] text-black border-2 border-[#ffcc00] hover:bg-black hover:text-[#ffcc00] px-2 whitespace-normal leading-tight cursor-pointer"
-          >
-            MANUAL OVERRIDE — TRIGGER 10→0 COUNTDOWN &amp; {ZERO_SOUND_LABELS[zeroSound]}
-          </button>
-
-          {/* Volume Slider */}
           <div className="flex items-center gap-3">
-            <span className="text-[10px] w-[50px] opacity-60">VOLUME</span>
+            <span className="text-[10px] tracking-widest opacity-60">MIN</span>
             <input
               type="range"
-              min={0}
-              max={1}
-              step={0.02}
+              min="0"
+              max="1"
+              step="0.05"
               value={timerVol}
               onChange={(e) => {
-                const val = parseFloat(e.target.value);
-                setTimerVol(val);
-                if (audioRef.current) audioRef.current.setVolume(val);
+                const v = parseFloat(e.target.value);
+                setTimerVol(v);
+                getAudio().setVolume(v);
               }}
-              className="flex-1 cursor-pointer"
+              className="flex-1"
             />
-            <span className="text-[11px] w-[30px] text-right">{timerVol.toFixed(2)}</span>
+            <span className="text-[10px] tracking-widest opacity-60">MAX</span>
           </div>
 
-          {/* At Zero Selector */}
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-1.5">
+          {/* Zero Sound Mode Chips */}
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5 mt-1">
             {(["voice", "boom", "alarm", "ctu_beep", "stinger"] as ZeroSoundType[]).map((key) => (
               <button
                 key={key}
                 type="button"
                 onClick={() => {
                   setZeroSound(key);
-                  showToast(`ZERO: ${ZERO_SOUND_LABELS[key]}`, 1500);
+                  showToast(`ZERO SOUND ARMED: ${ZERO_SOUND_LABELS[key]}`, 1500);
                 }}
-                className={`min-h-[38px] rounded-[6px] text-[10px] md:text-[11px] font-bold tracking-widest border transition-colors cursor-pointer ${
+                className={`py-2 px-1 text-center rounded text-[10px] font-bold tracking-wider transition-colors cursor-pointer border ${
                   zeroSound === key
-                    ? "bg-[#ffcc00] text-black border-[#ffcc00] shadow-[0_0_12px_rgba(255,204,0,0.4)]"
-                    : "bg-black text-[#ffcc00] border-[#ffcc00]/40 hover:bg-[#1a1a00]"
+                    ? "bg-[#ffcc00] text-black border-[#ffcc00] shadow-[0_0_10px_rgba(255,204,0,0.5)]"
+                    : "bg-[#0a0a00] text-[#ffcc00] border-[#ffcc00]/20 hover:border-[#ffcc00]"
                 }`}
               >
                 {ZERO_SOUND_LABELS[key]}
@@ -1064,8 +1087,7 @@ export function CTUTerminalV74() {
             <button
               type="button"
               onClick={() => {
-                const audio = getAudio();
-                audio.stopZeroTheme();
+                getAudio().stopAll();
                 showToast("SOUND STOPPED", 1500);
               }}
               className="min-h-[38px] rounded-[6px] text-[11px] font-bold tracking-widest bg-black border border-[#ffcc00] text-[#ffcc00] hover:bg-[#1a1a00] transition-colors cursor-pointer"
@@ -1093,21 +1115,29 @@ export function CTUTerminalV74() {
             </span>
           </div>
 
-          {/* Giant Countdown Digit */}
+          {/* Giant Countdown Digit - Shakes violently at <= 3 Seconds */}
           <div className="flex flex-col items-center justify-center my-auto">
             <div className="text-[14px] md:text-[18px] tracking-[0.4em] font-bold text-[#ffcc00]/70 mb-2">
               SECONDS TO ZERO
             </div>
             <div
               className={`font-black leading-none tracking-tight select-none ${
-                takeoverRemaining <= 3 ? "text-red-500" : "text-[#ffcc00] glow"
+                takeoverRemaining <= 3
+                  ? "ctu-shake-intense text-red-500 drop-shadow-[0_0_35px_rgba(255,0,0,0.9)]"
+                  : takeoverRemaining <= 5
+                    ? "text-orange-400 drop-shadow-[0_0_20px_rgba(255,140,0,0.8)]"
+                    : "text-[#ffcc00] glow"
               }`}
               style={{ fontSize: "clamp(120px, 28vw, 240px)", lineHeight: "0.85" }}
             >
               {String(takeoverRemaining).padStart(2, "0")}
             </div>
-            <div className="text-[11px] tracking-[0.3em] opacity-60 mt-4 text-[#ffcc00]">
-              TACTICAL KLAXON ACTIVE
+            <div className="text-[11px] tracking-[0.3em] opacity-80 mt-4 text-[#ffcc00]">
+              {takeoverRemaining <= 3
+                ? "CRISIS TIER 3: TRIPLE AUDIO ESCALATION & SEISMIC LOCK"
+                : takeoverRemaining <= 5
+                  ? "CRISIS TIER 2: DOUBLE AUDIO ESCALATION ENGAGED"
+                  : "TACTICAL KLAXON ACTIVE"}
             </div>
           </div>
 
