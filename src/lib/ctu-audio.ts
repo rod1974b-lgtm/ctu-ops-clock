@@ -8,15 +8,34 @@ export class CTUAudio {
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
   private zeroAudio: HTMLAudioElement | null = null;
-  private countdownAudio: HTMLAudioElement | null = null;
+
+  // Tripled instances of the exact original countdown audio file
+  private countdownAudio1: HTMLAudioElement | null = null;
+  private countdownAudio2: HTMLAudioElement | null = null;
+  private countdownAudio3: HTMLAudioElement | null = null;
+
   private volume: number = 0.85;
 
   constructor() {
     this.initContext();
   }
 
+  private createAudioElement(src: string, loop: boolean = true): HTMLAudioElement | null {
+    if (typeof Audio === "undefined") return null;
+    try {
+      const audio = new Audio(src);
+      audio.preload = "auto";
+      audio.loop = loop;
+      audio.volume = this.volume;
+      return audio;
+    } catch {
+      return null;
+    }
+  }
+
   private initContext() {
     if (typeof window === "undefined") return;
+
     try {
       const AudioCtx =
         window.AudioContext ||
@@ -29,20 +48,19 @@ export class CTUAudio {
       }
     } catch {}
 
-    if (!this.zeroAudio && typeof Audio !== "undefined") {
-      try {
-        this.zeroAudio = new Audio("/24 At Zero theme.mp3");
-        this.zeroAudio.preload = "auto";
-        this.zeroAudio.loop = true;
-      } catch {}
+    if (!this.zeroAudio) {
+      this.zeroAudio = this.createAudioElement("/24 At Zero theme.mp3", true);
     }
 
-    if (!this.countdownAudio && typeof Audio !== "undefined") {
-      try {
-        this.countdownAudio = new Audio("/24 Alarm Countdown.mp3");
-        this.countdownAudio.preload = "auto";
-        this.countdownAudio.loop = true;
-      } catch {}
+    // Initialize 3 instances of the identical original alarm file
+    if (!this.countdownAudio1) {
+      this.countdownAudio1 = this.createAudioElement("/24 Alarm Countdown.mp3", true);
+    }
+    if (!this.countdownAudio2) {
+      this.countdownAudio2 = this.createAudioElement("/24 Alarm Countdown.mp3", true);
+    }
+    if (!this.countdownAudio3) {
+      this.countdownAudio3 = this.createAudioElement("/24 Alarm Countdown.mp3", true);
     }
   }
 
@@ -50,6 +68,15 @@ export class CTUAudio {
     this.initContext();
     if (this.ctx && this.ctx.state === "suspended") {
       this.ctx.resume().catch(() => {});
+    }
+
+    // Pre-warm browser speech synthesis so zero voice can speak from intervals
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      try {
+        if (window.speechSynthesis.paused) {
+          window.speechSynthesis.resume();
+        }
+      } catch {}
     }
   }
 
@@ -70,82 +97,87 @@ export class CTUAudio {
     if (this.zeroAudio) {
       this.zeroAudio.volume = this.volume;
     }
-    if (this.countdownAudio) {
-      this.countdownAudio.volume = this.volume;
+    if (this.countdownAudio1) {
+      this.countdownAudio1.volume = this.volume;
+    }
+    if (this.countdownAudio2) {
+      this.countdownAudio2.volume = this.volume;
+    }
+    if (this.countdownAudio3) {
+      this.countdownAudio3.volume = this.volume;
     }
   }
 
   /**
-   * Escalating Countdown Alert:
-   * - intensity 1 (10s to 6s): Standard rate (1.0x) + base warning pip
-   * - intensity 2 (5s to 4s): DOUBLE SOUND -> rate 1.18x + 1.5x volume boost + double-pip klaxon
-   * - intensity 3 (3s to 1s): TRIPLE SOUND -> rate 1.35x + 2.0x volume peak + urgent triple-pip klaxon
+   * Escalating Countdown Alert using ONLY the original alarm track:
+   * - intensity 1 (10s to 6s): Single original alarm playing at 1.0x rate
+   * - intensity 2 (5s to 4s): DOUBLE sounding -> 1.55x playback rate + 2nd staggered original alarm track
+   * - intensity 3 (3s to 1s): TRIPLE sounding -> 1.95x playback rate + 3 simultaneous layered original alarm tracks
    */
   public playCountdownAlert(intensity: 1 | 2 | 3 = 1) {
     this.unlock();
 
-    // 1. Play & Escalate Background MP3 Alert
-    if (this.countdownAudio) {
+    const rate = intensity === 3 ? 1.95 : intensity === 2 ? 1.55 : 1.0;
+
+    // Track 1 (Base Alarm)
+    if (this.countdownAudio1) {
       try {
-        const rate = intensity === 3 ? 1.35 : intensity === 2 ? 1.18 : 1.0;
-        const volMultiplier = intensity === 3 ? 1.0 : intensity === 2 ? Math.min(1.0, this.volume * 1.35) : this.volume;
-
-        this.countdownAudio.playbackRate = rate;
-        this.countdownAudio.volume = volMultiplier;
-
-        if (this.countdownAudio.paused) {
-          this.countdownAudio.currentTime = 0;
-          this.countdownAudio.play().catch(() => {
-            this.fallbackCrisisSynth();
-          });
+        this.countdownAudio1.playbackRate = rate;
+        this.countdownAudio1.volume = this.volume;
+        if (this.countdownAudio1.paused) {
+          this.countdownAudio1.currentTime = 0;
+          this.countdownAudio1.play().catch(() => {});
         }
-      } catch {
-        this.fallbackCrisisSynth();
-      }
-    } else {
-      this.fallbackCrisisSynth();
+      } catch {}
     }
 
-    // 2. Layer Synthesizer Klaxon Pulses (Double at 5s, Triple at 3s)
-    this.layerCrisisPulse(intensity);
-  }
+    // Track 2 (Engages at <= 5s for DOUBLE sounding alarm)
+    if (this.countdownAudio2) {
+      try {
+        if (intensity >= 2) {
+          this.countdownAudio2.playbackRate = rate;
+          this.countdownAudio2.volume = Math.min(1.0, this.volume * 0.9);
+          if (this.countdownAudio2.paused) {
+            // Slight acoustic offset for rich dual-alarm sound
+            this.countdownAudio2.currentTime = 0.18;
+            this.countdownAudio2.play().catch(() => {});
+          }
+        } else {
+          this.countdownAudio2.pause();
+          this.countdownAudio2.currentTime = 0;
+        }
+      } catch {}
+    }
 
-  private layerCrisisPulse(intensity: 1 | 2 | 3) {
-    if (!this.ctx || !this.masterGain) return;
-    try {
-      const now = this.ctx.currentTime + 0.01;
-      const count = intensity; // 1 pip at 10-6s, 2 pips at 5-4s, 3 pips at 3-1s
-      const baseFreq = intensity === 3 ? 1800 : intensity === 2 ? 1500 : 1200;
-
-      for (let i = 0; i < count; i++) {
-        const osc = this.ctx.createOscillator();
-        const gain = this.ctx.createGain();
-        const startTime = now + i * 0.12;
-
-        osc.type = intensity === 3 ? "sawtooth" : "square";
-        osc.frequency.setValueAtTime(baseFreq + i * 150, startTime);
-
-        gain.gain.setValueAtTime(0.0001, startTime);
-        gain.gain.exponentialRampToValueAtTime(0.5 * this.volume, startTime + 0.005);
-        gain.gain.exponentialRampToValueAtTime(0.0001, startTime + 0.09);
-
-        osc.connect(gain);
-        gain.connect(this.masterGain);
-
-        osc.start(startTime);
-        osc.stop(startTime + 0.1);
-      }
-    } catch {}
+    // Track 3 (Engages at <= 3s for TRIPLE sounding alarm)
+    if (this.countdownAudio3) {
+      try {
+        if (intensity === 3) {
+          this.countdownAudio3.playbackRate = rate;
+          this.countdownAudio3.volume = Math.min(1.0, this.volume * 0.85);
+          if (this.countdownAudio3.paused) {
+            // Second acoustic offset for wall-of-sound triple alarm
+            this.countdownAudio3.currentTime = 0.36;
+            this.countdownAudio3.play().catch(() => {});
+          }
+        } else {
+          this.countdownAudio3.pause();
+          this.countdownAudio3.currentTime = 0;
+        }
+      } catch {}
+    }
   }
 
   public stopCountdownAlert() {
-    if (this.countdownAudio) {
-      try {
-        this.countdownAudio.pause();
-        this.countdownAudio.currentTime = 0;
-        this.countdownAudio.playbackRate = 1.0;
-      } catch {}
-    }
+    [this.countdownAudio1, this.countdownAudio2, this.countdownAudio3].forEach((audio) => {
+      if (audio) {
+        try {
+          audio.pause();
+          audio.currentTime = 0;
+          audio.playbackRate = 1.0;
+        } catch {}
+      }
+    });
   }
 
   /**
@@ -160,12 +192,23 @@ export class CTUAudio {
     // 1. Spoken Tactical Announcement: "Zero"
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       try {
-        window.speechSynthesis.cancel(); // Clear any queued utterances
-        const utter = new SpeechSynthesisUtterance("Zero");
-        utter.rate = 1.05;
-        utter.pitch = 0.9;
-        utter.volume = Math.max(0.6, this.volume);
-        window.speechSynthesis.speak(utter);
+        if (window.speechSynthesis.paused) {
+          window.speechSynthesis.resume();
+        }
+        window.speechSynthesis.cancel();
+
+        // 40ms timeout ensures Chromium does not swallow the speak() invocation
+        setTimeout(() => {
+          try {
+            const utter = new SpeechSynthesisUtterance("Zero");
+            utter.rate = 1.0;
+            utter.pitch = 0.85;
+            utter.volume = Math.max(0.85, this.volume);
+            window.speechSynthesis.speak(utter);
+          } catch (err) {
+            console.warn("SpeechSynthesis utterance error:", err);
+          }
+        }, 40);
       } catch (err) {
         console.warn("SpeechSynthesis error:", err);
       }
@@ -176,14 +219,8 @@ export class CTUAudio {
       try {
         this.zeroAudio.currentTime = 0;
         this.zeroAudio.volume = this.volume;
-        this.zeroAudio.play().catch(() => {
-          this.fallbackCrisisSynth();
-        });
-      } catch {
-        this.fallbackCrisisSynth();
-      }
-    } else {
-      this.fallbackCrisisSynth();
+        this.zeroAudio.play().catch(() => {});
+      } catch {}
     }
   }
 
@@ -208,26 +245,5 @@ export class CTUAudio {
   public stopAll() {
     this.stopCountdownAlert();
     this.stopZeroTheme();
-  }
-
-  private fallbackCrisisSynth() {
-    if (!this.ctx || !this.masterGain) return;
-    try {
-      const now = this.ctx.currentTime + 0.01;
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-      osc.type = "sawtooth";
-      osc.frequency.setValueAtTime(440, now);
-      osc.frequency.exponentialRampToValueAtTime(880, now + 0.4);
-
-      gain.gain.setValueAtTime(0.001, now);
-      gain.gain.linearRampToValueAtTime(0.5 * this.volume, now + 0.05);
-      gain.gain.linearRampToValueAtTime(0.0001, now + 0.4);
-
-      osc.connect(gain);
-      gain.connect(this.masterGain);
-      osc.start(now);
-      osc.stop(now + 0.45);
-    } catch {}
   }
 }
