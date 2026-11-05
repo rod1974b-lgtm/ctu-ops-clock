@@ -97,6 +97,37 @@
   animation: ctu-shake 0.1s cubic-bezier(0.36, 0.07, 0.19, 0.97) infinite !important;
 }
 
+/* 24 Ending Credits Rolling Amber Typography */
+@keyframes creditsRoll {
+  0% {
+    transform: translateY(55%);
+  }
+  100% {
+    transform: translateY(-115%);
+  }
+}
+
+/* Ken Burns Tactical Pan and Zoom for Watercolors */
+@keyframes kenBurns {
+  0% {
+    transform: scale(1) translate(0, 0);
+  }
+  50% {
+    transform: scale(1.08) translate(-1%, -1%);
+  }
+  100% {
+    transform: scale(1.12) translate(1%, 1%);
+  }
+}
+
+.ken {
+  animation: kenBurns 18s ease-in-out infinite alternate;
+}
+
+.watercolor {
+  filter: contrast(1.12) saturate(0.72) brightness(0.92) sepia(0.12);
+}
+
 /* Custom CTU Tactical Slider */
 input[type="range"] {
   -webkit-appearance: none;
