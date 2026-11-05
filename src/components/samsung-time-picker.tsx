@@ -53,7 +53,7 @@ function DrumColumn({
   const vPlus1 = wrap(value + 1);
   const vPlus2 = wrap(value + 2);
 
-  // Drag handling only when not clicking an interactive button/input
+  // Allow dragging only when touching the background drum, not on buttons or inputs
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (disabled || isInlineEditing) return;
     const target = e.target as HTMLElement;
@@ -113,7 +113,7 @@ function DrumColumn({
     }
   };
 
-  // Keyboard navigation when this drum column is active
+  // Keyboard navigation when this column is selected
   useEffect(() => {
     if (!isSelected || disabled) return;
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -172,11 +172,11 @@ function DrumColumn({
         onWheel={handleWheel}
         onClick={onSelect}
       >
-        {/* Top & Bottom Vignette Fade */}
+        {/* Top & Bottom Ambient Vignette Fade */}
         <div className="absolute inset-x-0 top-0 h-[50px] bg-gradient-to-b from-black via-black/80 to-transparent pointer-events-none z-20" />
         <div className="absolute inset-x-0 bottom-0 h-[50px] bg-gradient-to-t from-black via-black/80 to-transparent pointer-events-none z-20" />
 
-        {/* Center Glowing Target Box */}
+        {/* Center Glowing Target Pill */}
         <div
           className={`absolute left-1.5 right-1.5 top-1/2 -translate-y-1/2 h-[56px] rounded-[10px] z-10 pointer-events-none border transition-all ${
             isSelected
@@ -215,7 +215,7 @@ function DrumColumn({
             {pad(vMinus1)}
           </button>
 
-          {/* Center Active Value */}
+          {/* Center Active Value (Direct Click/Tap to Edit) */}
           <div className="my-[2px] relative z-30">
             {isInlineEditing ? (
               <input
@@ -338,10 +338,6 @@ export function SamsungTimePicker({
   const [minutes, setMinutes] = useState<number>(initialMinutes);
   const [seconds, setSeconds] = useState<number>(initialSeconds);
   const [activeUnit, setActiveUnit] = useState<"hours" | "minutes" | "seconds">(initialFocus);
-  const [keypadBuffer, setKeypadBuffer] = useState<string>("");
-  const [showKeypad, setShowKeypad] = useState<boolean>(true);
-
-  const pad = (n: number) => String(n).padStart(2, "0");
 
   const handleConfirm = useCallback(() => {
     const total = hours * 3600 + minutes * 60 + (mode === "alarm" ? 0 : seconds);
@@ -353,55 +349,14 @@ export function SamsungTimePicker({
     });
   }, [hours, minutes, seconds, mode, onSave]);
 
-  const handleKeypadPress = (digit: string) => {
-    const nextBuf = keypadBuffer + digit;
-    const num = parseInt(nextBuf, 10);
-
-    if (activeUnit === "hours") {
-      const maxH = mode === "alarm" ? 23 : 99;
-      const validVal = Math.min(maxH, num);
-      setHours(validVal);
-      if (nextBuf.length >= 2 || num * 10 > maxH) {
-        setKeypadBuffer("");
-        setActiveUnit("minutes");
-      } else {
-        setKeypadBuffer(nextBuf);
-      }
-    } else if (activeUnit === "minutes") {
-      const validVal = Math.min(59, num);
-      setMinutes(validVal);
-      if (nextBuf.length >= 2 || num >= 6) {
-        setKeypadBuffer("");
-        if (mode === "timer") setActiveUnit("seconds");
-      } else {
-        setKeypadBuffer(nextBuf);
-      }
-    } else if (activeUnit === "seconds" && mode === "timer") {
-      const validVal = Math.min(59, num);
-      setSeconds(validVal);
-      if (nextBuf.length >= 2 || num >= 6) {
-        setKeypadBuffer("");
-      } else {
-        setKeypadBuffer(nextBuf);
-      }
-    }
-  };
-
-  const handleBackspace = () => {
-    setKeypadBuffer("");
-    if (activeUnit === "hours") setHours(0);
-    else if (activeUnit === "minutes") setMinutes(0);
-    else if (activeUnit === "seconds") setSeconds(0);
-  };
-
   return (
-    <div className="border-2 border-[#ffcc00] rounded-[24px] bg-[#0a0a14] p-4 md:p-5 w-full max-w-[420px] shadow-[0_0_45px_rgba(255,204,0,0.35)] select-none">
+    <div className="border-2 border-[#ffcc00] rounded-[24px] bg-[#0a0a14] p-4 md:p-5 w-full max-w-[380px] shadow-[0_0_45px_rgba(255,204,0,0.35)] select-none">
       {/* Header */}
       <div className="text-center text-[15px] tracking-[0.25em] font-black text-[#ffcc00] flex items-center justify-center gap-2">
         <span>{mode === "alarm" ? "ALARM TIME SETTER" : "OPERATION TIMER SETTER"}</span>
       </div>
       <div className="text-center text-[9px] tracking-[0.22em] text-[#ffcc00]/70 mt-1">
-        TAP ANY NUMBER TO EDIT • USE ARROWS OR KEYPAD
+        TAP ANY DIGIT TO EDIT • USE ARROWS TO STEP
       </div>
 
       {/* Drums Row */}
@@ -412,10 +367,7 @@ export function SamsungTimePicker({
           max={mode === "alarm" ? 23 : 99}
           label="HOURS"
           isSelected={activeUnit === "hours"}
-          onSelect={() => {
-            setActiveUnit("hours");
-            setKeypadBuffer("");
-          }}
+          onSelect={() => setActiveUnit("hours")}
           onChange={setHours}
         />
         <DrumColumn
@@ -424,10 +376,7 @@ export function SamsungTimePicker({
           max={59}
           label="MINS"
           isSelected={activeUnit === "minutes"}
-          onSelect={() => {
-            setActiveUnit("minutes");
-            setKeypadBuffer("");
-          }}
+          onSelect={() => setActiveUnit("minutes")}
           onChange={setMinutes}
         />
         <DrumColumn
@@ -437,168 +386,13 @@ export function SamsungTimePicker({
           label="SECS"
           disabled={mode === "alarm"}
           isSelected={activeUnit === "seconds"}
-          onSelect={() => {
-            setActiveUnit("seconds");
-            setKeypadBuffer("");
-          }}
+          onSelect={() => setActiveUnit("seconds")}
           onChange={setSeconds}
         />
       </div>
 
-      {/* Segmented Clickable Readout Pill */}
-      <div className="mt-4 flex flex-col items-center">
-        <div className="inline-flex items-center gap-1.5 px-4 py-2 bg-black border-2 border-[#ffcc00]/40 rounded-full shadow-[0_0_20px_rgba(255,204,0,0.18)]">
-          {/* Hours button */}
-          <button
-            type="button"
-            onClick={() => {
-              setActiveUnit("hours");
-              setKeypadBuffer("");
-            }}
-            className={`px-2.5 py-0.5 rounded-lg font-black text-[22px] tracking-widest transition-all cursor-pointer ${
-              activeUnit === "hours"
-                ? "bg-[#ffcc00] text-black shadow-[0_0_12px_rgba(255,204,0,0.7)] scale-105"
-                : "text-white hover:text-[#ffcc00]"
-            }`}
-          >
-            {pad(hours)}
-          </button>
-          <span className="text-[#ffcc00] text-[20px] font-black">:</span>
-
-          {/* Minutes button */}
-          <button
-            type="button"
-            onClick={() => {
-              setActiveUnit("minutes");
-              setKeypadBuffer("");
-            }}
-            className={`px-2.5 py-0.5 rounded-lg font-black text-[22px] tracking-widest transition-all cursor-pointer ${
-              activeUnit === "minutes"
-                ? "bg-[#ffcc00] text-black shadow-[0_0_12px_rgba(255,204,0,0.7)] scale-105"
-                : "text-white hover:text-[#ffcc00]"
-            }`}
-          >
-            {pad(minutes)}
-          </button>
-          <span className="text-[#ffcc00] text-[20px] font-black">:</span>
-
-          {/* Seconds button */}
-          <button
-            type="button"
-            disabled={mode === "alarm"}
-            onClick={() => {
-              if (mode === "timer") {
-                setActiveUnit("seconds");
-                setKeypadBuffer("");
-              }
-            }}
-            className={`px-2.5 py-0.5 rounded-lg font-black text-[22px] tracking-widest transition-all cursor-pointer ${
-              mode === "alarm"
-                ? "text-white/20 cursor-not-allowed"
-                : activeUnit === "seconds"
-                  ? "bg-[#ffcc00] text-black shadow-[0_0_12px_rgba(255,204,0,0.7)] scale-105"
-                  : "text-white hover:text-[#ffcc00]"
-            }`}
-          >
-            {mode === "alarm" ? "--" : pad(seconds)}
-          </button>
-
-          <span className="text-[10px] tracking-widest font-black text-[#ffcc00]/80 ml-2 border-l border-[#ffcc00]/30 pl-2">
-            {activeUnit.toUpperCase()}
-          </span>
-        </div>
-
-        <div className="flex items-center gap-2 mt-2">
-          <button
-            type="button"
-            onClick={() => setShowKeypad(!showKeypad)}
-            className="text-[10px] tracking-widest text-[#ffcc00] hover:underline font-bold"
-          >
-            {showKeypad ? "▲ HIDE KEYPAD" : "▼ SHOW NUMBER KEYPAD"}
-          </button>
-        </div>
-      </div>
-
-      {/* Samsung Quick Number Pad */}
-      {showKeypad && (
-        <div className="mt-3 bg-black/90 border border-[#ffcc00]/30 rounded-[14px] p-2.5">
-          <div className="flex justify-between items-center mb-1.5 px-1">
-            <span className="text-[9px] tracking-widest text-[#ffcc00]/80 font-bold">
-              TAP NUMBERS FOR [{activeUnit.toUpperCase()}]:
-            </span>
-            <div className="flex gap-1">
-              <button
-                type="button"
-                onClick={() => {
-                  if (activeUnit === "minutes") setMinutes((m) => Math.min(59, m + 1));
-                  else if (activeUnit === "seconds") setSeconds((s) => Math.min(59, s + 1));
-                  else setHours((h) => Math.min(23, h + 1));
-                }}
-                className="text-[9px] px-2 py-0.5 bg-[#1a1a00] border border-[#ffcc00]/40 text-[#ffcc00] rounded hover:bg-[#ffcc00] hover:text-black font-bold"
-              >
-                +1
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (activeUnit === "minutes") setMinutes((m) => Math.min(59, m + 5));
-                  else if (activeUnit === "seconds") setSeconds((s) => Math.min(59, s + 5));
-                  else setHours((h) => Math.min(23, h + 1));
-                }}
-                className="text-[9px] px-2 py-0.5 bg-[#1a1a00] border border-[#ffcc00]/40 text-[#ffcc00] rounded hover:bg-[#ffcc00] hover:text-black font-bold"
-              >
-                +5
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (activeUnit === "minutes") setMinutes((m) => Math.min(59, m + 15));
-                  else if (activeUnit === "seconds") setSeconds((s) => Math.min(59, s + 15));
-                  else setHours((h) => Math.min(23, h + 5));
-                }}
-                className="text-[9px] px-2 py-0.5 bg-[#1a1a00] border border-[#ffcc00]/40 text-[#ffcc00] rounded hover:bg-[#ffcc00] hover:text-black font-bold"
-              >
-                +15
-              </button>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-4 gap-1.5">
-            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 0].map((digit) => (
-              <button
-                key={digit}
-                type="button"
-                onClick={() => handleKeypadPress(String(digit))}
-                className="min-h-[38px] rounded-[6px] bg-[#121220] border border-[#ffcc00]/30 text-[#ffcc00] font-black text-[16px] hover:bg-[#ffcc00] hover:text-black active:scale-95 transition-all cursor-pointer"
-              >
-                {digit}
-              </button>
-            ))}
-            <button
-              type="button"
-              onClick={() => {
-                if (activeUnit === "hours") setHours(0);
-                if (activeUnit === "minutes") setMinutes(0);
-                if (activeUnit === "seconds") setSeconds(0);
-                setKeypadBuffer("");
-              }}
-              className="min-h-[38px] rounded-[6px] bg-[#1a1010] border border-red-500/40 text-red-400 font-bold text-[11px] tracking-wider hover:bg-red-500 hover:text-black active:scale-95 transition-all cursor-pointer"
-            >
-              ZERO
-            </button>
-            <button
-              type="button"
-              onClick={handleBackspace}
-              className="min-h-[38px] rounded-[6px] bg-[#201a00] border border-[#ffcc00]/50 text-[#ffcc00] font-bold text-[12px] hover:bg-[#ffcc00] hover:text-black active:scale-95 transition-all cursor-pointer"
-            >
-              DEL
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* Modal Actions */}
-      <div className="grid grid-cols-2 gap-3 mt-4">
+      <div className="grid grid-cols-2 gap-3 mt-5">
         <button
           type="button"
           onClick={handleConfirm}
