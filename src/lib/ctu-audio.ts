@@ -8,6 +8,7 @@ export class CTUAudio {
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
   private zeroAudio: HTMLAudioElement | null = null;
+  private countdownAudio: HTMLAudioElement | null = null;
   private volume: number = 0.85;
 
   constructor() {
@@ -17,7 +18,9 @@ export class CTUAudio {
   private initContext() {
     if (typeof window === "undefined") return;
     try {
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       if (AudioCtx && !this.ctx) {
         this.ctx = new AudioCtx();
         this.masterGain = this.ctx.createGain();
@@ -33,6 +36,14 @@ export class CTUAudio {
         this.zeroAudio.loop = true;
       } catch {}
     }
+
+    if (!this.countdownAudio && typeof Audio !== "undefined") {
+      try {
+        this.countdownAudio = new Audio("/24 Alarm Countdown.mp3");
+        this.countdownAudio.preload = "auto";
+        this.countdownAudio.loop = true;
+      } catch {}
+    }
   }
 
   public unlock() {
@@ -40,6 +51,15 @@ export class CTUAudio {
     if (this.ctx && this.ctx.state === "suspended") {
       this.ctx.resume().catch(() => {});
     }
+  }
+
+  public unlockAudio() {
+    this.unlock();
+  }
+
+  public getAudioContext(): AudioContext | null {
+    this.unlock();
+    return this.ctx;
   }
 
   public setVolume(vol: number) {
@@ -50,16 +70,71 @@ export class CTUAudio {
     if (this.zeroAudio) {
       this.zeroAudio.volume = this.volume;
     }
+    if (this.countdownAudio) {
+      this.countdownAudio.volume = this.volume;
+    }
+  }
+
+  public playCountdownAlert() {
+    this.unlock();
+    if (this.countdownAudio) {
+      try {
+        this.countdownAudio.currentTime = 0;
+        this.countdownAudio.volume = this.volume;
+        this.countdownAudio.play().catch(() => {
+          this.fallbackCrisisSynth();
+        });
+      } catch {
+        this.fallbackCrisisSynth();
+      }
+    } else {
+      this.fallbackCrisisSynth();
+    }
+  }
+
+  public stopCountdownAlert() {
+    if (this.countdownAudio) {
+      try {
+        this.countdownAudio.pause();
+        this.countdownAudio.currentTime = 0;
+      } catch {}
+    }
+  }
+
+  public playZeroTheme() {
+    this.unlock();
+    this.stopCountdownAlert();
+    if (this.zeroAudio) {
+      try {
+        this.zeroAudio.currentTime = 0;
+        this.zeroAudio.volume = this.volume;
+        this.zeroAudio.play().catch(() => {
+          this.fallbackCrisisSynth();
+        });
+      } catch {
+        this.fallbackCrisisSynth();
+      }
+    } else {
+      this.fallbackCrisisSynth();
+    }
+  }
+
+  public stopZeroTheme() {
+    if (this.zeroAudio) {
+      try {
+        this.zeroAudio.pause();
+        this.zeroAudio.currentTime = 0;
+      } catch {}
+    }
   }
 
   /**
    * Tiered Clock Ticks:
-   * Tier 1 (Normal >10s): SILENT (returns immediately)
+   * Tier 1 (Normal >10s): SILENT
    * Tier 2 (Countdown 10s-4s): High-priority CTU warning pulse
    * Tier 3 (Crisis <=3s): Urgent double-staccato pip
    */
   public tick(tier: 1 | 2 | 3) {
-    // Keep normal operations completely silent as requested
     if (tier === 1) return;
 
     this.unlock();
@@ -69,7 +144,6 @@ export class CTUAudio {
       const now = this.ctx.currentTime + 0.01;
 
       if (tier === 2) {
-        // High-priority 24 countdown tick
         const osc = this.ctx.createOscillator();
         const gain = this.ctx.createGain();
         osc.type = "square";
@@ -85,7 +159,6 @@ export class CTUAudio {
         osc.start(now);
         osc.stop(now + 0.09);
       } else if (tier === 3) {
-        // Urgent dual-tone crisis pip
         const osc1 = this.ctx.createOscillator();
         const osc2 = this.ctx.createOscillator();
         const gain = this.ctx.createGain();
@@ -109,28 +182,6 @@ export class CTUAudio {
         osc2.stop(now + 0.11);
       }
     } catch {}
-  }
-
-  public playZeroTheme() {
-    this.unlock();
-    if (this.zeroAudio) {
-      this.zeroAudio.currentTime = 0;
-      this.zeroAudio.volume = this.volume;
-      this.zeroAudio.play().catch(() => {
-        this.fallbackCrisisSynth();
-      });
-    } else {
-      this.fallbackCrisisSynth();
-    }
-  }
-
-  public stopZeroTheme() {
-    if (this.zeroAudio) {
-      try {
-        this.zeroAudio.pause();
-        this.zeroAudio.currentTime = 0;
-      } catch {}
-    }
   }
 
   private fallbackCrisisSynth() {
