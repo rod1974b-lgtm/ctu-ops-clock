@@ -177,7 +177,7 @@ function formatTime(totalSeconds: number) {
 }
 
 export function CTUTerminalV74() {
-  const [now, setNow] = useState<Date>(new Date());
+  const [now, setNow] = useState<Date>(() => new Date(0));
   const [is24Hour, setIs24Hour] = useState(true);
   const [stealthOps, setStealthOps] = useState(false);
 
@@ -202,6 +202,7 @@ export function CTUTerminalV74() {
     hours: 0,
     minutes: 25,
     seconds: 0,
+    totalSeconds: 25 * 60,
   });
 
   // Fullscreen Cinematic Modals
@@ -213,6 +214,7 @@ export function CTUTerminalV74() {
 
   // 1-second system clock tick
   useEffect(() => {
+    setNow(new Date());
     const timer = setInterval(() => {
       setNow(new Date());
     }, 1000);
@@ -493,8 +495,9 @@ export function CTUTerminalV74() {
       hours: parseInt(hours, 10),
       minutes: parseInt(minutes, 10),
       seconds: parseInt(seconds, 10),
+      totalSeconds: dur,
     });
-    setPickerTarget({ type: "timer", timerId: target?.id });
+    setPickerTarget(target ? { type: "timer", timerId: target.id } : { type: "timer" });
     setPickerOpen(true);
   };
 
@@ -504,8 +507,9 @@ export function CTUTerminalV74() {
       hours: target ? target.hour : 7,
       minutes: target ? target.minute : 0,
       seconds: 0,
+      totalSeconds: (target ? target.hour : 7) * 3600 + (target ? target.minute : 0) * 60,
     });
-    setPickerTarget({ type: "alarm", alarmId: target?.id });
+    setPickerTarget(target ? { type: "alarm", alarmId: target.id } : { type: "alarm" });
     setPickerOpen(true);
   };
 
@@ -1126,17 +1130,16 @@ export function CTUTerminalV74() {
       </main>
 
       {/* SAMSUNG STYLE TIME PICKER MODAL */}
-      <SamsungTimePicker
-        isOpen={pickerOpen}
-        initialValues={pickerInitial}
-        onConfirm={handlePickerConfirm}
-        onCancel={() => setPickerOpen(false)}
-        title={
-          pickerTarget?.type === "alarm"
-            ? "ARM DAILY SCHEDULED ALARM"
-            : "ARM TACTICAL COUNTDOWN TIMER"
-        }
-      />
+      {pickerOpen && (
+        <SamsungTimePicker
+          mode={pickerTarget?.type === "alarm" ? "alarm" : "timer"}
+          initialHours={pickerInitial.hours}
+          initialMinutes={pickerInitial.minutes}
+          initialSeconds={pickerInitial.seconds}
+          onSave={handlePickerConfirm}
+          onCancel={() => setPickerOpen(false)}
+        />
+      )}
 
       {/* 24 OPENING CINEMATIC MODAL */}
       {showOpeningModal && (
