@@ -177,7 +177,7 @@ function formatTime(totalSeconds: number) {
 }
 
 export function CTUTerminalV74() {
-  const [now, setNow] = useState<Date>(new Date());
+  const [now, setNow] = useState<Date>(() => new Date(0));
   const [is24Hour, setIs24Hour] = useState(true);
   const [stealthOps, setStealthOps] = useState(false);
 
@@ -214,6 +214,7 @@ export function CTUTerminalV74() {
 
   // 1-second system clock tick
   useEffect(() => {
+    setNow(new Date());
     const timer = setInterval(() => {
       setNow(new Date());
     }, 1000);
