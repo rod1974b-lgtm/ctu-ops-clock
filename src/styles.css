@@ -97,6 +97,26 @@
   animation: ctu-shake 0.1s cubic-bezier(0.36, 0.07, 0.19, 0.97) infinite !important;
 }
 
+/* Medium-Speed World Time Tactical Ticker */
+@keyframes worldTicker {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.world-ticker-track {
+  display: flex;
+  width: max-content;
+  animation: worldTicker 42s linear infinite;
+}
+
+.world-ticker-track:hover {
+  animation-play-state: paused;
+}
+
 /* 24 Ending Credits Rolling Amber Typography */
 @keyframes creditsRoll {
   0% {
