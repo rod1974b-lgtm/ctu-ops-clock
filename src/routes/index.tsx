@@ -143,6 +143,7 @@ export function CTUTerminalV74() {
   // Watercolor Split-Screen Ending Credits State
   const [creditsStep, setCreditsStep] = useState<number>(0);
   const [creditsMusicOn, setCreditsMusicOn] = useState<boolean>(true);
+  const [creditsDisplayMode, setCreditsDisplayMode] = useState<"watercolors" | "original">("watercolors");
   const creditsAudioRef = useRef<HTMLAudioElement | null>(null);
 
   // Fullscreen Countdown Takeover
@@ -1247,30 +1248,72 @@ export function CTUTerminalV74() {
         </div>
       )}
 
-      {/* FULLSCREEN SEASON OPENING VIDEO MODAL */}
+      {/* ================= FULLSCREEN 24 SEASON OPENING VIDEO MODAL ================= */}
       {activeVideoModal === "opening" && (
-        <div className="fixed inset-0 z-[9999] bg-black/95 flex flex-col items-center justify-center p-4">
-          <div className="w-full max-w-[900px] flex flex-col gap-3">
-            <div className="flex justify-between items-center text-[#ffcc00]">
-              <span className="text-[13px] tracking-widest font-bold">
-                24 SEASON OPENING SEQUENCE
-              </span>
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-[10000] bg-black flex flex-col justify-between overflow-hidden select-none border-l-[10px] border-[#ff0000]"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setActiveVideoModal(null);
+          }}
+        >
+          {/* TOP TACTICAL CONTROL BAR - MATCHING CREDITS */}
+          <div className="h-[48px] border-b border-white/10 flex items-center justify-between px-3 md:px-5 bg-black shrink-0 z-20">
+            <div className="flex items-center gap-3">
+              <div className="text-[10px] md:text-[11px] tracking-[0.35em] text-[#ffcc00] font-black">
+                24 // OPENING SEQUENCE // {liveTime}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <div className="hidden sm:flex items-center gap-2 mr-2 text-[8px] md:text-[9px] tracking-[0.2em] text-[#ffcc00]/70">
+                <span className="flex items-center gap-1 text-red-500 font-bold animate-pulse">
+                  <span className="w-2 h-2 rounded-full bg-red-600 inline-block shadow-[0_0_8px_red]" />
+                  REC
+                </span>
+                <span>SECURE FEED</span>
+                <span className="hidden md:inline">CALIBRATED ASPECT RATIO</span>
+              </div>
               <button
                 type="button"
                 onClick={() => setActiveVideoModal(null)}
-                className="px-3 py-1 bg-black border border-[#ffcc00] text-[#ffcc00] font-bold text-[12px] hover:bg-[#ffcc00] hover:text-black rounded cursor-pointer"
+                className="min-h-[36px] px-4 border-2 border-[#ffcc00] text-[#ffcc00] bg-black font-black tracking-[0.2em] text-[12px] rounded-[6px] hover:bg-[#ffcc00] hover:text-black transition-colors cursor-pointer"
               >
-                CLOSE [ESC]
+                ✕ CLOSE [ESC]
               </button>
             </div>
-            <div className="aspect-video w-full bg-black border-2 border-[#ffcc00] rounded-[10px] overflow-hidden">
-              <video
-                src="/24 Opening.mp4"
-                controls
-                autoPlay
-                className="w-full h-full object-cover"
+          </div>
+
+          {/* MAIN CINEMATIC THEATER VIEW WITH ARTIFACT CROPPING & CRT SCANLINES */}
+          <div className="flex-1 flex items-center justify-center p-3 md:p-8 relative bg-black overflow-hidden">
+            <div className="relative w-full max-w-[1020px] aspect-video bg-black rounded-[10px] border-2 border-[#ffcc00]/40 shadow-[0_0_40px_rgba(255,204,0,0.25)] overflow-hidden flex items-center justify-center">
+              {/* Cropping wrapper: scale and slight translate crops out the 12px red screen recorder artifact on the left */}
+              <div className="w-full h-full relative overflow-hidden bg-black">
+                <video
+                  src="/24 Opening.mp4"
+                  controls
+                  autoPlay
+                  playsInline
+                  className="w-full h-full object-cover scale-[1.07] -translate-x-[2%]"
+                />
+              </div>
+
+              {/* CRT Scanlines Overlay */}
+              <div
+                className="pointer-events-none absolute inset-0 opacity-[0.06]"
+                style={{
+                  backgroundImage:
+                    "repeating-linear-gradient(0deg, white 0px, white 1px, transparent 1px, transparent 3px)",
+                }}
               />
             </div>
+          </div>
+
+          {/* FOOTER TELEMETRY BAR */}
+          <div className="h-[36px] border-t border-white/10 flex items-center justify-between px-4 bg-black/90 text-[8px] md:text-[9px] tracking-[0.25em] text-[#ffcc00]/60 shrink-0">
+            <span>CTU LOS ANGELES // PRIMARY SURVEILLANCE FEED</span>
+            <span>KLAXON AUDIO ENGAGED</span>
           </div>
         </div>
       )}
@@ -1280,7 +1323,10 @@ export function CTUTerminalV74() {
         <div
           role="dialog"
           aria-modal="true"
-          className="fixed inset-0 z-[99999] bg-black flex flex-col justify-between overflow-hidden select-none"
+          className="fixed inset-0 z-[10000] bg-black flex flex-col justify-between overflow-hidden select-none border-l-[10px] border-[#ff0000]"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setActiveVideoModal(null);
+          }}
         >
           {/* Authentic Sean Callery Ending Theme & Clock Ticks Soundtrack */}
           <audio
@@ -1291,23 +1337,32 @@ export function CTUTerminalV74() {
             muted={!creditsMusicOn}
           />
 
-          {/* TOP TACTICAL CONTROL BAR */}
-          <div className="h-[46px] border-b border-[#ffcc00]/25 flex items-center justify-between px-3 md:px-5 bg-black shrink-0 z-20">
-            <div className="flex items-center gap-3">
+          {/* TOP TACTICAL CONTROL BAR - MATCHING OPENING */}
+          <div className="h-[48px] border-b border-white/10 flex items-center justify-between px-3 md:px-5 bg-black shrink-0 z-20">
+            <div className="flex items-center gap-2 md:gap-3">
               <div className="text-[10px] md:text-[11px] tracking-[0.35em] text-[#ffcc00] font-black">
                 24 // ENDING CREDITS // {liveTime}
               </div>
               <button
                 type="button"
                 onClick={() => setCreditsMusicOn((prev) => !prev)}
-                className="min-h-[30px] px-3 border border-[#ffcc00]/40 text-[9px] md:text-[10px] tracking-[0.2em] font-bold rounded bg-black text-[#ffcc00] hover:bg-[#ffcc00] hover:text-black transition-colors cursor-pointer"
+                className="min-h-[32px] px-2.5 md:px-3 border border-[#ffcc00]/40 text-[9px] md:text-[10px] tracking-[0.2em] font-bold rounded bg-black text-[#ffcc00] hover:bg-[#ffcc00] hover:text-black transition-colors cursor-pointer"
               >
                 {creditsMusicOn ? "🔊 MUSIC ON • SEAN CALLERY" : "🔇 MUSIC MUTED"}
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setCreditsDisplayMode((prev) => (prev === "watercolors" ? "original" : "watercolors"))
+                }
+                className="min-h-[32px] px-2.5 md:px-3 border border-white/20 text-[9px] md:text-[10px] tracking-[0.2em] font-bold rounded bg-black text-white/80 hover:border-[#ffcc00] hover:text-[#ffcc00] transition-colors cursor-pointer hidden sm:inline-block"
+              >
+                {creditsDisplayMode === "watercolors" ? "🎬 VIEW ORIGINAL VIDEO" : "🎨 32 WATERCOLORS GRID"}
               </button>
             </div>
 
             <div className="flex items-center gap-2">
-              <div className="hidden sm:flex items-center gap-2 mr-2 text-[8px] md:text-[9px] tracking-[0.2em] text-[#ffcc00]/60">
+              <div className="hidden sm:flex items-center gap-2 mr-2 text-[8px] md:text-[9px] tracking-[0.2em] text-[#ffcc00]/70">
                 <span className="flex items-center gap-1 text-red-500 font-bold animate-pulse">
                   <span className="w-2 h-2 rounded-full bg-red-600 inline-block shadow-[0_0_8px_red]" />
                   REC
@@ -1318,261 +1373,272 @@ export function CTUTerminalV74() {
               <button
                 type="button"
                 onClick={() => setActiveVideoModal(null)}
-                className="min-h-[32px] px-3.5 border-2 border-[#ffcc00] text-[#ffcc00] bg-black font-black tracking-[0.2em] text-[11px] rounded-[6px] hover:bg-[#ffcc00] hover:text-black transition-colors cursor-pointer"
+                className="min-h-[36px] px-4 border-2 border-[#ffcc00] text-[#ffcc00] bg-black font-black tracking-[0.2em] text-[12px] rounded-[6px] hover:bg-[#ffcc00] hover:text-black transition-colors cursor-pointer"
               >
                 ✕ CLOSE [ESC]
               </button>
             </div>
           </div>
 
-          {/* TACTICAL SPLIT-SCREEN SURVEILLANCE GRID (CYCLING ALL 32 WATERCOLORS) */}
-          <div className="relative bg-black p-[3px] grid grid-cols-3 grid-rows-2 gap-[3px] h-[52vh] min-h-[280px] max-h-[58vh] shrink-0 border-b border-[#ffcc00]/20">
-            {/* Box 1 (Top-Left): CAM 01 - Los Angeles Night Road */}
-            <div className="relative border border-white/20 overflow-hidden bg-black">
-              <img
-                src={WATERCOLOR_IMAGES[(creditsStep * 5 + 0) % WATERCOLOR_IMAGES.length]}
-                alt="Los Angeles night road watercolor"
-                className="absolute inset-0 w-full h-full object-cover ken watercolor scale-[1.05]"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent pointer-events-none" />
-              <div className="absolute top-1 left-1 bg-black/80 border border-[#ffcc00]/30 text-[#ffcc00] text-[8px] tracking-[0.2em] px-1.5 py-0.5 font-bold">
-                LOS ANGELES • {liveTime}
-              </div>
-              <div className="absolute bottom-1 left-1 text-[7px] tracking-[0.3em] text-white/70 font-bold">
-                CAM 01 • NIGHT ROAD
-              </div>
-            </div>
-
-            {/* Box 2 (Top-Center): CTU Field Operative */}
-            <div className="relative border border-white/20 overflow-hidden bg-black">
-              <img
-                src={WATERCOLOR_IMAGES[(creditsStep * 5 + 1) % WATERCOLOR_IMAGES.length]}
-                alt="CTU Field Operative watercolor"
-                className="absolute inset-0 w-full h-full object-cover ken watercolor"
-                style={{ animationDelay: "1.2s" }}
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent pointer-events-none" />
-              <div className="absolute bottom-1 left-1 text-[7px] tracking-[0.3em] text-white/70 font-bold">
-                CTU • FIELD OP
-              </div>
-              <div className="absolute top-1 right-1 w-2 h-2 bg-red-600 rounded-full animate-pulse shadow-[0_0_6px_red]" />
-            </div>
-
-            {/* Box 3 (Top-Right): CTU Analyst Live Feed */}
-            <div className="relative border border-white/20 overflow-hidden bg-black">
-              <img
-                src={WATERCOLOR_IMAGES[(creditsStep * 5 + 2) % WATERCOLOR_IMAGES.length]}
-                alt="CTU Analyst watercolor"
-                className="absolute inset-0 w-full h-full object-cover ken watercolor"
-                style={{ animationDelay: "0.6s" }}
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent pointer-events-none" />
-              <div className="absolute bottom-1 left-1 text-[7px] tracking-[0.3em] text-white/70 font-bold">
-                CTU • ANALYST • LIVE
-              </div>
-              <div className="absolute top-1 left-1 bg-[#ffcc00] text-black text-[7px] font-black tracking-[0.2em] px-1">
-                LIVE {liveTime.slice(-5)}
-              </div>
-            </div>
-
-            {/* Box 4 (Bottom Left & Center, 2 columns wide): CTU Headquarters Exterior with Inset */}
-            <div className="relative border border-white/20 overflow-hidden bg-black col-span-2">
-              <img
-                src={WATERCOLOR_IMAGES[(creditsStep * 5 + 3) % WATERCOLOR_IMAGES.length]}
-                alt="CTU Los Angeles Exterior watercolor"
-                className="absolute inset-0 w-full h-full object-cover ken watercolor scale-[1.08]"
-                style={{ animationDelay: "2s" }}
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/20 pointer-events-none" />
-              <div className="absolute top-1 left-1 bg-black/80 border border-white/20 text-white/80 text-[7px] tracking-[0.3em] px-1.5 py-0.5">
-                CTU LOS ANGELES • EXTERIOR • NIGHT
-              </div>
-              <div className="absolute bottom-1 right-1 flex gap-1">
-                <span className="bg-black/80 border border-[#ffcc00]/30 text-[#ffcc00]/70 text-[6px] px-1 py-0.5 font-bold">
-                  CAM 04
-                </span>
-                <span className="bg-[#ffcc00] text-black text-[6px] font-bold px-1 py-0.5 tracking-widest">
-                  {liveDate.slice(0, 11)}
-                </span>
-              </div>
-              {/* Tactical surveillance inset artwork */}
-              <div className="absolute top-1/2 right-2 -translate-y-1/2 w-[28%] aspect-[4/3] border border-white/40 overflow-hidden bg-black hidden md:block shadow-[0_0_12px_rgba(0,0,0,0.8)]">
-                <img
-                  src={WATERCOLOR_IMAGES[(creditsStep * 5 + 4) % WATERCOLOR_IMAGES.length]}
-                  alt="Tactical inset watercolor"
-                  className="w-full h-full object-cover watercolor opacity-90"
+          {/* DISPLAY MODE 1: ORIGINAL VIDEO WITH CLEAN RECORDER CROP */}
+          {creditsDisplayMode === "original" ? (
+            <div className="flex-1 flex items-center justify-center p-3 md:p-8 relative bg-black overflow-hidden">
+              <div className="relative w-full max-w-[1020px] aspect-video bg-black rounded-[10px] border-2 border-[#ffcc00]/40 shadow-[0_0_40px_rgba(255,204,0,0.25)] overflow-hidden flex items-center justify-center">
+                <div className="w-full h-full relative overflow-hidden bg-black">
+                  <video
+                    src="/24 Closing.mp4"
+                    controls
+                    autoPlay
+                    playsInline
+                    className="w-full h-full object-cover scale-[1.07] -translate-x-[2%]"
+                  />
+                </div>
+                <div
+                  className="pointer-events-none absolute inset-0 opacity-[0.06]"
+                  style={{
+                    backgroundImage:
+                      "repeating-linear-gradient(0deg, white 0px, white 1px, transparent 1px, transparent 3px)",
+                  }}
                 />
               </div>
             </div>
+          ) : (
+            <>
+              {/* DISPLAY MODE 2: TACTICAL SPLIT-SCREEN SURVEILLANCE GRID (ALL 32 WATERCOLORS) */}
+              <div className="relative bg-black p-[3px] grid grid-cols-3 grid-rows-2 gap-[3px] h-[58vh] min-h-[300px] max-h-[60vh] shrink-0 border-b border-[#ffcc00]/20">
+                {/* Box 1 (Top-Left): CAM 01 - Los Angeles Night Road */}
+                <div className="relative border border-white/20 overflow-hidden bg-black">
+                  <img
+                    src={WATERCOLOR_IMAGES[(creditsStep * 5 + 0) % WATERCOLOR_IMAGES.length]}
+                    alt="Los Angeles night road watercolor"
+                    className="absolute inset-0 w-full h-full object-cover ken watercolor scale-[1.05]"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent pointer-events-none" />
+                  <div className="absolute top-1 left-1 bg-black/80 border border-[#ffcc00]/30 text-[#ffcc00] text-[8px] tracking-[0.2em] px-1.5 py-0.5 font-bold">
+                    LOS ANGELES • {liveTime}
+                  </div>
+                  <div className="absolute bottom-1 left-1 text-[7px] tracking-[0.3em] text-white/70 font-bold">
+                    CAM 01 • NIGHT ROAD
+                  </div>
+                </div>
 
-            {/* Box 5 (Bottom-Right): Washington DC CTU Division */}
-            <div className="relative border border-white/20 overflow-hidden bg-black">
-              <img
-                src={WATERCOLOR_IMAGES[(creditsStep * 5 + 5) % WATERCOLOR_IMAGES.length]}
-                alt="Washington DC CTU Division watercolor"
-                className="absolute inset-0 w-full h-full object-cover ken watercolor"
-                style={{ animationDelay: "1.8s" }}
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent pointer-events-none" />
-              <div className="absolute bottom-1 left-1 text-[7px] tracking-[0.3em] text-white/70 font-bold">
-                WASHINGTON DC • CTU DIVISION
-              </div>
-              <div className="absolute top-1 right-1 bg-black/70 border border-white/20 text-white/60 text-[6px] px-1 font-bold">
-                02:59:42
-              </div>
-            </div>
+                {/* Box 2 (Top-Center): CTU Field Operative */}
+                <div className="relative border border-white/20 overflow-hidden bg-black">
+                  <img
+                    src={WATERCOLOR_IMAGES[(creditsStep * 5 + 1) % WATERCOLOR_IMAGES.length]}
+                    alt="CTU Field Operative watercolor"
+                    className="absolute inset-0 w-full h-full object-cover ken watercolor"
+                    style={{ animationDelay: "1.2s" }}
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent pointer-events-none" />
+                  <div className="absolute bottom-1 left-1 text-[7px] tracking-[0.3em] text-white/70 font-bold">
+                    CTU • FIELD OP
+                  </div>
+                  <div className="absolute top-1 right-1 w-2 h-2 bg-red-600 rounded-full animate-pulse shadow-[0_0_6px_red]" />
+                </div>
 
-            {/* Tactical Scanlines Pattern */}
-            <div
-              className="pointer-events-none absolute inset-0 opacity-[0.06]"
-              style={{
-                backgroundImage:
-                  "repeating-linear-gradient(0deg, white 0px, white 1px, transparent 1px, transparent 3px)",
-              }}
-            />
-          </div>
+                {/* Box 3 (Top-Right): CTU Analyst Live Feed */}
+                <div className="relative border border-white/20 overflow-hidden bg-black">
+                  <img
+                    src={WATERCOLOR_IMAGES[(creditsStep * 5 + 2) % WATERCOLOR_IMAGES.length]}
+                    alt="CTU Analyst watercolor"
+                    className="absolute inset-0 w-full h-full object-cover ken watercolor"
+                    style={{ animationDelay: "0.6s" }}
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent pointer-events-none" />
+                  <div className="absolute bottom-1 left-1 text-[7px] tracking-[0.3em] text-white/70 font-bold">
+                    CTU • ANALYST • LIVE
+                  </div>
+                  <div className="absolute top-1 left-1 bg-[#ffcc00] text-black text-[7px] font-black tracking-[0.2em] px-1">
+                    LIVE {liveTime.slice(-5)}
+                  </div>
+                </div>
 
-          {/* LOWER SECTION: ROLLING AMBER CREDITS */}
-          <div className="flex-1 relative overflow-hidden bg-black">
-            {/* Vignette Gradients */}
-            <div className="absolute top-0 left-0 right-0 h-[40px] bg-gradient-to-b from-black to-transparent z-10 pointer-events-none" />
-            <div className="absolute bottom-0 left-0 right-0 h-[60px] bg-gradient-to-t from-black to-transparent z-10 pointer-events-none" />
+                {/* Box 4 (Bottom Left & Center, 2 columns wide): CTU Headquarters Exterior with Inset */}
+                <div className="relative border border-white/20 overflow-hidden bg-black col-span-2">
+                  <img
+                    src={WATERCOLOR_IMAGES[(creditsStep * 5 + 3) % WATERCOLOR_IMAGES.length]}
+                    alt="CTU Los Angeles Exterior watercolor"
+                    className="absolute inset-0 w-full h-full object-cover ken watercolor scale-[1.08]"
+                    style={{ animationDelay: "2s" }}
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/20 pointer-events-none" />
+                  <div className="absolute top-1 left-1 bg-black/80 border border-white/20 text-white/80 text-[7px] tracking-[0.3em] px-1.5 py-0.5">
+                    CTU LOS ANGELES • EXTERIOR • NIGHT
+                  </div>
+                  <div className="absolute bottom-1 right-1 flex gap-1">
+                    <span className="bg-black/80 border border-[#ffcc00]/30 text-[#ffcc00]/70 text-[6px] px-1 py-0.5 font-bold">
+                      CAM 04
+                    </span>
+                    <span className="bg-[#ffcc00] text-black text-[6px] font-bold px-1 py-0.5 tracking-widest">
+                      {liveDate.slice(0, 11)}
+                    </span>
+                  </div>
+                  {/* Tactical surveillance inset artwork */}
+                  <div className="absolute top-1/2 right-2 -translate-y-1/2 w-[28%] aspect-[4/3] border border-white/40 overflow-hidden bg-black hidden md:block shadow-[0_0_12px_rgba(0,0,0,0.8)]">
+                    <img
+                      src={WATERCOLOR_IMAGES[(creditsStep * 5 + 4) % WATERCOLOR_IMAGES.length]}
+                      alt="Tactical inset watercolor"
+                      className="w-full h-full object-cover watercolor opacity-90"
+                    />
+                  </div>
+                </div>
 
-            {/* Rolling Credits Content */}
-            <div className="absolute inset-0 flex justify-center overflow-hidden">
-              <div
-                className="w-full max-w-[580px] will-change-transform hover:[animation-play-state:paused]"
-                style={{ animation: "creditsRoll 62s linear forwards" }}
-              >
+                {/* Box 5 (Bottom-Right): Washington DC CTU Division */}
+                <div className="relative border border-white/20 overflow-hidden bg-black">
+                  <img
+                    src={WATERCOLOR_IMAGES[(creditsStep * 5 + 5) % WATERCOLOR_IMAGES.length]}
+                    alt="Washington DC CTU Division watercolor"
+                    className="absolute inset-0 w-full h-full object-cover ken watercolor"
+                    style={{ animationDelay: "1.8s" }}
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent pointer-events-none" />
+                  <div className="absolute bottom-1 left-1 text-[7px] tracking-[0.3em] text-white/70 font-bold">
+                    WASHINGTON DC • CTU DIVISION
+                  </div>
+                  <div className="absolute top-1 right-1 bg-black/70 border border-white/20 text-white/60 text-[6px] px-1 font-bold">
+                    02:59:42
+                  </div>
+                </div>
+
+                {/* Tactical Scanlines Pattern */}
                 <div
-                  className="flex flex-col items-center text-center px-6 pt-[6vh] pb-[22vh]"
-                  style={{ lineHeight: "1.8" }}
-                >
-                  <div className="text-[#ffcc00] font-black tracking-[0.25em] text-[13px]">
-                    THE FOLLOWING TAKES PLACE BETWEEN
-                  </div>
-                  <div className="mt-2 text-[#ffcc00] font-black tracking-[0.2em] text-[24px] md:text-[30px] glow">
-                    {creditsHours.start}
-                  </div>
-                  <div className="text-[#ffcc00]/60 text-[10px] tracking-[0.5em]">AND</div>
-                  <div className="text-[#ffcc00] font-black tracking-[0.2em] text-[24px] md:text-[30px] glow">
-                    {creditsHours.end}
-                  </div>
+                  className="pointer-events-none absolute inset-0 opacity-[0.06]"
+                  style={{
+                    backgroundImage:
+                      "repeating-linear-gradient(0deg, white 0px, white 1px, transparent 1px, transparent 3px)",
+                  }}
+                />
+              </div>
 
-                  <div className="mt-6 w-[90px] h-[2px] bg-[#ffcc00]/50 shadow-[0_0_8px_#ffcc00]" />
+              {/* LOWER SECTION: ROLLING AMBER CREDITS */}
+              <div className="flex-1 relative overflow-hidden bg-black border-t border-white/10">
+                {/* Vignette Gradients */}
+                <div className="absolute top-0 left-0 right-0 h-[40px] bg-gradient-to-b from-black to-transparent z-10 pointer-events-none" />
+                <div className="absolute bottom-0 left-0 right-0 h-[60px] bg-gradient-to-t from-black to-transparent z-10 pointer-events-none" />
 
-                  {/* Production Credits Block */}
-                  <div className="mt-10 w-full text-[#ffcc00] font-bold tracking-[0.18em] text-[12px] md:text-[13px] space-y-7">
-                    <div>
-                      <div className="text-white/40 text-[10px] tracking-[0.4em]">ASSOCIATE PRODUCER</div>
-                      <div className="mt-1">BOB JOHNSON</div>
-                      <div className="mt-1">PAUL GADD</div>
-                    </div>
-
-                    <div>
-                      <div className="text-white/40 text-[10px] tracking-[0.4em]">CO-STARRING</div>
-                      <div className="mt-2 leading-[1.9]">
-                        DEVIKA PARIKH as MAUREEN KINGSLEY
-                        <br />
-                        SPENCER GARRETT as HARRY SWINTON
-                        <br />
-                        MARISOL NICHOLS as DESI
-                        <br />
-                        JUDE CICCOLELLA as MIKE NOVICK
+                {/* Rolling Credits Content */}
+                <div className="absolute inset-0 flex justify-center overflow-hidden">
+                  <div
+                    className="w-full max-w-[580px] will-change-transform hover:[animation-play-state:paused]"
+                    style={{ animation: "creditsRoll 62s linear forwards" }}
+                  >
+                    <div
+                      className="flex flex-col items-center text-center px-6 pt-[6vh] pb-[22vh]"
+                      style={{ lineHeight: "1.8" }}
+                    >
+                      <div className="text-[#ffcc00] font-black tracking-[0.25em] text-[13px]">
+                        THE FOLLOWING TAKES PLACE BETWEEN
                       </div>
-                    </div>
+                      <div className="mt-2 text-[#ffcc00] font-black tracking-[0.2em] text-[24px] md:text-[30px] glow">
+                        {creditsHours.start}
+                      </div>
+                      <div className="text-[#ffcc00]/60 text-[10px] tracking-[0.5em]">AND</div>
+                      <div className="text-[#ffcc00] font-black tracking-[0.2em] text-[24px] md:text-[30px] glow">
+                        {creditsHours.end}
+                      </div>
 
-                    <div>
-                      <div className="text-white/40 text-[10px] tracking-[0.4em]">CASTING BY</div>
-                      <div className="mt-1">DEBI MANWILLER C.S.A.</div>
-                      <div className="mt-1">PEGGY KENNEDY C.S.A.</div>
-                    </div>
+                      <div className="mt-5 w-[100px] h-[2px] bg-[#ffcc00]/60" />
 
-                    <div>
-                      <div className="text-white/40 text-[10px] tracking-[0.4em]">MUSIC BY</div>
-                      <div className="mt-1 text-[14px] text-[#ffcc00] font-black tracking-[0.25em]">
+                      <div className="mt-8 text-white font-bold tracking-[0.35em] text-[15px] glow">
+                        KIEFER SUTHERLAND
+                      </div>
+
+                      <div className="mt-8 text-white/60 tracking-[0.25em] text-[10px]">CREATED BY</div>
+                      <div className="mt-1 text-white font-bold tracking-[0.25em] text-[13px]">
+                        ROBERT COCHRAN &amp; JOEL SURNOW
+                      </div>
+
+                      <div className="mt-7 text-white/60 tracking-[0.25em] text-[10px]">ORIGINAL MUSIC BY</div>
+                      <div className="mt-1 text-[#ffcc00] font-black tracking-[0.3em] text-[14px]">
                         SEAN CALLERY
                       </div>
-                    </div>
 
-                    <div>
-                      <div className="text-white/40 text-[10px] tracking-[0.4em]">COSTUME DESIGNER</div>
-                      <div className="mt-1">JAMES LAPIDUS</div>
-                    </div>
-
-                    <div>
-                      <div className="text-white/40 text-[10px] tracking-[0.4em]">EDITED BY</div>
-                      <div className="mt-1">SCOTT POWELL</div>
-                    </div>
-
-                    <div>
-                      <div className="text-white/40 text-[10px] tracking-[0.4em]">PRODUCTION DESIGNER</div>
-                      <div className="mt-1">CARLOS BARBOSA</div>
-                    </div>
-
-                    <div>
-                      <div className="text-white/40 text-[10px] tracking-[0.4em]">DIRECTOR OF PHOTOGRAPHY</div>
-                      <div className="mt-1">RODNEY CHARTRES</div>
-                    </div>
-
-                    <div>
-                      <div className="text-white/40 text-[10px] tracking-[0.4em]">PRODUCED BY</div>
-                      <div className="mt-1">MICHAEL KLICH</div>
-                      <div className="mt-1">TIM IACOFANO</div>
-                    </div>
-
-                    <div>
-                      <div className="text-white/40 text-[10px] tracking-[0.4em]">EXECUTIVE PRODUCERS</div>
-                      <div className="mt-2 leading-[1.9]">
-                        ROBERT COCHRAN
-                        <br />
-                        JOEL SURNOW
-                        <br />
-                        HOWARD GORDON
-                        <br />
-                        BRIAN GRAZER
-                        <br />
-                        KEVIN REILLY
+                      <div className="mt-7 text-white/60 tracking-[0.25em] text-[10px]">STARRING</div>
+                      <div className="mt-1 text-white/90 font-bold tracking-[0.2em] text-[12px] space-y-1">
+                        <div>LESLIE HOPE</div>
+                        <div>SARAH CLARKE</div>
+                        <div>ELISHA CUTHBERT</div>
+                        <div>DENNIS HAYSBERT</div>
+                        <div>CARLOS BERNARD</div>
+                        <div>PENNY JOHNSON JERALD</div>
                       </div>
-                    </div>
 
-                    <div>
-                      <div className="text-white/40 text-[10px] tracking-[0.4em]">STARRING</div>
-                      <div className="mt-2 leading-[1.9] text-[13px] md:text-[14px]">
-                        KIEFER SUTHERLAND as JACK BAUER
-                        <br />
-                        MARY LYNN RAJSKUB as CHLOE O&apos;BRIAN
-                        <br />
-                        CARLOS BERNARD as TONY ALMEIDA
+                      <div className="mt-7 text-white/60 tracking-[0.25em] text-[10px]">CO-EXECUTIVE PRODUCERS</div>
+                      <div className="mt-1 text-white/80 font-bold tracking-[0.2em] text-[11px] space-y-1">
+                        <div>MICHAEL LOEFFELHOLZ</div>
+                        <div>STEPHEN KRONISH</div>
                       </div>
-                    </div>
 
-                    {/* Archive Watercolors Attribution */}
-                    <div className="pt-6 border-t border-[#ffcc00]/20 w-full">
-                      <div className="text-[#ffcc00] text-[11px] tracking-[0.5em] font-black">
-                        WATERCOLOR SPLIT-SCREEN • 32 CTU ARCHIVE ARTWORKS
+                      <div className="mt-7 text-white/60 tracking-[0.25em] text-[10px]">EXECUTIVE PRODUCERS</div>
+                      <div className="mt-1 text-white font-bold tracking-[0.2em] text-[12px] space-y-1">
+                        <div>BRIAN GRAZER</div>
+                        <div>TONY KRANTZ</div>
+                        <div>HOWARD GORDON</div>
+                        <div>ROBERT COCHRAN</div>
+                        <div>JOEL SURNOW</div>
                       </div>
-                      <div className="mt-1 text-white/40 text-[9px] tracking-[0.2em]">
-                        LOS ANGELES NIGHT • CTU OPERATIVE • ANALYST • CTU HQ • DC DIVISION
-                      </div>
-                    </div>
 
-                    {/* Iconic End of Hour Clock Climax */}
-                    <div className="pt-8">
-                      <div className="inline-flex flex-col items-center gap-3 border border-[#ffcc00]/30 bg-black px-8 py-5 rounded-[12px] shadow-[0_0_24px_rgba(255,204,0,0.2)]">
-                        <div className="text-white/50 text-[9px] tracking-[0.5em] font-bold">END OF HOUR</div>
-                        <div className="text-[38px] md:text-[48px] font-black tracking-[0.18em] leading-none text-[#ffcc00] glow">
-                          {creditsHours.endOfHour}
+                      <div className="mt-7 text-white/60 tracking-[0.25em] text-[10px]">DIRECTED BY</div>
+                      <div className="mt-1 text-white font-bold tracking-[0.25em] text-[13px]">
+                        STEPHEN HOPKINS
+                      </div>
+
+                      <div className="mt-8 text-white/40 text-[10px] tracking-[0.4em]">ASSOCIATE PRODUCER</div>
+                      <div className="text-white text-[12px] tracking-[0.2em] mt-1">JAMES LAPIDUS</div>
+
+                      <div className="mt-6 text-white/40 text-[10px] tracking-[0.4em]">EDITED BY</div>
+                      <div className="text-white text-[12px] tracking-[0.2em] mt-1">SCOTT POWELL</div>
+
+                      <div className="mt-6 text-white/40 text-[10px] tracking-[0.4em]">PRODUCTION DESIGNER</div>
+                      <div className="text-white text-[12px] tracking-[0.2em] mt-1">CARLOS BARBOSA</div>
+
+                      <div className="mt-6 text-white/40 text-[10px] tracking-[0.4em]">DIRECTOR OF PHOTOGRAPHY</div>
+                      <div className="text-white text-[12px] tracking-[0.2em] mt-1">RODNEY CHARTERS</div>
+
+                      {/* Archive Watercolors Attribution */}
+                      <div className="pt-8 border-t border-[#ffcc00]/20 w-full mt-8">
+                        <div className="text-[#ffcc00] text-[11px] tracking-[0.5em] font-black">
+                          WATERCOLOR SPLIT-SCREEN • 32 CTU ARCHIVE ARTWORKS
                         </div>
-                        <div className="text-[9px] tracking-[0.35em] text-red-500 font-bold animate-pulse">
-                          ● EVENTS OCCUR IN REAL TIME
+                        <div className="mt-1 text-white/40 text-[9px] tracking-[0.2em]">
+                          LOS ANGELES NIGHT • CTU OPERATIVE • ANALYST • CTU HQ • DC DIVISION
                         </div>
+                      </div>
+
+                      {/* Iconic End of Hour Clock Climax */}
+                      <div className="pt-8">
+                        <div className="inline-flex flex-col items-center gap-3 border border-[#ffcc00]/30 bg-black px-8 py-5 rounded-[12px] shadow-[0_0_24px_rgba(255,204,0,0.2)]">
+                          <div className="text-white/50 text-[9px] tracking-[0.5em] font-bold">END OF HOUR</div>
+                          <div className="text-[38px] md:text-[48px] font-black tracking-[0.18em] leading-none text-[#ffcc00] glow">
+                            {creditsHours.endOfHour}
+                          </div>
+                          <div className="text-[9px] tracking-[0.35em] text-red-500 font-bold animate-pulse">
+                            ● EVENTS OCCUR IN REAL TIME
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-12 text-[#ffcc00] font-black tracking-[0.35em] text-[18px] glow">
+                        CTU // LOS ANGELES
+                      </div>
+                      <div className="text-[#ffcc00]/50 tracking-[0.3em] text-[9px] mt-1">
+                        COUNTER TERRORIST UNIT • ALL RIGHTS RESERVED
+                      </div>
+                      <div className="mt-6 text-[#ffcc00]/40 tracking-[0.2em] text-[8px]">
+                        20TH CENTURY FOX TELEVISION • IMAGINE TELEVISION
                       </div>
                     </div>
                   </div>
                 </div>
               </div>
-            </div>
+            </>
+          )}
+
+          {/* FOOTER TELEMETRY BAR - MATCHING OPENING */}
+          <div className="h-[36px] border-t border-white/10 flex items-center justify-between px-4 bg-black/90 text-[8px] md:text-[9px] tracking-[0.25em] text-[#ffcc00]/60 shrink-0">
+            <span>CTU ARCHIVE DIVISION // REEL 24-001</span>
+            <span>END OF EPISODE CLOCK LOCKED</span>
           </div>
         </div>
       )}
