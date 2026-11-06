@@ -164,9 +164,10 @@ export function CTUTerminalV74() {
   const getAudio = useCallback(() => {
     if (!audioRef.current) {
       audioRef.current = new CTUAudio();
+      audioRef.current.setVolume(timerVol);
     }
     return audioRef.current;
-  }, []);
+  }, [timerVol]);
 
   const showToast = useCallback((msg: string, durationMs = 2500) => {
     if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
@@ -176,7 +177,7 @@ export function CTUTerminalV74() {
     }, durationMs);
   }, []);
 
-  // Hydrate from localStorage
+  // Hydrate all state from localStorage on initial mount (SSR safe)
   useEffect(() => {
     try {
       const savedTimers = localStorage.getItem("ctu-v74-timers");
@@ -186,6 +187,7 @@ export function CTUTerminalV74() {
           setTimers(parsed.map((t) => ({ ...t, running: false })));
         }
       }
+
       const savedAlarms = localStorage.getItem("ctu-v74-alarms");
       if (savedAlarms) {
         const parsed = JSON.parse(savedAlarms);
@@ -193,17 +195,44 @@ export function CTUTerminalV74() {
           setAlarms(parsed);
         }
       }
+
+      const savedVol = localStorage.getItem("ctu-v74-volume");
+      if (savedVol !== null) {
+        const v = parseFloat(savedVol);
+        if (!isNaN(v) && v >= 0 && v <= 1) {
+          setTimerVol(v);
+          if (audioRef.current) audioRef.current.setVolume(v);
+        }
+      }
+
+      const savedZeroSound = localStorage.getItem("ctu-v74-zero-sound") as ZeroSoundType | null;
+      if (
+        savedZeroSound &&
+        ["voice", "boom", "alarm", "ctu_beep", "stinger"].includes(savedZeroSound)
+      ) {
+        setZeroSound(savedZeroSound);
+      }
+
+      const savedMusic = localStorage.getItem("ctu-v74-credits-music");
+      if (savedMusic !== null) {
+        setCreditsMusicOn(savedMusic === "true");
+      }
+
+      const savedMode = localStorage.getItem("ctu-v74-credits-mode");
+      if (savedMode === "watercolors" || savedMode === "original") {
+        setCreditsDisplayMode(savedMode);
+      }
     } catch {
-      // Ignore parse error
+      // Ignore parse errors on storage
     }
   }, []);
 
-  // Sync to localStorage
+  // Sync all modified settings and queues to localStorage
   useEffect(() => {
     try {
       localStorage.setItem("ctu-v74-timers", JSON.stringify(timers));
     } catch {
-      // Quota exceeded
+      // Storage quota guard
     }
   }, [timers]);
 
@@ -211,9 +240,41 @@ export function CTUTerminalV74() {
     try {
       localStorage.setItem("ctu-v74-alarms", JSON.stringify(alarms));
     } catch {
-      // Quota exceeded
+      // Storage quota guard
     }
   }, [alarms]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("ctu-v74-volume", String(timerVol));
+    } catch {
+      // Storage quota guard
+    }
+  }, [timerVol]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("ctu-v74-zero-sound", zeroSound);
+    } catch {
+      // Storage quota guard
+    }
+  }, [zeroSound]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("ctu-v74-credits-music", String(creditsMusicOn));
+    } catch {
+      // Storage quota guard
+    }
+  }, [creditsMusicOn]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("ctu-v74-credits-mode", creditsDisplayMode);
+    } catch {
+      // Storage quota guard
+    }
+  }, [creditsDisplayMode]);
 
   // Live clock tick
   useEffect(() => {
@@ -795,8 +856,11 @@ export function CTUTerminalV74() {
             {/* Segmented Clickable Time Readout (Hours, Minutes, Seconds) - Shakes at <= 3 Seconds */}
             {(() => {
               const hms = formatHMS(focusedTimer.remainingSec);
-              const isUrgent = focusedTimer.running && focusedTimer.remainingSec <= 3 && focusedTimer.remainingSec > 0;
-              const shakeClass = isUrgent ? "ctu-shake-intense text-red-500 drop-shadow-[0_0_18px_rgba(255,0,0,0.85)]" : "text-[#ffcc00]";
+              const isUrgent =
+                focusedTimer.running && focusedTimer.remainingSec <= 3 && focusedTimer.remainingSec > 0;
+              const shakeClass = isUrgent
+                ? "ctu-shake-intense text-red-500 drop-shadow-[0_0_18px_rgba(255,0,0,0.85)]"
+                : "text-[#ffcc00]";
 
               return (
                 <div className="mt-3 py-3 px-2 border border-[#ffcc00]/30 rounded-[10px] bg-black flex flex-col items-center">
