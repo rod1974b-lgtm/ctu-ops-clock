@@ -97,7 +97,7 @@
   animation: ctu-shake 0.1s cubic-bezier(0.36, 0.07, 0.19, 0.97) infinite !important;
 }
 
-/* Tactical World Time Ticker (90s Linear Military Crawl) */
+/* Tactical World Time Ticker (120s Ultra-Smooth Command Glide) */
 @keyframes worldTicker {
   0% {
     transform: translateX(0);
@@ -110,7 +110,7 @@
 .world-ticker-track {
   display: flex;
   width: max-content;
-  animation: worldTicker 90s linear infinite;
+  animation: worldTicker 120s linear infinite;
 }
 
 .world-ticker-track:hover {
