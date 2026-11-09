@@ -1,11 +1,13 @@
 // src/lib/background-alerts.ts
 // Counter Terrorist Unit Background Alert, Floating Picture-in-Picture HUD, & Lockscreen Engine
+import { nextAlarm } from "./mission-engine";
 
 export interface ScheduledDeadline {
   id: string;
   label: string;
   targetEpochMs: number;
   type: "timer" | "alarm";
+  days?: number[];
 }
 
 const STORAGE_KEY = "ctu_active_deadlines";
@@ -63,25 +65,26 @@ export class CTUBackgroundAlerts {
   }
 
   /**
-   * Schedule a daily alarm in Bangkok time
+   * Schedule a weekly recurring alarm in Bangkok time
    */
-  static scheduleAlarmAlert(id: string, label: string, hour: number, minute: number): void {
-    const cur = new Date();
-    const target = new Date();
-    target.setHours(hour, minute, 0, 0);
+  static scheduleAlarmAlert(
+    id: string,
+    label: string,
+    hour: number,
+    minute: number,
+    days?: number[]
+  ): void {
+    const timeStr = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00`;
+    const targetEpochMs = nextAlarm(timeStr, Date.now(), days);
+    const delayMs = Math.max(0, targetEpochMs - Date.now());
 
-    if (target.getTime() <= cur.getTime()) {
-      target.setDate(target.getDate() + 1);
-    }
-
-    const delayMs = target.getTime() - cur.getTime();
-    this.saveDeadline({ id, label, targetEpochMs: target.getTime(), type: "alarm" });
+    this.saveDeadline({ id, label, targetEpochMs, type: "alarm", days });
 
     this.postToWorker({
       type: "SCHEDULE_ALERT",
       id,
-      title: `[CTU DAILY ALARM] ${label.toUpperCase()}`,
-      body: `Scheduled operation time: ${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}.`,
+      title: `[CTU WEEKLY ALARM] ${label.toUpperCase()}`,
+      body: `Scheduled operation time: ${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")} BKK.`,
       delayMs,
     });
   }
@@ -136,7 +139,6 @@ export class CTUBackgroundAlerts {
 
   /**
    * Launch the always-on-top Picture-in-Picture Tactical Mini-HUD
-   * Supported on PC and Samsung Galaxy S23 Ultra (Android Chrome)
    */
   static async startFloatingHUD(opts: {
     bkkTime: string;
@@ -224,16 +226,13 @@ export class CTUBackgroundAlerts {
     const h = pipCanvas.height;
     const isCrisis = opts.remainingSec <= 10 && opts.remainingSec > 0;
 
-    // Tactical Obsidian Background
     ctx.fillStyle = "#020202";
     ctx.fillRect(0, 0, w, h);
 
-    // Threat Outline
     ctx.strokeStyle = isCrisis ? "#ef4444" : "#ffcc00";
     ctx.lineWidth = 3;
     ctx.strokeRect(3, 3, w - 6, h - 6);
 
-    // Top Header Banner
     ctx.fillStyle = isCrisis ? "#7f1d1d" : "#1a1603";
     ctx.fillRect(5, 5, w - 10, 26);
 
@@ -245,12 +244,10 @@ export class CTUBackgroundAlerts {
     ctx.font = "bold 11px monospace";
     ctx.fillText(`BKK ${opts.bkkTime}`, w - 95, 23);
 
-    // Operation Label
     ctx.fillStyle = "#a3a3a3";
     ctx.font = "11px monospace";
     ctx.fillText(opts.label.toUpperCase().slice(0, 26), 12, 48);
 
-    // 7-Segment Countdown Display
     const hrs = Math.floor(opts.remainingSec / 3600);
     const mins = Math.floor((opts.remainingSec % 3600) / 60);
     const secs = opts.remainingSec % 60;
@@ -260,13 +257,11 @@ export class CTUBackgroundAlerts {
     ctx.font = "bold 44px monospace";
     ctx.fillText(timeStr, 12, 100);
 
-    // Threat Footer
     ctx.fillStyle = isCrisis ? "#ef4444" : "#ffcc00";
     ctx.font = "bold 11px monospace";
     const threat = isCrisis ? "CRISIS LEVEL 1 (COUNTDOWN)" : opts.threatLevel || "WATCH LEVEL 3";
     ctx.fillText(`STATUS: ${threat}`, 12, 132);
 
-    // Scanline effect
     ctx.fillStyle = "rgba(0, 0, 0, 0.25)";
     for (let y = 0; y < h; y += 4) {
       ctx.fillRect(0, y, w, 2);
