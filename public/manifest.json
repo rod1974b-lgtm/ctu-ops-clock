@@ -1,0 +1,17 @@
+{
+  "short_name": "CTU Ops",
+  "name": "CTU 24 Operational Terminal",
+  "description": "Counter Terrorist Unit tactical mission timer and multi-alarm terminal.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "theme_color": "#000000",
+  "background_color": "#000000",
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "64x64 32x32 24x24 16x16",
+      "type": "image/x-icon"
+    }
+  ]
+}
