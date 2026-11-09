@@ -1,4 +1,6 @@
 // public/sw.js
+// CTU Operational Terminal Background Service Worker
+
 self.addEventListener("install", (event) => {
   self.skipWaiting();
 });
@@ -22,8 +24,8 @@ self.addEventListener("message", (event) => {
 
     if (delayMs > 0) {
       const timeoutId = setTimeout(() => {
-        self.registration.showNotification(title || "[CTU ALERT] OPERATION EXPIRED", {
-          body: body || "Mission deadline reached. Open terminal immediately.",
+        self.registration.showNotification(title || "[CTU CRISIS ALERT] OPERATION EXPIRED", {
+          body: body || "Mission deadline reached. Tactical override engaged.",
           icon: "/favicon.ico",
           badge: "/favicon.ico",
           tag: id || "ctu-alert",
