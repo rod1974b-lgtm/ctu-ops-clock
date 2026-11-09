@@ -15,6 +15,7 @@ export interface Mission {
   status: MissionStatus;
   pinned?: boolean;
   alarmTime?: string;
+  days?: number[]; // 0 = Sun, 1 = Mon, ..., 6 = Sat
   startedAt?: number;
 }
 
@@ -25,6 +26,7 @@ export interface Preset {
   kind?: "timer" | "alarm";
   durationMs: number;
   alarmTime?: string;
+  days?: number[];
   description?: string;
 }
 
@@ -71,19 +73,35 @@ export function remainingMs(mission: Mission, now = Date.now()): number {
   return Math.max(0, target - now);
 }
 
-export function nextAlarm(alarmTime: string, now = Date.now()): number {
+/**
+ * Calculates the exact millisecond epoch for the next alarm trigger.
+ * Supports weekly recurring days (0 = Sun, 1 = Mon, 2 = Tue, 3 = Wed, 4 = Thu, 5 = Fri, 6 = Sat).
+ * Defaults to daily recurrence if no days are specified.
+ */
+export function nextAlarm(alarmTime: string, now = Date.now(), days?: number[]): number {
   const parts = alarmTime.split(":").map(Number);
   const hours = parts[0] ?? 0;
   const minutes = parts[1] ?? 0;
   const seconds = parts[2] ?? 0;
 
-  const target = new Date(now);
-  target.setHours(hours, minutes, seconds, 0);
+  const activeDays = (days && days.length > 0) ? days : [0, 1, 2, 3, 4, 5, 6];
 
-  if (target.getTime() <= now) {
-    target.setDate(target.getDate() + 1);
+  for (let offset = 0; offset <= 7; offset++) {
+    const candidate = new Date(now);
+    candidate.setDate(candidate.getDate() + offset);
+    candidate.setHours(hours, minutes, seconds, 0);
+
+    const dayOfWeek = candidate.getDay(); // 0 = Sun, 1 = Mon, ..., 6 = Sat
+    if (activeDays.includes(dayOfWeek) && candidate.getTime() > now) {
+      return candidate.getTime();
+    }
   }
-  return target.getTime();
+
+  // Fallback: 24 hours later
+  const fallback = new Date(now);
+  fallback.setDate(fallback.getDate() + 1);
+  fallback.setHours(hours, minutes, seconds, 0);
+  return fallback.getTime();
 }
 
 export function focusMission(
