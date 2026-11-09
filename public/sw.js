@@ -1,6 +1,4 @@
 // public/sw.js
-// CTU Operational Terminal Background Service Worker
-
 self.addEventListener("install", (event) => {
   self.skipWaiting();
 });
@@ -9,8 +7,7 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(self.clients.claim());
 });
 
-// Map of active scheduled timer IDs
-const scheduledAlerts = new Map();
+const activeAlerts = new Map();
 
 self.addEventListener("message", (event) => {
   const data = event.data;
@@ -18,13 +15,13 @@ self.addEventListener("message", (event) => {
 
   if (data.type === "SCHEDULE_ALERT") {
     const { id, title, body, delayMs } = data;
-    if (scheduledAlerts.has(id)) {
-      clearTimeout(scheduledAlerts.get(id));
+    if (activeAlerts.has(id)) {
+      clearTimeout(activeAlerts.get(id));
     }
 
     if (delayMs > 0) {
-      const timeoutId = setTimeout(() => {
-        self.registration.showNotification(title || "[CTU CRISIS ALERT] OPERATION EXPIRED", {
+      const timerId = setTimeout(() => {
+        self.registration.showNotification(title || "[CTU ALERT] OPERATION EXPIRED", {
           body: body || "Mission deadline reached. Tactical override engaged.",
           icon: "/favicon.ico",
           badge: "/favicon.ico",
@@ -33,16 +30,16 @@ self.addEventListener("message", (event) => {
           requireInteraction: true,
           data: { url: "/" },
         });
-        scheduledAlerts.delete(id);
+        activeAlerts.delete(id);
       }, delayMs);
 
-      scheduledAlerts.set(id, timeoutId);
+      activeAlerts.set(id, timerId);
     }
   } else if (data.type === "CANCEL_ALERT") {
     const { id } = data;
-    if (scheduledAlerts.has(id)) {
-      clearTimeout(scheduledAlerts.get(id));
-      scheduledAlerts.delete(id);
+    if (activeAlerts.has(id)) {
+      clearTimeout(activeAlerts.get(id));
+      activeAlerts.delete(id);
     }
   }
 });
