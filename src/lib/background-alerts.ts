@@ -61,6 +61,7 @@ export class CTUBackgroundAlerts {
       title: `[CTU CRISIS ALERT] ${label.toUpperCase()} AT ZERO`,
       body: `Operational deadline expired. Tactical override active.`,
       delayMs: remainingSec * 1000,
+      targetEpochMs,
     });
   }
 
@@ -86,6 +87,7 @@ export class CTUBackgroundAlerts {
       title: `[CTU WEEKLY ALARM] ${label.toUpperCase()}`,
       body: `Scheduled operation time: ${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")} BKK.`,
       delayMs,
+      targetEpochMs,
     });
   }
 
@@ -103,10 +105,30 @@ export class CTUBackgroundAlerts {
   /**
    * Update the persistent lockscreen notification status card
    */
-  static updateLiveStatusNotification(title: string, body: string): void {
+  static updateLockscreenHUD(opts: {
+    bkkTime: string;
+    timerLabel?: string;
+    remainingSec?: number;
+    nextAlarmText?: string;
+    threatLevel?: string;
+  }): void {
+    let body = `BKK ${opts.bkkTime} | Status: ${opts.threatLevel || "WATCH LEVEL 3"}`;
+
+    if (opts.timerLabel && typeof opts.remainingSec === "number") {
+      const hrs = Math.floor(opts.remainingSec / 3600);
+      const mins = Math.floor((opts.remainingSec % 3600) / 60);
+      const secs = opts.remainingSec % 60;
+      const timeStr = `${String(hrs).padStart(2, "0")}:${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+      body = `${opts.timerLabel}: ${timeStr}\n${body}`;
+    }
+
+    if (opts.nextAlarmText) {
+      body += `\nNext: ${opts.nextAlarmText}`;
+    }
+
     this.postToWorker({
-      type: "UPDATE_LIVE_STATUS",
-      title,
+      type: "UPDATE_LOCKSCREEN_HUD",
+      title: `[CTU TACTICAL HUD] LIVE MONITOR`,
       body,
     });
   }
@@ -114,9 +136,9 @@ export class CTUBackgroundAlerts {
   /**
    * Remove the persistent lockscreen notification status card
    */
-  static clearLiveStatusNotification(): void {
+  static clearLockscreenHUD(): void {
     this.postToWorker({
-      type: "CLEAR_LIVE_STATUS",
+      type: "CLEAR_LOCKSCREEN_HUD",
     });
   }
 
@@ -270,7 +292,13 @@ export class CTUBackgroundAlerts {
 
   private static postToWorker(message: unknown): void {
     if (typeof window !== "undefined" && "serviceWorker" in navigator) {
-      navigator.serviceWorker.controller?.postMessage(message);
+      if (navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage(message);
+      } else {
+        navigator.serviceWorker.ready.then((reg) => {
+          reg.active?.postMessage(message);
+        });
+      }
     }
   }
 
