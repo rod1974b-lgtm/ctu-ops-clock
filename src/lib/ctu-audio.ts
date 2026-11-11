@@ -346,8 +346,20 @@ export class CTUAudio {
     this.activeNodes.clear();
   }
 
-  // Static facade used by the current route.
+  // Complete static facade ensuring all terminal and modal calls execute reliably
+  public static unlock(): void {
+    void CTUAudio.shared.unlock();
+  }
+
+  public static unlockAudio(): void {
+    void CTUAudio.shared.unlock();
+  }
+
   public static setVolume(volume: number): void {
+    CTUAudio.shared.setVolume(volume);
+  }
+
+  public static setMasterVolume(volume: number): void {
     CTUAudio.shared.setVolume(volume);
   }
 
@@ -359,7 +371,19 @@ export class CTUAudio {
     CTUAudio.shared.playCountdownAlertForSecond(secondsRemaining);
   }
 
+  public static playCountdownSound(secondsRemaining = 10): void {
+    CTUAudio.shared.playCountdownAlertForSecond(secondsRemaining);
+  }
+
+  public static stopCountdownSound(): void {
+    CTUAudio.shared.stopCountdownAlert();
+  }
+
   public static playZeroSound(sound: ZeroSoundType): void {
+    CTUAudio.shared.playZeroSound(sound);
+  }
+
+  public static triggerZeroSound(sound: ZeroSoundType = "voice"): void {
     CTUAudio.shared.playZeroSound(sound);
   }
 
@@ -367,8 +391,28 @@ export class CTUAudio {
     CTUAudio.shared.startCreditsAudio();
   }
 
+  public static playCreditsAudio(): void {
+    CTUAudio.shared.startCreditsAudio();
+  }
+
   public static stopCreditsAudio(): void {
     CTUAudio.shared.stopCreditsAudio();
+  }
+
+  public static tick(
+    level: 1 | 2 | 3 = 1,
+    settings: AudioSettings = defaultAudio,
+    secondsRemaining = 60
+  ): void {
+    CTUAudio.shared.tick(level, settings, secondsRemaining);
+  }
+
+  public static chirp(durationSeconds = 0.08): void {
+    CTUAudio.shared.chirp(durationSeconds);
+  }
+
+  public static beep(durationSeconds = 0.12): void {
+    CTUAudio.shared.chirp(durationSeconds);
   }
 
   public static stopAll(): void {
