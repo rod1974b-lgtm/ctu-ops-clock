@@ -6,16 +6,16 @@ export type SamsungTimePickerValues = {
   minutes: number;
   seconds: number;
   totalSeconds: number;
-  days?: number[]; // 0 = Sun, 1 = Mon, ..., 6 = Sat
+  days?: number[] | undefined; // 0 = Sun, 1 = Mon, ..., 6 = Sat
 };
 
 export interface SamsungTimePickerProps {
   mode: "timer" | "alarm";
-  initialHours?: number;
-  initialMinutes?: number;
-  initialSeconds?: number;
-  initialDays?: number[];
-  initialFocus?: "hours" | "minutes" | "seconds";
+  initialHours?: number | undefined;
+  initialMinutes?: number | undefined;
+  initialSeconds?: number | undefined;
+  initialDays?: number[] | undefined;
+  initialFocus?: "hours" | "minutes" | "seconds" | undefined;
   onSave: (values: SamsungTimePickerValues) => void;
   onCancel: () => void;
 }
@@ -306,14 +306,13 @@ export function SamsungTimePicker({
   const [minutes, setMinutes] = useState<number>(initialMinutes);
   const [seconds, setSeconds] = useState<number>(initialSeconds);
   const [selectedDays, setSelectedDays] = useState<number[]>(
-    initialDays.length > 0 ? initialDays : [0, 1, 2, 3, 4, 5, 6]
+    initialDays && initialDays.length > 0 ? initialDays : [0, 1, 2, 3, 4, 5, 6]
   );
   const [activeUnit, setActiveUnit] = useState<"hours" | "minutes" | "seconds">(initialFocus);
 
   const toggleDay = (day: number) => {
     setSelectedDays((prev) => {
       if (prev.includes(day)) {
-        // Prevent deselecting all days in weekly repeating mode
         if (prev.length === 1) return prev;
         return prev.filter((d) => d !== day);
       } else {
@@ -339,9 +338,13 @@ export function SamsungTimePicker({
 
   const getDaysSummary = () => {
     if (selectedDays.length === 7) return "EVERY DAY";
-    if (selectedDays.length === 5 && [1, 2, 3, 4, 5].every((d) => selectedDays.includes(d))) return "WEEKDAYS (MON–FRI)";
-    if (selectedDays.length === 2 && selectedDays.includes(0) && selectedDays.includes(6)) return "WEEKENDS (SAT–SUN)";
-    return selectedDays.map((d) => WEEK_DAYS.find((w) => w.day === d)?.full.toUpperCase()).join(", ");
+    if (selectedDays.length === 5 && [1, 2, 3, 4, 5].every((d) => selectedDays.includes(d)))
+      return "WEEKDAYS (MON–FRI)";
+    if (selectedDays.length === 2 && selectedDays.includes(0) && selectedDays.includes(6))
+      return "WEEKENDS (SAT–SUN)";
+    return selectedDays
+      .map((d) => WEEK_DAYS.find((w) => w.day === d)?.full.toUpperCase())
+      .join(", ");
   };
 
   return (
