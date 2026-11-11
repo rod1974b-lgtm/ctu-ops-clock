@@ -7,7 +7,7 @@ export interface ScheduledDeadline {
   label: string;
   targetEpochMs: number;
   type: "timer" | "alarm";
-  days?: number[];
+  days?: number[] | undefined;
 }
 
 const STORAGE_KEY = "ctu_active_deadlines";
