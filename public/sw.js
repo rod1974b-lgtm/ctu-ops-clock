@@ -16,19 +16,25 @@ self.addEventListener("message", (event) => {
   if (!data || !data.type) return;
 
   if (data.type === "SCHEDULE_ALERT") {
-    const { id, title, body, delayMs, targetEpochMs } = data;
-    if (activeAlerts.has(id)) {
-      clearTimeout(activeAlerts.get(id));
-      activeAlerts.delete(id);
+    const { id, title, label, body, subtext, delayMs, targetEpochMs, epochMs } = data;
+    const finalId = id || "ctu-alert";
+    const finalTitle = title || (label ? `[CTU CRISIS ALERT] ${label.toUpperCase()} AT ZERO` : "[CTU CRISIS ALERT] OPERATION EXPIRED");
+    const finalBody = body || subtext || "Mission deadline reached. Tactical override active.";
+    const finalDelay = typeof delayMs === "number" ? Math.max(0, delayMs) : 0;
+    const finalEpoch = targetEpochMs || epochMs || (Date.now() + finalDelay);
+
+    if (activeAlerts.has(finalId)) {
+      clearTimeout(activeAlerts.get(finalId));
+      activeAlerts.delete(finalId);
     }
 
-    if (delayMs > 0) {
+    if (finalDelay > 0) {
       const timerId = setTimeout(() => {
-        self.registration.showNotification(title || "[CTU CRISIS ALERT] OPERATION EXPIRED", {
-          body: body || "Mission deadline reached. Tactical override active.",
+        self.registration.showNotification(finalTitle, {
+          body: finalBody,
           icon: "/favicon.ico",
           badge: "/favicon.ico",
-          tag: id || "ctu-alert",
+          tag: finalId,
           vibrate: [300, 100, 300, 100, 600, 100, 800],
           requireInteraction: true,
           renotify: true,
@@ -38,12 +44,12 @@ self.addEventListener("message", (event) => {
             { action: "snooze", title: "SNOOZE 5M" },
             { action: "disarm", title: "DISARM" },
           ],
-          data: { url: "/?crisis=true", id: id || "timer", targetEpochMs },
+          data: { url: "/?crisis=true", id: finalId, targetEpochMs: finalEpoch },
         });
-        activeAlerts.delete(id);
-      }, delayMs);
+        activeAlerts.delete(finalId);
+      }, finalDelay);
 
-      activeAlerts.set(id, timerId);
+      activeAlerts.set(finalId, timerId);
     }
   } else if (data.type === "CANCEL_ALERT") {
     const { id } = data;
@@ -82,7 +88,6 @@ self.addEventListener("notificationclick", (event) => {
   const data = event.notification.data || {};
 
   if (action === "snooze") {
-    // Re-arm a 5-minute (300,000ms) background emergency timer
     const snoozeId = (data.id || "snooze") + "-snooze";
     const snoozeMs = 5 * 60 * 1000;
     const timerId = setTimeout(() => {
@@ -104,7 +109,6 @@ self.addEventListener("notificationclick", (event) => {
 
     activeAlerts.set(snoozeId, timerId);
 
-    // Inform open clients
     self.clients.matchAll({ type: "window" }).then((clients) => {
       for (const c of clients) {
         c.postMessage({ type: "SNOOZE_APPLIED", minutes: 5 });
@@ -126,7 +130,6 @@ self.addEventListener("notificationclick", (event) => {
     return;
   }
 
-  // Default action: Focus running window or launch terminal directly into Crisis mode
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
       for (const client of clientList) {
@@ -142,6 +145,6 @@ self.addEventListener("notificationclick", (event) => {
   );
 });
 
-self.addEventListener("notificationclose", (event) => {
-  // Notification dismissed by user
+self.addEventListener("notificationclose", () => {
+  // Notification dismissed
 });
