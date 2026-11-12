@@ -772,10 +772,18 @@ function CTUTerminalV74() {
         </div>
       )}
 
-      {/* Samsung picker — extra props passed via `as any` so any picker prop-shape works */}
+      {/* Samsung picker — EXACT props from samsung-time-picker.tsx:
+          mode, isOpen, initialValues, onConfirm, onCancel.
+          No `open`, `initial`, `onClose`, or `as any` anymore.
+          Kept conditionally mounted ({pickerOpen && ...}) so the picker's
+          own early-return never runs while hooks are expected. */}
       {pickerOpen && (
         <SamsungTimePicker
-          {...({ open: pickerOpen, isOpen: pickerOpen, mode: pickerMode, initial: pickerInitial, initialValues: pickerInitial, value: pickerInitial, onConfirm: handlePickerConfirm, onClose: () => setPickerOpen(false), onCancel: () => setPickerOpen(false) } as any)}
+          mode={pickerMode}
+          isOpen={pickerOpen}
+          initialValues={pickerInitial}
+          onConfirm={handlePickerConfirm}
+          onCancel={() => setPickerOpen(false)}
         />
       )}
 
