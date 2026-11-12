@@ -1,152 +1,124 @@
-// public/sw.js
-// Counter Terrorist Unit Tactical Service Worker: Background Scheduling, Live Lockscreen HUD, & Crisis Wake
+// public/sw.js — CTU background alerts
+// IMPORTANT: place this file at public/sw.js so it is served at /sw.js (same origin, root scope).
+// A service worker CANNOT be trusted to run a long setTimeout after the tab/app is closed:
+// iOS Safari and Android Chrome kill / throttle it. So this worker does 3 things:
+//  1) shows the notification if it is still alive at fire time,
+//  2) persists every deadline in IndexedDB, and re-arms them on install/activate/message,
+//  3) on every wake-up (fetch/message/activate) checks for missed deadlines and fires them immediately.
+// The page side (src/lib/background-alarms.ts) is the other half: it re-schedules
+// everything on every load/visibilitychange, and fires missed deadlines the moment you reopen.
 
-self.addEventListener("install", (event) => {
-  self.skipWaiting();
-});
+const DB_NAME = "ctu-alarms-db";
+const STORE = "deadlines";
 
-self.addEventListener("activate", (event) => {
-  event.waitUntil(self.clients.claim());
-});
-
-const activeAlerts = new Map();
-
-self.addEventListener("message", (event) => {
-  const data = event.data;
-  if (!data || !data.type) return;
-
-  if (data.type === "SCHEDULE_ALERT") {
-    const { id, title, label, body, subtext, delayMs, targetEpochMs, epochMs } = data;
-    const finalId = id || "ctu-alert";
-    const finalTitle =
-      title ||
-      (label ? `[CTU CRISIS ALERT] ${label.toUpperCase()} AT ZERO` : "[CTU CRISIS ALERT] OPERATION EXPIRED");
-    const finalBody = body || subtext || "Mission deadline reached. Tactical override active.";
-    const finalDelay = typeof delayMs === "number" ? Math.max(0, delayMs) : 0;
-    const finalEpoch = targetEpochMs || epochMs || Date.now() + finalDelay;
-
-    if (activeAlerts.has(finalId)) {
-      clearTimeout(activeAlerts.get(finalId));
-      activeAlerts.delete(finalId);
-    }
-
-    if (finalDelay > 0) {
-      const timerId = setTimeout(() => {
-        self.registration.showNotification(finalTitle, {
-          body: finalBody,
-          icon: "/favicon.ico",
-          badge: "/favicon.ico",
-          tag: finalId,
-          vibrate: [300, 100, 300, 100, 600, 100, 800],
-          requireInteraction: true,
-          renotify: true,
-          silent: false,
-          actions: [
-            { action: "open", title: "OPEN TERMINAL" },
-            { action: "snooze", title: "SNOOZE 5M" },
-            { action: "disarm", title: "DISARM" },
-          ],
-          data: { url: "/?crisis=true", id: finalId, targetEpochMs: finalEpoch },
-        });
-        activeAlerts.delete(finalId);
-      }, finalDelay);
-
-      activeAlerts.set(finalId, timerId);
-    }
-  } else if (data.type === "CANCEL_ALERT") {
-    const { id } = data;
-    if (activeAlerts.has(id)) {
-      clearTimeout(activeAlerts.get(id));
-      activeAlerts.delete(id);
-    }
-  } else if (data.type === "UPDATE_LOCKSCREEN_HUD" || data.type === "UPDATE_LIVE_STATUS") {
-    const { title, body } = data;
-    self.registration.showNotification(title || "[CTU ACTIVE HUD] OPERATIONAL WATCH", {
-      body: body || "Monitoring active mission deadlines.",
-      icon: "/favicon.ico",
-      badge: "/favicon.ico",
-      tag: "ctu-lockscreen-hud",
-      renotify: false,
-      silent: true,
-      requireInteraction: false,
-      actions: [
-        { action: "open", title: "EXPAND HUD" },
-        { action: "disarm_all", title: "DISARM ALL" },
-      ],
-      data: { url: "/", type: "hud" },
-    });
-  } else if (data.type === "CLEAR_LOCKSCREEN_HUD" || data.type === "CLEAR_LIVE_STATUS") {
-    self.registration.getNotifications({ tag: "ctu-lockscreen-hud" }).then((notifications) => {
-      for (const n of notifications) {
-        n.close();
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      if (!req.result.objectStoreNames.contains(STORE)) {
+        req.result.createObjectStore(STORE, { keyPath: "id" });
       }
-    });
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function dbPut(deadline) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, "readwrite");
+    tx.objectStore(STORE).put(deadline);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+async function dbDelete(id) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, "readwrite");
+    tx.objectStore(STORE).delete(id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+async function dbAll() {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, "readonly");
+    const req = tx.objectStore(STORE).getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+// In-memory timers for THIS worker lifetime only. They die with the worker —
+// that is expected. Persistence + re-arming on wake is what makes this work.
+const liveTimers = new Map();
+
+async function showAlert(d) {
+  await dbDelete(d.id);
+  liveTimers.delete(d.id);
+  // waitUntil keeps the worker alive until the notification is shown.
+  await self.registration.showNotification(d.title || "CTU ALERT", {
+    body: d.body || "Operation reached zero.",
+    tag: d.id, // replaces duplicates instead of stacking 20 copies
+    renotify: true,
+    requireInteraction: true, // stays on lockscreen until dismissed (desktop/Android)
+    vibrate: [200, 100, 200, 100, 400],
+    data: { id: d.id, label: d.label, url: "/" },
+  });
+}
+
+async function arm(d) {
+  const delay = d.targetEpochMs - Date.now();
+  if (delay <= 0) { await showAlert(d); return; }
+  await dbPut(d);
+  if (liveTimers.has(d.id)) clearTimeout(liveTimers.get(d.id));
+  // Cap: browsers clamp very long timeouts to ~24.8 days and kill SWs long before that.
+  // For alarms days away, the page re-arms on every open; the worker re-arms on wake.
+  const t = setTimeout(() => { showAlert(d).catch(() => {}); }, Math.min(delay, 2147483647));
+  liveTimers.set(d.id, t);
+}
+
+async function checkMissed() {
+  const all = await dbAll();
+  const now = Date.now();
+  for (const d of all) {
+    if (d.targetEpochMs <= now) await showAlert(d);
+    else await arm(d); // re-arm anything still in the future
   }
+}
+
+self.addEventListener("install", (e) => { e.waitUntil(self.skipWaiting()); });
+self.addEventListener("activate", (e) => {
+  e.waitUntil((async () => { await self.clients.claim(); await checkMissed(); })());
 });
 
-self.addEventListener("notificationclick", (event) => {
-  event.notification.close();
-  const action = event.action;
-  const data = event.notification.data || {};
-
-  if (action === "snooze") {
-    const snoozeId = (data.id || "snooze") + "-snooze";
-    const snoozeMs = 5 * 60 * 1000;
-    const timerId = setTimeout(() => {
-      self.registration.showNotification("[CTU CRISIS ALERT] SNOOZE EXPIRED", {
-        body: "5-minute stand-down expired. Return to operational status.",
-        icon: "/favicon.ico",
-        badge: "/favicon.ico",
-        tag: snoozeId,
-        vibrate: [300, 100, 300, 100, 600],
-        requireInteraction: true,
-        actions: [
-          { action: "open", title: "OPEN TERMINAL" },
-          { action: "disarm", title: "DISARM" },
-        ],
-        data: { url: "/?crisis=true", id: snoozeId },
-      });
-      activeAlerts.delete(snoozeId);
-    }, snoozeMs);
-
-    activeAlerts.set(snoozeId, timerId);
-
-    self.clients.matchAll({ type: "window" }).then((clients) => {
-      for (const c of clients) {
-        c.postMessage({ type: "SNOOZE_APPLIED", minutes: 5 });
-      }
-    });
-    return;
+self.addEventListener("message", (e) => {
+  const msg = e.data || {};
+  if (msg.type === "SCHEDULE_ALERT") {
+    // Accept every naming variant the old page sent: targetEpochMs / epochMs
+    const targetEpochMs = msg.targetEpochMs ?? msg.epochMs;
+    if (!targetEpochMs || !msg.id) return;
+    e.waitUntil(arm({ id: msg.id, label: msg.label, title: msg.title, body: msg.body, targetEpochMs }));
   }
-
-  if (action === "disarm" || action === "disarm_all") {
-    if (data.id && activeAlerts.has(data.id)) {
-      clearTimeout(activeAlerts.get(data.id));
-      activeAlerts.delete(data.id);
-    }
-    self.clients.matchAll({ type: "window" }).then((clients) => {
-      for (const c of clients) {
-        c.postMessage({ type: "DISARM_MISSION", id: data.id });
-      }
-    });
-    return;
+  if (msg.type === "CANCEL_ALERT") {
+    if (liveTimers.has(msg.id)) clearTimeout(liveTimers.get(msg.id));
+    liveTimers.delete(msg.id);
+    e.waitUntil(dbDelete(msg.id));
   }
-
-  event.waitUntil(
-    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
-      for (const client of clientList) {
-        if ("focus" in client) {
-          client.postMessage({ type: "CRISIS_WAKE", id: data.id });
-          return client.focus();
-        }
-      }
-      if (self.clients.openWindow) {
-        return self.clients.openWindow(data.url || "/");
-      }
-    })
-  );
+  if (msg.type === "CHECK_MISSED") e.waitUntil(checkMissed());
+  if (msg.type === "CLEAR_LOCKSCREEN_HUD") { /* HUD was a fake concept — no persistent notification exists. Ignored on purpose. */ }
+  if (msg.type === "UPDATE_LOCKSCREEN_HUD") { /* Same: a page cannot keep a lockscreen HUD alive after close. Ignored. */ }
 });
 
-self.addEventListener("notificationclose", () => {
-  // Notification dismissed
+// Clicking the notification must reopen/focus the app.
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  e.waitUntil((async () => {
+    const all = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    const existing = all.find((c) => new URL(c.url).pathname === "/");
+    if (existing) { await existing.focus(); await existing.postMessage({ type: "CHECK_MISSED" }); }
+    else await self.clients.openWindow("/");
+  })());
 });
