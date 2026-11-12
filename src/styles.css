@@ -2,10 +2,7 @@
 @import "tailwindcss";
 
 @layer base {
-  * {
-    box-sizing: border-box;
-  }
-
+  * { box-sizing: border-box; }
   body {
     margin: 0;
     padding: 0;
@@ -19,134 +16,76 @@
 
 /* Authentic CTU Amber Glow Animation */
 @keyframes glow {
-  0%,
-  100% {
-    text-shadow:
-      0 0 12px #ffcc00,
-      0 0 32px #ffcc00;
-  }
-  50% {
-    text-shadow:
-      0 0 18px #ffcc00,
-      0 0 48px #ffcc00,
-      0 0 70px #ffcc00;
-  }
+  0%, 100% { text-shadow: 0 0 12px #ffcc00, 0 0 32px #ffcc00; }
+  50% { text-shadow: 0 0 18px #ffcc00, 0 0 48px #ffcc00, 0 0 70px #ffcc00; }
 }
-
-.glow {
-  animation: glow 2.2s ease-in-out infinite;
-}
+.glow { animation: glow 2.2s ease-in-out infinite; }
 
 /* Tactical Pulse Box Animation */
 @keyframes pulseBox {
-  0% {
-    transform: scale(0.99);
-    box-shadow: 0 0 0 0 rgba(255, 204, 0, 0.4);
-  }
-  50% {
-    transform: scale(1.008);
-    box-shadow: 0 0 20px 4px rgba(255, 204, 0, 0.25);
-  }
-  100% {
-    transform: scale(1);
-    box-shadow: 0 0 0 0 rgba(255, 204, 0, 0);
-  }
+  0% { transform: scale(0.99); box-shadow: 0 0 0 0 rgba(255, 204, 0, 0.4); }
+  50% { transform: scale(1.008); box-shadow: 0 0 20px 4px rgba(255, 204, 0, 0.25); }
+  100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255, 204, 0, 0); }
 }
-
-.pulse {
-  animation: pulseBox 0.35s ease-out;
-}
+.pulse { animation: pulseBox 0.35s ease-out; }
 
 /* Severe Tactical Number & Screen Shake (Engages at <= 3 Seconds) */
 @keyframes ctu-shake {
-  0%,
-  100% {
-    transform: translate(0, 0) rotate(0deg);
-  }
-  10% {
-    transform: translate(-4px, -3px) rotate(-1deg);
-  }
-  20% {
-    transform: translate(4px, 2px) rotate(1deg);
-  }
-  30% {
-    transform: translate(-5px, 3px) rotate(0deg);
-  }
-  40% {
-    transform: translate(5px, -2px) rotate(1deg);
-  }
-  50% {
-    transform: translate(-3px, 4px) rotate(-1deg);
-  }
-  60% {
-    transform: translate(4px, -3px) rotate(0deg);
-  }
-  70% {
-    transform: translate(-4px, 2px) rotate(1deg);
-  }
-  80% {
-    transform: translate(3px, -2px) rotate(-1deg);
-  }
-  90% {
-    transform: translate(-2px, 3px) rotate(0deg);
-  }
+  0%, 100% { transform: translate(0, 0) rotate(0deg); }
+  10% { transform: translate(-4px, -3px) rotate(-1deg); }
+  20% { transform: translate(4px, 2px) rotate(1deg); }
+  30% { transform: translate(-5px, 3px) rotate(0deg); }
+  40% { transform: translate(5px, -2px) rotate(1deg); }
+  50% { transform: translate(-3px, 4px) rotate(-1deg); }
+  60% { transform: translate(4px, -3px) rotate(0deg); }
+  70% { transform: translate(-4px, 2px) rotate(1deg); }
+  80% { transform: translate(3px, -2px) rotate(-1deg); }
+  90% { transform: translate(-2px, 3px) rotate(0deg); }
 }
-
 .ctu-shake-intense {
   display: inline-block;
   animation: ctu-shake 0.1s cubic-bezier(0.36, 0.07, 0.19, 0.97) infinite !important;
 }
 
-/* Tactical World Time Ticker (120s Ultra-Smooth Command Glide) */
+/* Tactical World Time Ticker — FIXED
+   Why it looked frozen before:
+   1) 120s was ~8px/sec on a phone-width track — imperceptible in a screenshot,
+      and it looked dead for the first seconds. Now 40s (~25px/sec): clearly moving,
+      still smooth, still "command glide".
+   2) The track must have NO gap of its own: translateX(-50%) only lands exactly
+      on one copy if the two copies are identical AND butt up against each other.
+      Each copy in index.tsx carries pr-6 instead, so the loop is seamless.
+   3) index.tsx now actually USES this class. Before, index.tsx had its own JS
+      scroll loop and never referenced .world-ticker-track, so this CSS was dead. */
 @keyframes worldTicker {
-  0% {
-    transform: translateX(0);
-  }
-  100% {
-    transform: translateX(-50%);
-  }
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
 }
-
 .world-ticker-track {
   display: flex;
   width: max-content;
-  animation: worldTicker 120s linear infinite;
+  will-change: transform;
+  animation: worldTicker 40s linear infinite;
 }
-
-.world-ticker-track:hover {
-  animation-play-state: paused;
+.world-ticker-track:hover { animation-play-state: paused; }
+@media (prefers-reduced-motion: reduce) {
+  .world-ticker-track { animation: none; }
 }
 
 /* 24 Ending Credits Rolling Amber Typography */
 @keyframes creditsRoll {
-  0% {
-    transform: translateY(55%);
-  }
-  100% {
-    transform: translateY(-115%);
-  }
+  0% { transform: translateY(55%); }
+  100% { transform: translateY(-115%); }
 }
 
 /* Ken Burns Tactical Pan and Zoom for Watercolors */
 @keyframes kenBurns {
-  0% {
-    transform: scale(1) translate(0, 0);
-  }
-  50% {
-    transform: scale(1.08) translate(-1%, -1%);
-  }
-  100% {
-    transform: scale(1.12) translate(1%, 1%);
-  }
+  0% { transform: scale(1) translate(0, 0); }
+  50% { transform: scale(1.08) translate(-1%, -1%); }
+  100% { transform: scale(1.12) translate(1%, 1%); }
 }
-
-.ken {
-  animation: kenBurns 18s ease-in-out infinite alternate;
-}
-
-.watercolor {
-  filter: contrast(1.12) saturate(0.72) brightness(0.92) sepia(0.12);
-}
+.ken { animation: kenBurns 18s ease-in-out infinite alternate; }
+.watercolor { filter: contrast(1.12) saturate(0.72) brightness(0.92) sepia(0.12); }
 
 /* Custom CTU Tactical Slider */
 input[type="range"] {
@@ -157,7 +96,6 @@ input[type="range"] {
   border-radius: 3px;
   outline: none;
 }
-
 input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
@@ -169,7 +107,6 @@ input[type="range"]::-webkit-slider-thumb {
   box-shadow: 0 0 6px #ffcc00;
   cursor: pointer;
 }
-
 input[type="range"]::-moz-range-thumb {
   width: 18px;
   height: 18px;
