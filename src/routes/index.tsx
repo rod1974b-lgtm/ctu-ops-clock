@@ -662,6 +662,15 @@ function CTUTerminalV74() {
               {(Object.keys(ZERO_SOUND_LABELS) as ZeroSoundType[]).map((s) => (
                 <button key={s} onClick={() => { setZeroSound(s); CTUAudio.triggerZeroSound(s); }} className={`px-2 py-1 border text-[10px] font-bold tracking-wider ${zeroSound === s ? "bg-[#ffcc00] text-black border-[#ffcc00]" : "border-[#ffcc00]/50 text-[#ffcc00] hover:bg-[#ffcc00]/20"}`}>{ZERO_SOUND_LABELS[s]}</button>
               ))}
+              {/* STOP — kills any test / zero / countdown / crisis sound that is playing */}
+              <button onClick={() => {
+                // CTUAudio has several stop methods across builds; call every
+                // known one defensively so STOP always works, never throws.
+                const audio = CTUAudio as unknown as Record<string, unknown>;
+                for (const fn of ["stopZeroSound", "stopCountdownSound", "stopCrisisAudio", "stopCreditsAudio", "stopAllSounds", "stop"]) {
+                  try { if (typeof audio[fn] === "function") (audio[fn] as () => void)(); } catch {}
+                }
+              }} className="px-3 py-1 border border-red-600 bg-red-600 text-white text-[10px] font-black tracking-wider hover:bg-red-500 transition">■ STOP SOUND</button>
             </div>
             <div className="flex items-center gap-2 text-[11px]"><span className="font-bold tracking-wider text-[#ffcc00]/70">VOLUME</span><input type="range" min={0} max={100} value={masterVol} onChange={(e) => setMasterVol(Number(e.target.value))} className="flex-1 accent-[#ffcc00]" /><span className="tabular-nums">{masterVol}%</span></div>
             <p className="text-[10px] text-[#ffcc00]/50 leading-relaxed">Background alerts need: installed PWA + OS Alerts: ARMED. On iPhone, Safari will not fire while fully closed — use Android for reliable background firing.</p>
