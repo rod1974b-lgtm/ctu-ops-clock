@@ -548,21 +548,20 @@ function CTUTerminalV74() {
         </div>
       </header>
 
-      {/* World Theaters ticker — TRUE marquee.
-          FIX: old version was `overflow-x-auto flex` — flex items shrank to fit,
-          so there was nothing to scroll, and nothing moved on its own.
-          Now: overflow-hidden + a duplicated track animated with translateX,
-          so it scrolls continuously on every screen, touch or no touch. */}
-      <style>{`@keyframes ctu-ticker-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } } .ctu-ticker-track { animation: ctu-ticker-scroll 60s linear infinite; } .ctu-ticker-track:hover { animation-play-state: paused; } @media (prefers-reduced-motion: reduce) { .ctu-ticker-track { animation: none; } }`}</style>
-      <div className="w-full bg-black/80 border border-[#ffcc00]/30 py-1 px-2 mb-4 overflow-hidden whitespace-nowrap flex items-center gap-6 text-[11px] text-[#ffcc00]/70">
-        <span className="font-bold text-[#ffcc00] tracking-widest shrink-0 z-10 bg-black pr-2">WORLD THEATERS:</span>
-        <div className="relative flex-1 overflow-hidden">
-          <div className="ctu-ticker-track flex w-max items-center gap-6 will-change-transform">
+      {/* World Theaters ticker — driven ONLY by .world-ticker-track in styles.css.
+          No JS scroll loop anymore: two systems were fighting / duplicating.
+          Structure must stay exactly this: overflow-hidden wrapper >
+          .world-ticker-track > 2 identical copies, NO gap on the track itself
+          (each copy carries padding-right), so translateX(-50%) = exactly one copy. */}
+      <div className="w-full bg-black/80 border border-[#ffcc00]/30 py-1 mb-4 overflow-hidden flex items-center text-[11px] text-[#ffcc00]/70">
+        <span className="font-bold text-[#ffcc00] tracking-widest shrink-0 bg-black px-2 py-1 z-10">WORLD THEATERS:</span>
+        <div className="flex-1 overflow-hidden">
+          <div className="world-ticker-track">
             {[0, 1].map((copy) => (
-              <div key={copy} aria-hidden={copy === 1} className="flex items-center gap-6 shrink-0">
+              <div key={copy} aria-hidden={copy === 1} className="flex items-center gap-6 pr-6 shrink-0">
                 {WORLD_THEATERS.map((wt) => {
                   const tStr = new Intl.DateTimeFormat("en-US", { timeZone: wt.tz, hour: "numeric", minute: "numeric", second: "numeric", hour12: false }).format(nowDate);
-                  return <span key={`${copy}-${wt.city}`} className="inline-flex items-center gap-1.5 shrink-0"><span className="text-[#ffcc00]/50">{wt.city}:</span><strong className="text-[#ffcc00] font-mono">{tStr}</strong></span>;
+                  return <span key={`${copy}-${wt.city}`} className="inline-flex items-center gap-1.5 shrink-0 whitespace-nowrap"><span className="text-[#ffcc00]/50">{wt.city}:</span><strong className="text-[#ffcc00] font-mono">{tStr}</strong></span>;
                 })}
               </div>
             ))}
