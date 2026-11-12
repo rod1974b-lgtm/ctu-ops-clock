@@ -5,18 +5,21 @@ export type SamsungTimePickerValues = {
   hours: number;
   minutes: number;
   seconds: number;
-  totalSeconds: number;
+  totalSeconds?: number;
   days?: number[] | undefined; // 0 = Sun, 1 = Mon, ..., 6 = Sat
 };
 
 export interface SamsungTimePickerProps {
   mode: "timer" | "alarm";
+  isOpen?: boolean;
   initialHours?: number | undefined;
   initialMinutes?: number | undefined;
   initialSeconds?: number | undefined;
   initialDays?: number[] | undefined;
+  initialValues?: SamsungTimePickerValues | undefined;
   initialFocus?: "hours" | "minutes" | "seconds" | undefined;
-  onSave: (values: SamsungTimePickerValues) => void;
+  onSave?: (values: SamsungTimePickerValues) => void;
+  onConfirm?: (values: SamsungTimePickerValues) => void;
   onCancel: () => void;
 }
 
@@ -128,213 +131,217 @@ function DrumColumn({
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isSelected, disabled, value, wrap, onChange, isInlineEditing]);
+  }, [isSelected, disabled, isInlineEditing, onChange, wrap, value]);
 
   return (
-    <div
-      className={`relative flex flex-col items-center select-none ${disabled ? "opacity-30 pointer-events-none" : ""}`}
-    >
-      {/* Top Stepper Button */}
+    <div className="flex flex-col items-center">
+      {/* Upper Stepper Arrow (+1) */}
       <button
         type="button"
-        onPointerDown={(e) => e.stopPropagation()}
+        disabled={disabled}
         onClick={(e) => {
           e.stopPropagation();
           onSelect();
-          if (!disabled) onChange(wrap(value + 1));
+          onChange(wrap(value + 1));
         }}
-        className={`w-[96px] h-[34px] rounded-t-[10px] bg-black border border-b-0 text-[12px] tracking-widest font-bold active:scale-[0.96] transition-all flex items-center justify-center gap-1 cursor-pointer z-30 ${
-          isSelected
-            ? "border-[#ffcc00] text-[#ffcc00] bg-[#1a1a00] shadow-[0_0_12px_rgba(255,204,0,0.3)]"
-            : "border-[#ffcc00]/30 text-[#ffcc00]/70 hover:text-[#ffcc00] hover:border-[#ffcc00]"
-        }`}
+        className="w-full py-1 text-[#ffcc00]/60 hover:text-[#ffcc00] hover:bg-[#ffcc00]/10 flex items-center justify-center transition border-b border-[#ffcc00]/20 active:scale-95 disabled:opacity-20"
+        title={`Increment ${label} (+1)`}
       >
-        ▲ <span className="opacity-80 font-mono">{pad(vPlus1)}</span>
+        <svg className="w-4 h-4 fill-current" viewBox="0 0 20 20">
+          <path d="M10 5l6 7H4z" />
+        </svg>
       </button>
 
-      {/* Drum Cylinder Viewport */}
+      {/* Drum Cylinder */}
       <div
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
         onWheel={handleWheel}
+        onClick={onSelect}
         className={`w-[96px] h-[190px] bg-[#05050a] border-x flex flex-col items-center justify-center relative overflow-hidden transition-all touch-none ${
           isSelected
             ? "border-x-[#ffcc00] shadow-[inset_0_0_20px_rgba(255,204,0,0.2)]"
-            : "border-x-[#ffcc00]/30"
-        }`}
+            : "border-x-neutral-800 opacity-80"
+        } ${disabled ? "opacity-30 cursor-not-allowed" : "cursor-grab active:cursor-grabbing"}`}
       >
-        {/* Curved Drum Ambient Vignettes */}
-        <div className="absolute top-0 left-0 right-0 h-10 bg-gradient-to-b from-black via-black/80 to-transparent pointer-events-none z-10" />
-        <div className="absolute bottom-0 left-0 right-0 h-10 bg-gradient-to-t from-black via-black/80 to-transparent pointer-events-none z-10" />
+        {/* Top & Bottom Vignettes */}
+        <div className="absolute top-0 inset-x-0 h-10 bg-gradient-to-b from-black via-black/80 to-transparent pointer-events-none z-10" />
+        <div className="absolute bottom-0 inset-x-0 h-10 bg-gradient-to-t from-black via-black/80 to-transparent pointer-events-none z-10" />
 
-        {/* Center Target Lens */}
-        <div className="absolute inset-x-1 top-[70px] h-[50px] border-y-2 border-[#ffcc00] bg-[#ffcc00]/10 pointer-events-none z-10 shadow-[0_0_15px_rgba(255,204,0,0.25)]" />
-
-        {/* Outer Top +2 */}
+        {/* -2 Position */}
         <div
           onClick={(e) => {
             e.stopPropagation();
-            onSelect();
-            onChange(vPlus2);
+            onChange(vMinus2);
           }}
-          className="text-[13px] font-mono text-[#ffcc00]/25 select-none h-6 flex items-center cursor-pointer hover:text-[#ffcc00]/60 transition"
+          className="h-[32px] flex items-center justify-center text-[18px] text-[#ffcc00]/20 font-mono font-bold select-none cursor-pointer hover:text-[#ffcc00]/40"
         >
-          {pad(vPlus2)}
+          {pad(vMinus2)}
         </div>
 
-        {/* Inner Top +1 */}
+        {/* -1 Position */}
         <div
           onClick={(e) => {
             e.stopPropagation();
-            onSelect();
-            onChange(vPlus1);
+            onChange(vMinus1);
           }}
-          className="text-[18px] font-mono text-[#ffcc00]/50 select-none h-7 flex items-center cursor-pointer hover:text-[#ffcc00]/80 transition"
+          className="h-[36px] flex items-center justify-center text-[22px] text-[#ffcc00]/50 font-mono font-bold select-none cursor-pointer hover:text-[#ffcc00]/70"
         >
-          {pad(vPlus1)}
+          {pad(vMinus1)}
         </div>
 
-        {/* Center Active Value */}
-        <div className="h-[52px] flex items-center justify-center z-20 my-0.5">
+        {/* Central Active Value (Direct Tap to Type) */}
+        <div className="h-[48px] w-full flex items-center justify-center relative z-20 my-0.5">
+          <div className="absolute inset-x-1 inset-y-0.5 border-y-2 border-[#ffcc00] bg-[#ffcc00]/15 pointer-events-none shadow-[0_0_12px_rgba(255,204,0,0.25)]" />
           {isInlineEditing ? (
             <input
               ref={inputRef}
               type="text"
               inputMode="numeric"
-              pattern="[0-9]*"
+              maxLength={2}
               value={typedValue}
-              onChange={(e) => {
-                const clean = e.target.value.replace(/\D/g, "").slice(0, 2);
-                setTypedValue(clean);
-              }}
+              onChange={(e) => setTypedValue(e.target.value.replace(/\D/g, ""))}
               onBlur={commitInlineEdit}
               onKeyDown={(e) => {
                 if (e.key === "Enter") commitInlineEdit();
                 if (e.key === "Escape") setIsInlineEditing(false);
               }}
-              className="w-16 h-10 bg-black text-[#ffcc00] border-2 border-[#ffcc00] rounded text-center text-[28px] font-black font-mono tracking-wider focus:outline-none shadow-[0_0_15px_rgba(255,204,0,0.6)]"
+              className="w-16 h-10 bg-black text-[#ffcc00] text-[32px] font-black font-mono text-center outline-none border border-[#ffcc00] shadow-[0_0_15px_rgba(255,204,0,0.5)] z-30"
             />
           ) : (
             <button
               type="button"
               onClick={startInlineEdit}
-              className="text-[34px] font-black font-mono text-[#ffcc00] tracking-wider select-none hover:scale-105 active:scale-95 transition-transform flex items-center justify-center cursor-pointer px-2 py-0.5 rounded bg-black/40 hover:bg-[#ffcc00]/20"
               title="Tap to type directly"
+              className="text-[34px] font-black font-mono text-[#ffcc00] drop-shadow-[0_0_10px_rgba(255,204,0,0.8)] tracking-tight hover:scale-105 active:scale-95 transition-transform cursor-pointer px-3 py-1"
             >
               {pad(value)}
             </button>
           )}
         </div>
 
-        {/* Inner Bottom -1 */}
+        {/* +1 Position */}
         <div
           onClick={(e) => {
             e.stopPropagation();
-            onSelect();
-            onChange(vMinus1);
+            onChange(vPlus1);
           }}
-          className="text-[18px] font-mono text-[#ffcc00]/50 select-none h-7 flex items-center cursor-pointer hover:text-[#ffcc00]/80 transition"
+          className="h-[36px] flex items-center justify-center text-[22px] text-[#ffcc00]/50 font-mono font-bold select-none cursor-pointer hover:text-[#ffcc00]/70"
         >
-          {pad(vMinus1)}
+          {pad(vPlus1)}
         </div>
 
-        {/* Outer Bottom -2 */}
+        {/* +2 Position */}
         <div
           onClick={(e) => {
             e.stopPropagation();
-            onSelect();
-            onChange(vMinus2);
+            onChange(vPlus2);
           }}
-          className="text-[13px] font-mono text-[#ffcc00]/25 select-none h-6 flex items-center cursor-pointer hover:text-[#ffcc00]/60 transition"
+          className="h-[32px] flex items-center justify-center text-[18px] text-[#ffcc00]/20 font-mono font-bold select-none cursor-pointer hover:text-[#ffcc00]/40"
         >
-          {pad(vMinus2)}
-        </div>
-
-        {/* Sub-label */}
-        <div
-          className={`text-[9px] tracking-[0.25em] font-black absolute bottom-1 transition ${
-            isSelected ? "text-[#ffcc00]" : "text-[#ffcc00]/60 hover:text-[#ffcc00]"
-          }`}
-        >
-          {label}
+          {pad(vPlus2)}
         </div>
       </div>
 
-      {/* Bottom Stepper Button */}
+      {/* Lower Stepper Arrow (-1) */}
       <button
         type="button"
-        onPointerDown={(e) => e.stopPropagation()}
+        disabled={disabled}
         onClick={(e) => {
           e.stopPropagation();
           onSelect();
-          if (!disabled) onChange(wrap(value - 1));
+          onChange(wrap(value - 1));
         }}
-        className={`w-[96px] h-[34px] rounded-b-[10px] bg-black border border-t-0 text-[12px] tracking-widest font-bold active:scale-[0.96] transition-all flex items-center justify-center gap-1 cursor-pointer z-30 ${
-          isSelected
-            ? "border-[#ffcc00] text-[#ffcc00] bg-[#1a1a00] shadow-[0_0_12px_rgba(255,204,0,0.3)]"
-            : "border-[#ffcc00]/30 text-[#ffcc00]/70 hover:text-[#ffcc00] hover:border-[#ffcc00]"
+        className="w-full py-1 text-[#ffcc00]/60 hover:text-[#ffcc00] hover:bg-[#ffcc00]/10 flex items-center justify-center transition border-t border-[#ffcc00]/20 active:scale-95 disabled:opacity-20"
+        title={`Decrement ${label} (-1)`}
+      >
+        <svg className="w-4 h-4 fill-current" viewBox="0 0 20 20">
+          <path d="M10 15l-6-7h12z" />
+        </svg>
+      </button>
+
+      {/* Unit Label */}
+      <span
+        className={`mt-1.5 text-[11px] font-bold tracking-widest ${
+          isSelected ? "text-[#ffcc00]" : "text-neutral-500"
         }`}
       >
-        ▼ <span className="opacity-80 font-mono">{pad(vMinus1)}</span>
-      </button>
+        {label}
+      </span>
     </div>
   );
 }
 
 const WEEK_DAYS = [
-  { short: "S", full: "Sun", day: 0 },
-  { short: "M", full: "Mon", day: 1 },
-  { short: "T", full: "Tue", day: 2 },
-  { short: "W", full: "Wed", day: 3 },
-  { short: "T", full: "Thu", day: 4 },
-  { short: "F", full: "Fri", day: 5 },
-  { short: "S", full: "Sat", day: 6 },
+  { day: 0, label: "S", full: "Sun" },
+  { day: 1, label: "M", full: "Mon" },
+  { day: 2, label: "T", full: "Tue" },
+  { day: 3, label: "W", full: "Wed" },
+  { day: 4, label: "T", full: "Thu" },
+  { day: 5, label: "F", full: "Fri" },
+  { day: 6, label: "S", full: "Sat" },
 ];
 
 export function SamsungTimePicker({
   mode,
+  isOpen = true,
   initialHours = 0,
-  initialMinutes = 5,
+  initialMinutes = 0,
   initialSeconds = 0,
   initialDays = [0, 1, 2, 3, 4, 5, 6],
+  initialValues,
   initialFocus = "minutes",
   onSave,
+  onConfirm,
   onCancel,
 }: SamsungTimePickerProps) {
-  const [hours, setHours] = useState<number>(initialHours);
-  const [minutes, setMinutes] = useState<number>(initialMinutes);
-  const [seconds, setSeconds] = useState<number>(initialSeconds);
-  const [selectedDays, setSelectedDays] = useState<number[]>(
-    initialDays && initialDays.length > 0 ? initialDays : [0, 1, 2, 3, 4, 5, 6]
-  );
+  // If explicitly closed, do not render backdrop
+  if (isOpen === false) {
+    return null;
+  }
+
+  const effectiveHours = initialValues?.hours ?? initialHours;
+  const effectiveMinutes = initialValues?.minutes ?? initialMinutes;
+  const effectiveSeconds = initialValues?.seconds ?? initialSeconds;
+  const effectiveDays = initialValues?.days ?? initialDays;
+
+  const [hours, setHours] = useState(effectiveHours);
+  const [minutes, setMinutes] = useState(effectiveMinutes);
+  const [seconds, setSeconds] = useState(mode === "alarm" ? 0 : effectiveSeconds);
   const [activeUnit, setActiveUnit] = useState<"hours" | "minutes" | "seconds">(initialFocus);
+  const [selectedDays, setSelectedDays] = useState<number[]>(effectiveDays);
+
+  useEffect(() => {
+    setHours(effectiveHours);
+    setMinutes(effectiveMinutes);
+    setSeconds(mode === "alarm" ? 0 : effectiveSeconds);
+    setSelectedDays(effectiveDays);
+  }, [effectiveHours, effectiveMinutes, effectiveSeconds, effectiveDays, mode]);
 
   const toggleDay = (day: number) => {
     setSelectedDays((prev) => {
       if (prev.includes(day)) {
-        if (prev.length === 1) return prev;
+        if (prev.length === 1) return prev; // At least one active day
         return prev.filter((d) => d !== day);
-      } else {
-        return [...prev, day].sort((a, b) => a - b);
       }
+      return [...prev, day].sort((a, b) => a - b);
     });
   };
 
-  const setEveryDay = () => setSelectedDays([0, 1, 2, 3, 4, 5, 6]);
-  const setWeekdays = () => setSelectedDays([1, 2, 3, 4, 5]);
-  const setWeekends = () => setSelectedDays([0, 6]);
-
-  const handleConfirm = useCallback(() => {
-    const total = hours * 3600 + minutes * 60 + (mode === "alarm" ? 0 : seconds);
-    onSave({
+  const handleSave = () => {
+    const totalSec = hours * 3600 + minutes * 60 + seconds;
+    const result: SamsungTimePickerValues = {
       hours,
       minutes,
-      seconds: mode === "alarm" ? 0 : seconds,
-      totalSeconds: total,
+      seconds,
+      totalSeconds: totalSec,
       days: mode === "alarm" ? selectedDays : undefined,
-    });
-  }, [hours, minutes, seconds, mode, selectedDays, onSave]);
+    };
+    if (onConfirm) onConfirm(result);
+    if (onSave) onSave(result);
+  };
 
   const getDaysSummary = () => {
     if (selectedDays.length === 7) return "EVERY DAY";
@@ -384,60 +391,33 @@ export function SamsungTimePicker({
             onSelect={() => setActiveUnit("minutes")}
             onChange={setMinutes}
           />
-          <DrumColumn
-            unit="seconds"
-            value={seconds}
-            max={59}
-            label="SECS"
-            disabled={mode === "alarm"}
-            isSelected={activeUnit === "seconds"}
-            onSelect={() => setActiveUnit("seconds")}
-            onChange={setSeconds}
-          />
+          {mode === "timer" && (
+            <DrumColumn
+              unit="seconds"
+              value={seconds}
+              max={59}
+              label="SECS"
+              isSelected={activeUnit === "seconds"}
+              onSelect={() => setActiveUnit("seconds")}
+              onChange={setSeconds}
+            />
+          )}
         </div>
 
-        {/* Samsung One UI Weekly Day Selector (Alarms Only) */}
+        {/* Weekly Day Selector for Alarms */}
         {mode === "alarm" && (
-          <div className="mt-4 pt-3 border-t border-[#ffcc00]/30 flex flex-col items-center gap-2.5">
-            {/* Quick Preset Buttons */}
-            <div className="flex items-center gap-1.5 w-full justify-between">
-              <button
-                type="button"
-                onClick={setEveryDay}
-                className={`flex-1 py-1 px-1 rounded text-[10px] font-bold tracking-wider border transition-all ${
-                  selectedDays.length === 7
-                    ? "bg-[#ffcc00] text-black border-[#ffcc00] shadow-[0_0_8px_rgba(255,204,0,0.4)]"
-                    : "border-[#ffcc00]/40 text-[#ffcc00]/70 hover:border-[#ffcc00] hover:text-[#ffcc00]"
-                }`}
-              >
-                EVERY DAY
-              </button>
-              <button
-                type="button"
-                onClick={setWeekdays}
-                className={`flex-1 py-1 px-1 rounded text-[10px] font-bold tracking-wider border transition-all ${
-                  selectedDays.length === 5 && [1, 2, 3, 4, 5].every((d) => selectedDays.includes(d))
-                    ? "bg-[#ffcc00] text-black border-[#ffcc00] shadow-[0_0_8px_rgba(255,204,0,0.4)]"
-                    : "border-[#ffcc00]/40 text-[#ffcc00]/70 hover:border-[#ffcc00] hover:text-[#ffcc00]"
-                }`}
-              >
-                WEEKDAYS
-              </button>
-              <button
-                type="button"
-                onClick={setWeekends}
-                className={`flex-1 py-1 px-1 rounded text-[10px] font-bold tracking-wider border transition-all ${
-                  selectedDays.length === 2 && selectedDays.includes(0) && selectedDays.includes(6)
-                    ? "bg-[#ffcc00] text-black border-[#ffcc00] shadow-[0_0_8px_rgba(255,204,0,0.4)]"
-                    : "border-[#ffcc00]/40 text-[#ffcc00]/70 hover:border-[#ffcc00] hover:text-[#ffcc00]"
-                }`}
-              >
-                WEEKENDS
-              </button>
+          <div className="mt-5 border-t border-[#ffcc00]/25 pt-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[10px] tracking-widest text-[#ffcc00]/80 font-bold uppercase">
+                REPEATING DAYS:
+              </span>
+              <span className="text-[10px] tracking-wider text-[#ffcc00] font-black">
+                {getDaysSummary()}
+              </span>
             </div>
 
-            {/* Sunday-first Circular Tactile Day Chips */}
-            <div className="flex items-center justify-between w-full px-1">
+            {/* Sunday-first S M T W T F S buttons */}
+            <div className="flex justify-between items-center gap-1.5 mt-2">
               {WEEK_DAYS.map((w) => {
                 const active = selectedDays.includes(w.day);
                 return (
@@ -445,41 +425,60 @@ export function SamsungTimePicker({
                     key={w.day}
                     type="button"
                     onClick={() => toggleDay(w.day)}
-                    className={`w-9 h-9 rounded-full flex flex-col items-center justify-center font-mono font-black text-xs transition-all active:scale-95 cursor-pointer ${
+                    className={`flex-1 h-9 rounded-full text-xs font-black transition flex items-center justify-center border ${
                       active
-                        ? "bg-[#ffcc00] text-black border-2 border-[#ffcc00] shadow-[0_0_12px_rgba(255,204,0,0.5)] scale-105"
-                        : "bg-black/60 text-[#ffcc00]/50 border border-[#ffcc00]/30 hover:border-[#ffcc00] hover:text-[#ffcc00]"
+                        ? "bg-[#ffcc00] text-black border-[#ffcc00] shadow-[0_0_12px_rgba(255,204,0,0.5)] scale-105"
+                        : "bg-black/60 text-[#ffcc00]/40 border-[#ffcc00]/20 hover:border-[#ffcc00]/60 hover:text-[#ffcc00]"
                     }`}
-                    title={`${w.full} (Tap to toggle)`}
                   >
-                    <span>{w.short}</span>
+                    {w.label}
                   </button>
                 );
               })}
             </div>
 
-            {/* Recurrence Status Readout */}
-            <div className="text-[10px] font-mono tracking-widest text-[#ffcc00]/80 text-center uppercase">
-              REPEATS: <span className="text-[#ffcc00] font-bold">{getDaysSummary()}</span>
+            {/* Quick-Select Presets */}
+            <div className="flex justify-center gap-2 mt-3 text-[9px] font-bold">
+              <button
+                type="button"
+                onClick={() => setSelectedDays([0, 1, 2, 3, 4, 5, 6])}
+                className="px-2 py-0.5 border border-[#ffcc00]/30 text-[#ffcc00]/80 hover:bg-[#ffcc00]/15"
+              >
+                ALL
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedDays([1, 2, 3, 4, 5])}
+                className="px-2 py-0.5 border border-[#ffcc00]/30 text-[#ffcc00]/80 hover:bg-[#ffcc00]/15"
+              >
+                MON–FRI
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedDays([0, 6])}
+                className="px-2 py-0.5 border border-[#ffcc00]/30 text-[#ffcc00]/80 hover:bg-[#ffcc00]/15"
+              >
+                SAT–SUN
+              </button>
             </div>
           </div>
         )}
 
-        {/* Modal Actions */}
-        <div className="grid grid-cols-2 gap-3 mt-4">
-          <button
-            type="button"
-            onClick={handleConfirm}
-            className="bg-[#ffcc00] text-black font-black text-[15px] tracking-widest min-h-[44px] rounded-[8px] hover:bg-[#ffcc00]/80 active:scale-[0.98] transition-all shadow-[0_0_20px_rgba(255,204,0,0.3)] cursor-pointer"
-          >
-            CONFIRM
-          </button>
+        {/* Action Controls */}
+        <div className="mt-5 pt-3 border-t border-[#ffcc00]/30 flex gap-3">
           <button
             type="button"
             onClick={onCancel}
-            className="bg-black border border-[#ffcc00] text-[#ffcc00] font-black text-[15px] tracking-widest min-h-[44px] rounded-[8px] hover:bg-[#1a1a00] active:scale-[0.98] transition-all cursor-pointer"
+            className="flex-1 py-2.5 border border-[#ffcc00]/50 text-[#ffcc00]/80 hover:bg-[#ffcc00]/10 font-bold tracking-widest text-xs rounded transition"
           >
             CANCEL
+          </button>
+          <button
+            type="button"
+            onClick={handleSave}
+            className="flex-1 py-2.5 bg-[#ffcc00] text-black hover:bg-[#ffe066] font-black tracking-widest text-xs rounded shadow-[0_0_20px_rgba(255,204,0,0.4)] transition"
+          >
+            CONFIRM
           </button>
         </div>
       </div>
