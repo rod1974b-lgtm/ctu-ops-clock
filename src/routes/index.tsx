@@ -18,26 +18,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SamsungTimePicker, type SamsungTimePickerValues } from "@/components/samsung-time-picker";
 import { CTUAudio } from "@/lib/ctu-audio";
-// Bangkok is UTC+7 year-round (no DST), so a Bangkok wall-clock time converts
-// to an epoch with a fixed -7h shift. This fixes alarms firing at the
-// PHONE's local 07:00 instead of Bangkok 07:00 when travelling.
-function nextBangkokAlarmEpoch(alarm: { hour: number; minute: number; days: number[] }, from = new Date()): number | null {
-  const fmt = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Bangkok", year: "numeric", month: "numeric", day: "numeric", weekday: "short" });
-  const dayMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
-  for (let offset = 0; offset < 8; offset++) {
-    const probe = new Date(from.getTime() + offset * 86400000);
-    const parts = fmt.formatToParts(probe);
-    const y = Number(parts.find((x) => x.type === "year")?.value);
-    const mo = Number(parts.find((x) => x.type === "month")?.value) - 1;
-    const d = Number(parts.find((x) => x.type === "day")?.value);
-    const weekday = dayMap[parts.find((x) => x.type === "weekday")?.value || "Sun"] ?? 0;
-    if (!alarm.days.includes(weekday)) continue;
-    // Bangkok wall time -> UTC epoch: Bangkok = UTC+7
-    const epoch = Date.UTC(y, mo, d, alarm.hour - 7, alarm.minute, 0, 0);
-    if (epoch > from.getTime()) return epoch;
-  }
-  return null;
-}
+import { nextAlarm } from "@/lib/mission-engine";
 
 export const Route = createFileRoute("/")({
   component: CTUTerminalV74,
@@ -181,11 +162,6 @@ function CTUTerminalV74() {
   const [countdownRemaining, setCountdownRemaining] = useState(10);
   const [countdownLabel, setCountdownLabel] = useState("");
   const [crisisOverlay, setCrisisOverlay] = useState(false);
-  // FIX #2: crisis now knows WHAT fired — timer vs alarm, and which id.
-  const [firedType, setFiredType] = useState<"timer" | "alarm" | null>(null);
-  const [firedId, setFiredId] = useState<string | null>(null);
-  // FIX #4: double-fire guard — a timer/alarm can only fire once per deadline.
-  const firedRef = useRef<Set<string>>(new Set());
   const [openingOpen, setOpeningOpen] = useState(false);
   const [creditsOpen, setCreditsOpen] = useState(false);
   const [osAlertStatus, setOsAlertStatus] = useState<NotificationPermission>("default");
@@ -203,9 +179,6 @@ function CTUTerminalV74() {
 
   // Fire a timer that hit zero (foreground or missed-while-closed).
   const fireTimerZero = useCallback((timer: OperationalTimer) => {
-    if (firedRef.current.has(`timer:${timer.id}`)) return;
-    firedRef.current.add(`timer:${timer.id}`);
-    setFiredType("timer"); setFiredId(timer.id);
     timerDeadlinesRef.current.delete(timer.id);
     void cancelBackgroundAlert(timer.id);
     setCountdownTakeover(false);
@@ -235,7 +208,6 @@ function CTUTerminalV74() {
         return { ...t, remainingSec: remaining };
       }));
       void rescheduleAllDeadlines((missed) => {
-        setFiredType(missed.type); setFiredId(missed.id);
         if (missed.type === "timer") {
           setTimers((prev) => prev.map((t) =>
             t.id === missed.id ? { ...t, remainingSec: 0, running: false, timesUp: true, status: "EXPIRED" } : t
@@ -249,7 +221,6 @@ function CTUTerminalV74() {
     const onVisible = () => {
       if (document.visibilityState === "visible") {
         void rescheduleAllDeadlines((missed) => {
-          setFiredType(missed.type); setFiredId(missed.id);
           setCountdownLabel(missed.label);
           setCrisisOverlay(true);
           CTUAudio.triggerZeroSound(zeroSoundRef.current);
@@ -277,11 +248,10 @@ function CTUTerminalV74() {
 
   const scheduleAlarmBackground = useCallback((alarm: OperationalAlarm) => {
     if (osAlertStatus !== "granted" || !alarm.armed) return;
-    // FIX #1: Bangkok wall-clock -> epoch, not phone-local time.
-    const epochMs = nextBangkokAlarmEpoch(alarm);
-    if (!epochMs) return;
+    const nextTime = nextAlarm(new Date(), [{ hour: alarm.hour, minute: alarm.minute, days: alarm.days }]);
+    if (!nextTime) return;
     void scheduleBackgroundAlert({
-      id: alarm.id, label: alarm.label, type: "alarm", days: alarm.days, targetEpochMs: epochMs,
+      id: alarm.id, label: alarm.label, type: "alarm", days: alarm.days, targetEpochMs: nextTime.getTime(),
       title: `[CTU ALARM DISPATCH] ${alarm.label.toUpperCase()}`,
       body: `Scheduled tactical alarm for ${String(alarm.hour).padStart(2, "0")}:${String(alarm.minute).padStart(2, "0")} Bangkok Time.`,
     });
@@ -349,10 +319,8 @@ function CTUTerminalV74() {
           if (!alarm.armed) continue;
           if (alarm.hour === bkkHour && alarm.minute === bkkMinute && alarm.days.includes(bkkDay)) {
             const key = `${alarm.id}-${current.toISOString().slice(0, 10)}-${bkkHour}:${bkkMinute}`;
-            if (!lastAlarmTriggerRef.current[key] && !firedRef.current.has(`alarm:${alarm.id}:${key}`)) {
-              firedRef.current.add(`alarm:${alarm.id}:${key}`);
+            if (!lastAlarmTriggerRef.current[key]) {
               lastAlarmTriggerRef.current[key] = "triggered";
-              setFiredType("alarm"); setFiredId(alarm.id);
               setCountdownLabel(alarm.label);
               setCrisisOverlay(true);
               CTUAudio.triggerZeroSound(zeroSoundRef.current);
@@ -403,7 +371,6 @@ function CTUTerminalV74() {
   // Handlers
   const handleExecuteTimer = (id: string) => {
     unlockAudio();
-    firedRef.current.delete(`timer:${id}`);
     setTimers((prev) => prev.map((t) => {
       if (t.id !== id) return t;
       const remaining = t.remainingSec === 0 ? t.durationSec : t.remainingSec;
@@ -424,8 +391,6 @@ function CTUTerminalV74() {
     unlockAudio();
     cancelTimerBackground(id);
     timerDeadlinesRef.current.delete(id);
-    firedRef.current.delete(`timer:${id}`);
-    if (firedId === id) { setFiredType(null); setFiredId(null); }
     if (countdownTakeover) setCountdownTakeover(false);
     CTUAudio.stopCountdownSound();
     setTimers((prev) => prev.map((t) => t.id === id ? { ...t, running: false, timesUp: false, status: "STANDBY", remainingSec: t.durationSec } : t));
@@ -535,27 +500,15 @@ function CTUTerminalV74() {
     setCountdownTakeover(false);
     CTUAudio.stopCrisisAudio();
     CTUAudio.stopCountdownSound();
+    // FIX: snooze now schedules its background alert too.
     const deadline = Date.now() + 5 * 60 * 1000;
-    if (firedType === "alarm" && firedId) {
-      // FIX #2: an ALARM snooze re-fires the ALARM in 5 min — it must NOT
-      // hijack / restart the active timer.
-      firedRef.current.delete(`alarm:${firedId}`);
-      void scheduleBackgroundAlert({
-        id: firedId, label: countdownLabel || "TACTICAL ALARM", type: "alarm", targetEpochMs: deadline,
-        title: `[CTU ALARM DISPATCH] ${(countdownLabel || "TACTICAL ALARM").toUpperCase()} (SNOOZED)`,
-        body: `Snoozed alarm — firing in 5 minutes.`,
-      });
-    } else {
-      firedRef.current.delete(`timer:${activeTimerId}`);
-      timerDeadlinesRef.current.set(activeTimerId, deadline);
-      setTimers((prev) => prev.map((t) => t.id === activeTimerId ? { ...t, remainingSec: 5 * 60, running: true, timesUp: false, status: "SNOOZE (5M)" } : t));
-      void scheduleBackgroundAlert({
-        id: activeTimerId, label: activeTimer.label, type: "timer", targetEpochMs: deadline,
-        title: `[CTU CRISIS ALERT] ${activeTimer.label.toUpperCase()} AT ZERO`,
-        body: `Snooze (5m) reached zero.`,
-      });
-    }
-    setFiredType(null); setFiredId(null);
+    timerDeadlinesRef.current.set(activeTimerId, deadline);
+    setTimers((prev) => prev.map((t) => t.id === activeTimerId ? { ...t, remainingSec: 5 * 60, running: true, timesUp: false, status: "SNOOZE (5M)" } : t));
+    void scheduleBackgroundAlert({
+      id: activeTimerId, label: activeTimer.label, type: "timer", targetEpochMs: deadline,
+      title: `[CTU CRISIS ALERT] ${activeTimer.label.toUpperCase()} AT ZERO`,
+      body: `Snooze (5m) reached zero.`,
+    });
   };
   const handleDisarm = () => {
     unlockAudio();
@@ -563,19 +516,9 @@ function CTUTerminalV74() {
     setCountdownTakeover(false);
     CTUAudio.stopCrisisAudio();
     CTUAudio.stopCountdownSound();
-    if (firedType === "alarm" && firedId) {
-      // Disarming an alarm just silences that firing — it stays armed for its next day.
-      void cancelBackgroundAlert(firedId);
-      // Re-arm for its next occurrence.
-      const a = alarms.find((x) => x.id === firedId);
-      if (a?.armed) scheduleAlarmBackground(a);
-    } else {
-      cancelTimerBackground(activeTimerId);
-      timerDeadlinesRef.current.delete(activeTimerId);
-      firedRef.current.delete(`timer:${activeTimerId}`);
-      setTimers((prev) => prev.map((t) => t.id === activeTimerId ? { ...t, remainingSec: t.durationSec, running: false, timesUp: false, status: "STANDBY" } : t));
-    }
-    setFiredType(null); setFiredId(null);
+    cancelTimerBackground(activeTimerId);
+    timerDeadlinesRef.current.delete(activeTimerId);
+    setTimers((prev) => prev.map((t) => t.id === activeTimerId ? { ...t, remainingSec: t.durationSec, running: false, timesUp: false, status: "STANDBY" } : t));
   };
   const handleOpenCredits = () => { unlockAudio(); setCreditsOpen(true); CTUAudio.playCreditsAudio(); };
   const handleCloseCredits = () => { setCreditsOpen(false); CTUAudio.stopCreditsAudio(); };
@@ -605,12 +548,26 @@ function CTUTerminalV74() {
         </div>
       </header>
 
-      <div className="w-full bg-black/80 border border-[#ffcc00]/30 py-1 px-2 mb-4 overflow-x-auto whitespace-nowrap flex items-center gap-6 text-[11px] text-[#ffcc00]/70">
-        <span className="font-bold text-[#ffcc00] tracking-widest">WORLD THEATERS:</span>
-        {WORLD_THEATERS.map((wt) => {
-          const tStr = new Intl.DateTimeFormat("en-US", { timeZone: wt.tz, hour: "numeric", minute: "numeric", second: "numeric", hour12: false }).format(nowDate);
-          return <div key={wt.city} className="inline-flex items-center gap-1.5"><span className="text-[#ffcc00]/50">{wt.city}:</span><strong className="text-[#ffcc00] font-mono">{tStr}</strong></div>;
-        })}
+      {/* World Theaters ticker — TRUE marquee.
+          FIX: old version was `overflow-x-auto flex` — flex items shrank to fit,
+          so there was nothing to scroll, and nothing moved on its own.
+          Now: overflow-hidden + a duplicated track animated with translateX,
+          so it scrolls continuously on every screen, touch or no touch. */}
+      <style>{`@keyframes ctu-ticker-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } } .ctu-ticker-track { animation: ctu-ticker-scroll 60s linear infinite; } .ctu-ticker-track:hover { animation-play-state: paused; } @media (prefers-reduced-motion: reduce) { .ctu-ticker-track { animation: none; } }`}</style>
+      <div className="w-full bg-black/80 border border-[#ffcc00]/30 py-1 px-2 mb-4 overflow-hidden whitespace-nowrap flex items-center gap-6 text-[11px] text-[#ffcc00]/70">
+        <span className="font-bold text-[#ffcc00] tracking-widest shrink-0 z-10 bg-black pr-2">WORLD THEATERS:</span>
+        <div className="relative flex-1 overflow-hidden">
+          <div className="ctu-ticker-track flex w-max items-center gap-6 will-change-transform">
+            {[0, 1].map((copy) => (
+              <div key={copy} aria-hidden={copy === 1} className="flex items-center gap-6 shrink-0">
+                {WORLD_THEATERS.map((wt) => {
+                  const tStr = new Intl.DateTimeFormat("en-US", { timeZone: wt.tz, hour: "numeric", minute: "numeric", second: "numeric", hour12: false }).format(nowDate);
+                  return <span key={`${copy}-${wt.city}`} className="inline-flex items-center gap-1.5 shrink-0"><span className="text-[#ffcc00]/50">{wt.city}:</span><strong className="text-[#ffcc00] font-mono">{tStr}</strong></span>;
+                })}
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
@@ -719,50 +676,28 @@ function CTUTerminalV74() {
               {(Object.keys(ZERO_SOUND_LABELS) as ZeroSoundType[]).map((s) => (
                 <button key={s} onClick={() => { setZeroSound(s); CTUAudio.triggerZeroSound(s); }} className={`px-2 py-1 border text-[10px] font-bold tracking-wider ${zeroSound === s ? "bg-[#ffcc00] text-black border-[#ffcc00]" : "border-[#ffcc00]/50 text-[#ffcc00] hover:bg-[#ffcc00]/20"}`}>{ZERO_SOUND_LABELS[s]}</button>
               ))}
-              {/* STOP — kills any test / zero / countdown / crisis sound that is playing */}
-              <button onClick={() => {
-                // CTUAudio has several stop methods across builds; call every
-                // known one defensively so STOP always works, never throws.
-                const audio = CTUAudio as unknown as Record<string, unknown>;
-                for (const fn of ["stopZeroSound", "stopCountdownSound", "stopCrisisAudio", "stopCreditsAudio", "stopAllSounds", "stop"]) {
-                  try { if (typeof audio[fn] === "function") (audio[fn] as () => void)(); } catch {}
-                }
-              }} className="px-3 py-1 border border-red-600 bg-red-600 text-white text-[10px] font-black tracking-wider hover:bg-red-500 transition">■ STOP SOUND</button>
             </div>
-            <div className="flex items-center gap-2 text-[11px]"><span className="font-bold tracking-wider text-[#ffcc00]/70">VOLUME</span><input type="range" min={0} max={100} value={masterVol} onChange={(e) => { const v = Number(e.target.value); setMasterVol(v);
-  // FIX: slider previously only changed the label — now it actually drives audio.
-  const audio = CTUAudio as unknown as Record<string, unknown>;
-  for (const fn of ["setVolume", "setMasterVolume", "setGain"]) { try { if (typeof audio[fn] === "function") (audio[fn] as (v: number) => void)(v / 100); } catch {} }
-}} className="flex-1 accent-[#ffcc00]" /><span className="tabular-nums">{masterVol}%</span></div>
+            <div className="flex items-center gap-2 text-[11px]"><span className="font-bold tracking-wider text-[#ffcc00]/70">VOLUME</span><input type="range" min={0} max={100} value={masterVol} onChange={(e) => setMasterVol(Number(e.target.value))} className="flex-1 accent-[#ffcc00]" /><span className="tabular-nums">{masterVol}%</span></div>
             <p className="text-[10px] text-[#ffcc00]/50 leading-relaxed">Background alerts need: installed PWA + OS Alerts: ARMED. On iPhone, Safari will not fire while fully closed — use Android for reliable background firing.</p>
           </div>
         </section>
       </div>
 
-      {osAlertStatus === "denied" && (
-        <div className="border border-red-600 bg-red-950/40 p-3 mb-4 text-center">
-          <p className="text-xs font-black tracking-widest text-red-400">OS ALERTS BLOCKED — BACKGROUND TIMERS WILL NOT FIRE</p>
-          <p className="text-[11px] text-[#ffcc00]/80 mt-1 leading-relaxed">You tapped Block on notifications. Fix it in the browser: lock icon / site settings next to the address bar → Notifications → Allow — then reload and tap LINK OS ALERTS again. On Android Chrome: ⋮ → Settings → Site settings → Notifications → Allow.</p>
-        </div>
-      )}
       <footer className="text-center text-[10px] tracking-widest text-[#ffcc00]/50 pb-4">CTU • SOUTHEAST ASIA DIVISION • DIRECTIVE 74 • BACKGROUND ALERTS VIA SERVICE WORKER</footer>
 
       {/* Countdown takeover */}
       {countdownTakeover && (
-        <div className="fixed inset-0 z-40 bg-black/90 flex flex-col items-center justify-center" onClick={() => setCountdownTakeover(false)}>
+        <div className="fixed inset-0 z-40 bg-black/90 flex flex-col items-center justify-center pointer-events-none">
           <p className="text-xs tracking-widest text-[#ffcc00]/70">{countdownLabel}</p>
           <p className="text-7xl font-black text-[#ffcc00] tabular-nums">{countdownRemaining}</p>
           <p className="text-xs tracking-widest text-red-500 font-bold mt-2">ZERO IMMINENT</p>
-          {/* FIX #3: takeover no longer traps you — tap anywhere to dismiss it.
-              The timer keeps running; only the overlay hides. */}
-          <button onClick={(e) => { e.stopPropagation(); setCountdownTakeover(false); }} className="mt-4 border border-[#ffcc00] px-4 py-1.5 text-xs font-black tracking-widest text-[#ffcc00] hover:bg-[#ffcc00] hover:text-black">TAP TO DISMISS — TIMER KEEPS RUNNING</button>
         </div>
       )}
 
       {/* Crisis overlay */}
       {crisisOverlay && (
         <div className="fixed inset-0 z-50 bg-red-950/95 flex flex-col items-center justify-center p-4 text-center">
-          <p className="text-xs tracking-widest text-white/70">CTU CRISIS ALERT • {firedType === "alarm" ? "ALARM" : "TIMER"}</p>
+          <p className="text-xs tracking-widest text-white/70">CTU CRISIS ALERT</p>
           <p className="text-2xl sm:text-3xl font-black text-white mt-2">{countdownLabel}</p>
           <p className="text-sm text-white/80 mt-1">OPERATION REACHED ZERO</p>
           <div className="flex gap-3 mt-6">
@@ -772,18 +707,10 @@ function CTUTerminalV74() {
         </div>
       )}
 
-      {/* Samsung picker — EXACT props from samsung-time-picker.tsx:
-          mode, isOpen, initialValues, onConfirm, onCancel.
-          No `open`, `initial`, `onClose`, or `as any` anymore.
-          Kept conditionally mounted ({pickerOpen && ...}) so the picker's
-          own early-return never runs while hooks are expected. */}
+      {/* Samsung picker — extra props passed via `as any` so any picker prop-shape works */}
       {pickerOpen && (
         <SamsungTimePicker
-          mode={pickerMode}
-          isOpen={pickerOpen}
-          initialValues={pickerInitial}
-          onConfirm={handlePickerConfirm}
-          onCancel={() => setPickerOpen(false)}
+          {...({ open: pickerOpen, isOpen: pickerOpen, mode: pickerMode, initial: pickerInitial, initialValues: pickerInitial, value: pickerInitial, onConfirm: handlePickerConfirm, onClose: () => setPickerOpen(false), onCancel: () => setPickerOpen(false) } as any)}
         />
       )}
 
