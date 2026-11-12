@@ -58,8 +58,8 @@ interface StoredDeadline {
 
 const INITIAL_TIMERS: OperationalTimer[] = [
   {
-    id: "timer-1",
-    label: "TACTICAL SPRINT",
+    id: "timer-alpha",
+    label: "ALPHA: RECON INSERTION",
     durationSec: 25 * 60,
     remainingSec: 25 * 60,
     running: false,
@@ -67,17 +67,8 @@ const INITIAL_TIMERS: OperationalTimer[] = [
     status: "STANDBY",
   },
   {
-    id: "timer-2",
-    label: "FIELD INTERROGATION",
-    durationSec: 15 * 60,
-    remainingSec: 15 * 60,
-    running: false,
-    timesUp: false,
-    status: "STANDBY",
-  },
-  {
-    id: "timer-3",
-    label: "SATELLITE RECON PASS",
+    id: "timer-bravo",
+    label: "BRAVO: SATELLITE PASS",
     durationSec: 45 * 60,
     remainingSec: 45 * 60,
     running: false,
@@ -88,118 +79,78 @@ const INITIAL_TIMERS: OperationalTimer[] = [
 
 const INITIAL_ALARMS: OperationalAlarm[] = [
   {
-    id: "alarm-1",
-    label: "DAILY BRIEFING",
-    hour: 8,
+    id: "alarm-briefing",
+    label: "MANDATORY BRIEFING",
+    hour: 7,
     minute: 0,
     days: [1, 2, 3, 4, 5],
     armed: true,
   },
   {
-    id: "alarm-2",
-    label: "PERIMETER DEFENSE SWEEP",
-    hour: 20,
+    id: "alarm-shift",
+    label: "SHIFT COMMENCEMENT",
+    hour: 14,
     minute: 30,
     days: [0, 1, 2, 3, 4, 5, 6],
-    armed: false,
+    armed: true,
   },
 ];
 
-const CTU_PRESETS = [
-  { label: "FIELD STAND-DOWN", sec: 5 * 60 },
-  { label: "INTERROGATION", sec: 15 * 60 },
-  { label: "TACTICAL SPRINT", sec: 25 * 60 },
-  { label: "SATELLITE PASS", sec: 45 * 60 },
-  { label: "PERIMETER LOCK", sec: 60 * 60 },
+const QUICK_PRESETS = [
+  { label: "STAND-DOWN", seconds: 5 * 60 },
+  { label: "INTERROGATE", seconds: 15 * 60 },
+  { label: "SPRINT", seconds: 25 * 60 },
+  { label: "SATELLITE", seconds: 45 * 60 },
 ];
 
-const WEEK_DAYS = [
-  { day: 0, short: "S", name: "Sun" },
-  { day: 1, short: "M", name: "Mon" },
-  { day: 2, short: "T", name: "Tue" },
-  { day: 3, short: "W", name: "Wed" },
-  { day: 4, short: "T", name: "Thu" },
-  { day: 5, short: "F", name: "Fri" },
-  { day: 6, short: "S", name: "Sat" },
-];
-
-function formatDaysSummary(days: number[]): string {
-  if (!days || days.length === 0) return "ONCE";
-  if (days.length === 7) return "EVERY DAY";
-  const sorted = [...days].sort((a, b) => a - b);
-  const isWeekdays = sorted.length === 5 && sorted.every((d, i) => d === i + 1);
-  if (isWeekdays) return "WEEKDAYS";
-  const isWeekends = sorted.length === 2 && sorted.includes(0) && sorted.includes(6);
-  if (isWeekends) return "WEEKENDS";
-  const map: Record<number, string> = { 0: "Sun", 1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri", 6: "Sat" };
-  return sorted.map((d) => map[d]).join(", ");
-}
-
-const GLOBAL_THEATERS = [
-  { code: "LAX", city: "LOS ANGELES (CTU HQ)", zone: "America/Los_Angeles" },
-  { code: "WAS", city: "WASHINGTON D.C.", zone: "America/New_York" },
-  { code: "NYC", city: "NEW YORK", zone: "America/New_York" },
-  { code: "SAO", city: "SÃO PAULO", zone: "America/Sao_Paulo" },
-  { code: "UTC", city: "ZULU HQ", zone: "UTC" },
-  { code: "LON", city: "LONDON (MI6)", zone: "Europe/London" },
-  { code: "PAR", city: "PARIS", zone: "Europe/Paris" },
-  { code: "BER", city: "BERLIN", zone: "Europe/Berlin" },
-  { code: "CAI", city: "CAIRO", zone: "Africa/Cairo" },
-  { code: "MOW", city: "MOSCOW", zone: "Europe/Moscow" },
-  { code: "DXB", city: "DUBAI", zone: "Asia/Dubai" },
-  { code: "BKK", city: "BANGKOK [ACTIVE]", zone: "Asia/Bangkok", isHome: true },
-  { code: "SIN", city: "SINGAPORE", zone: "Asia/Singapore" },
-  { code: "HKG", city: "HONG KONG", zone: "Asia/Hong_Kong" },
-  { code: "TYO", city: "TOKYO", zone: "Asia/Tokyo" },
-  { code: "SYD", city: "SYDNEY", zone: "Australia/Sydney" },
-  { code: "AKL", city: "AUCKLAND", zone: "Pacific/Auckland" },
-  { code: "HNL", city: "HONOLULU", zone: "Pacific/Honolulu" },
-];
-
-const WATERCOLOR_IMAGES = [
-  "/24_accurate_watercolors_final/image_20260922_210052.webp",
-  "/24_accurate_watercolors_final/image_20260922_210055.webp",
-  "/24_accurate_watercolors_final/image_20260922_210058.webp",
-  "/24_accurate_watercolors_final/image_20260922_210101.webp",
-  "/24_accurate_watercolors_final/image_20260922_210104.webp",
-  "/24_accurate_watercolors_final/image_20260922_210107.webp",
-  "/24_accurate_watercolors_final/image_20260922_210110.webp",
-  "/24_accurate_watercolors_final/image_20260922_210113.webp",
-  "/24_accurate_watercolors_final/image_20260922_210116.webp",
-  "/24_accurate_watercolors_final/image_20260922_210119.webp",
-  "/24_accurate_watercolors_final/image_20260922_210122.webp",
-  "/24_accurate_watercolors_final/image_20260922_210125.webp",
-];
-
-const SURVEILLANCE_CHANNELS = [
-  { id: "FEED-ALPHA", name: "CTU LOS ANGELES PERIMETER", status: "FEED LIVE", type: "grid" },
-  { id: "FEED-BRAVO", name: "BANGKOK SECTOR 4 COVERT", status: "ENCRYPTED", type: "scan" },
-  { id: "FEED-CHARLIE", name: "SATELLITE THERMAL OVERLAY", status: "TELEMETRY", type: "thermal" },
-  { id: "FEED-DELTA", name: "TACTICAL SECURE ARCHIVE", status: "STANDBY", type: "archive" },
+const WORLD_THEATERS = [
+  { city: "HONOLULU", tz: "Pacific/Honolulu" },
+  { city: "LOS ANGELES", tz: "America/Los_Angeles" },
+  { city: "WASHINGTON DC", tz: "America/New_York" },
+  { city: "LONDON (ZULU)", tz: "UTC" },
+  { city: "BERLIN", tz: "Europe/Berlin" },
+  { city: "CAIRO", tz: "Africa/Cairo" },
+  { city: "MOSCOW", tz: "Europe/Moscow" },
+  { city: "DUBAI", tz: "Asia/Dubai" },
+  { city: "BANGKOK HQ", tz: "Asia/Bangkok" },
+  { city: "TOKYO", tz: "Asia/Tokyo" },
+  { city: "SYDNEY", tz: "Australia/Sydney" },
 ];
 
 function CTUTerminalV74() {
-  const [nowDate, setNowDate] = useState<Date | null>(null);
+  const [mounted, setMounted] = useState(false);
+
+  // Time & Bangkok Clock
+  const [nowDate, setNowDate] = useState<Date>(() => new Date());
   const [colonVisible, setColonVisible] = useState(true);
 
-  // Audio & Media State
-  const [masterVol, setMasterVol] = useState<number>(0.85);
+  // Audio & Master Volume
+  const [audioUnlocked, setAudioUnlocked] = useState(false);
+  const [masterVol, setMasterVol] = useState(85);
   const [zeroSound, setZeroSound] = useState<ZeroSoundType>("voice");
-  const [creditsMusic, setCreditsMusic] = useState<boolean>(true);
-  const [creditsMode, setCreditsMode] = useState<"watercolor" | "video">("watercolor");
 
   // Operational Queues
-  const [timers, setTimers] = useState<OperationalTimer[]>(INITIAL_TIMERS);
-  const [alarms, setAlarms] = useState<OperationalAlarm[]>(INITIAL_ALARMS);
-  const [activeTimerId, setActiveTimerId] = useState<string>("timer-1");
+  const [timers, setTimers] = useState<OperationalTimer[]>(() => {
+    if (typeof window === "undefined") return INITIAL_TIMERS;
+    try {
+      const saved = localStorage.getItem("ctu_timers_v74");
+      return saved ? JSON.parse(saved) : INITIAL_TIMERS;
+    } catch {
+      return INITIAL_TIMERS;
+    }
+  });
 
-  // OS Background Notifications State
-  const [osAlertStatus, setOsAlertStatus] = useState<NotificationPermission>("default");
+  const [alarms, setAlarms] = useState<OperationalAlarm[]>(() => {
+    if (typeof window === "undefined") return INITIAL_ALARMS;
+    try {
+      const saved = localStorage.getItem("ctu_alarms_v74");
+      return saved ? JSON.parse(saved) : INITIAL_ALARMS;
+    } catch {
+      return INITIAL_ALARMS;
+    }
+  });
 
-  // Modals & Panels
-  const [openingOpen, setOpeningOpen] = useState(false);
-  const [creditsOpen, setCreditsOpen] = useState(false);
-  const [creditsImageOffset, setCreditsImageOffset] = useState(0);
+  const [activeTimerId, setActiveTimerId] = useState<string>("timer-alpha");
 
   // Unified Samsung HH:MM:SS Time Picker
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -213,157 +164,154 @@ function CTUTerminalV74() {
     totalSeconds: 25 * 60,
   });
 
-  // Fullscreen Countdown / Crisis Takeover State
-  const [countdownActive, setCountdownActive] = useState(false);
+  // Countdown & Crisis Takeover Protocol
+  const [countdownTakeover, setCountdownTakeover] = useState(false);
   const [countdownRemaining, setCountdownRemaining] = useState(10);
   const [countdownLabel, setCountdownLabel] = useState("");
-  const [crisisTimesUp, setCrisisTimesUp] = useState(false);
+  const [crisisOverlay, setCrisisOverlay] = useState(false);
 
-  // Active Sound Staging
-  const countdownAudioRef = useRef<HTMLAudioElement | null>(null);
-  const zeroAudioRef = useRef<HTMLAudioElement | null>(null);
+  // Modals & Media
+  const [openingOpen, setOpeningOpen] = useState(false);
+  const [creditsOpen, setCreditsOpen] = useState(false);
 
-  // Audio Unlock on First Touch
+  // OS Background Notifications
+  const [osAlertStatus, setOsAlertStatus] = useState<NotificationPermission>("default");
+  const lastAlarmTriggerRef = useRef<Record<string, string>>({});
+  const lastCountdownSecondRef = useRef<number | null>(null);
+
+  // Client Mount
+  useEffect(() => {
+    setMounted(true);
+    if (typeof window !== "undefined" && "Notification" in window) {
+      setOsAlertStatus(Notification.permission);
+    }
+  }, []);
+
+  // Unlock Audio on First User Gesture
   const unlockAudio = useCallback(() => {
-    CTUAudio.unlock();
-  }, []);
-
-  // Post message to Service Worker safely
-  const postToWorker = useCallback((message: unknown) => {
-    if (typeof window !== "undefined" && "serviceWorker" in navigator) {
-      if (navigator.serviceWorker.controller) {
-        navigator.serviceWorker.controller.postMessage(message);
-      } else {
-        navigator.serviceWorker.ready.then((registration) => {
-          registration.active?.postMessage(message);
-        });
-      }
+    if (!audioUnlocked) {
+      CTUAudio.unlock();
+      setAudioUnlocked(true);
     }
-  }, []);
+  }, [audioUnlocked]);
 
-  // Save deadline to localStorage for background wake catch-up
-  const saveDeadline = useCallback((item: StoredDeadline) => {
+  // Persist Timers & Alarms
+  useEffect(() => {
+    if (!mounted) return;
     try {
-      const stored = localStorage.getItem("ctu_active_deadlines");
-      const list: StoredDeadline[] = stored ? JSON.parse(stored) : [];
-      const updated = list.filter((x) => x.id !== item.id);
-      updated.push(item);
-      localStorage.setItem("ctu_active_deadlines", JSON.stringify(updated));
-    } catch {
-      // Ignore
-    }
-  }, []);
+      localStorage.setItem("ctu_timers_v74", JSON.stringify(timers));
+    } catch {}
+  }, [timers, mounted]);
 
-  // Remove deadline from localStorage
-  const removeDeadline = useCallback((id: string) => {
+  useEffect(() => {
+    if (!mounted) return;
     try {
-      const stored = localStorage.getItem("ctu_active_deadlines");
-      if (stored) {
-        const list: StoredDeadline[] = JSON.parse(stored);
-        const updated = list.filter((x) => x.id !== id);
-        localStorage.setItem("ctu_active_deadlines", JSON.stringify(updated));
-      }
-    } catch {
-      // Ignore
+      localStorage.setItem("ctu_alarms_v74", JSON.stringify(alarms));
+    } catch {}
+  }, [alarms, mounted]);
+
+  // Service Worker Messaging Helper
+  const postToWorker = useCallback((msg: unknown) => {
+    if (typeof window === "undefined" || !("serviceWorker" in navigator)) return;
+    if (navigator.serviceWorker.controller) {
+      navigator.serviceWorker.controller.postMessage(msg);
+    } else {
+      navigator.serviceWorker.ready.then((reg) => {
+        reg.active?.postMessage(msg);
+      }).catch(() => {});
     }
   }, []);
 
-  // Schedule Timer Alert in Service Worker
+  // Schedule / Cancel Background Alerts
   const scheduleTimerBackground = useCallback(
-    (timerId: string, label: string, remainingSec: number) => {
-      const targetEpoch = Date.now() + remainingSec * 1000;
-      saveDeadline({ id: timerId, label, targetEpochMs: targetEpoch, type: "timer" });
+    (timer: OperationalTimer) => {
+      if (osAlertStatus !== "granted") return;
+      const targetEpochMs = Date.now() + timer.remainingSec * 1000;
       postToWorker({
         type: "SCHEDULE_ALERT",
-        id: timerId,
-        title: `[CTU CRISIS ALERT] ${label.toUpperCase()} AT ZERO`,
-        body: "Operational deadline expired. Tactical override active.",
-        label,
-        delayMs: remainingSec * 1000,
-        epochMs: targetEpoch,
-        targetEpochMs: targetEpoch,
+        id: timer.id,
+        label: timer.label,
+        title: `[CTU CRISIS ALERT] ${timer.label.toUpperCase()} AT ZERO`,
+        body: `Operation reached zero. Return to tactical terminal immediately.`,
+        delayMs: timer.remainingSec * 1000,
+        targetEpochMs,
+        epochMs: targetEpochMs,
       });
+
+      try {
+        const stored: StoredDeadline[] = JSON.parse(localStorage.getItem("ctu_active_deadlines") || "[]");
+        const filtered = stored.filter((s) => s.id !== timer.id);
+        filtered.push({
+          id: timer.id,
+          label: timer.label,
+          targetEpochMs,
+          type: "timer",
+        });
+        localStorage.setItem("ctu_active_deadlines", JSON.stringify(filtered));
+      } catch {}
     },
-    [postToWorker, saveDeadline]
+    [osAlertStatus, postToWorker]
   );
 
-  // Cancel Timer Alert in Service Worker
   const cancelTimerBackground = useCallback(
-    (timerId: string) => {
-      removeDeadline(timerId);
-      postToWorker({ type: "CANCEL_ALERT", id: timerId });
+    (id: string) => {
+      postToWorker({ type: "CANCEL_ALERT", id });
+      try {
+        const stored: StoredDeadline[] = JSON.parse(localStorage.getItem("ctu_active_deadlines") || "[]");
+        localStorage.setItem("ctu_active_deadlines", JSON.stringify(stored.filter((s) => s.id !== id)));
+      } catch {}
     },
-    [postToWorker, removeDeadline]
+    [postToWorker]
   );
 
-  // Schedule Alarm Alert in Service Worker with Weekly Recurrence
   const scheduleAlarmBackground = useCallback(
     (alarm: OperationalAlarm) => {
-      const alarmTimeStr = `${String(alarm.hour).padStart(2, "0")}:${String(alarm.minute).padStart(2, "0")}:00`;
-      const targetEpochMs = nextAlarm(alarmTimeStr, Date.now(), alarm.days);
-      const delayMs = Math.max(0, targetEpochMs - Date.now());
+      if (osAlertStatus !== "granted" || !alarm.armed) return;
+      const now = new Date();
+      const nextTime = nextAlarm(now, [{ hour: alarm.hour, minute: alarm.minute, days: alarm.days }]);
+      if (!nextTime) return;
 
-      saveDeadline({ id: alarm.id, label: alarm.label, targetEpochMs, type: "alarm", days: alarm.days });
+      const delayMs = nextTime.getTime() - now.getTime();
       postToWorker({
         type: "SCHEDULE_ALERT",
         id: alarm.id,
-        title: `[CTU ALARM] ${alarm.label.toUpperCase()}`,
-        body: `Scheduled operation time: ${String(alarm.hour).padStart(2, "0")}:${String(alarm.minute).padStart(2, "0")} BKK (${formatDaysSummary(alarm.days)})`,
         label: alarm.label,
+        title: `[CTU ALARM DISPATCH] ${alarm.label.toUpperCase()}`,
+        body: `Scheduled tactical alarm for ${String(alarm.hour).padStart(2, "0")}:${String(alarm.minute).padStart(2, "0")} Bangkok Time.`,
         delayMs,
-        epochMs: targetEpochMs,
-        targetEpochMs,
-        subtext: `RECURRING (${formatDaysSummary(alarm.days)})`,
+        targetEpochMs: nextTime.getTime(),
+        epochMs: nextTime.getTime(),
       });
-    },
-    [postToWorker, saveDeadline]
-  );
 
-  // Cancel Alarm in Service Worker
-  const cancelAlarmBackground = useCallback(
-    (alarmId: string) => {
-      removeDeadline(alarmId);
-      postToWorker({ type: "CANCEL_ALERT", id: alarmId });
-    },
-    [postToWorker, removeDeadline]
-  );
-
-  // Register Service Worker and check permissions on mount
-  useEffect(() => {
-    if (typeof window !== "undefined" && "serviceWorker" in navigator) {
-      navigator.serviceWorker
-        .register("/sw.js")
-        .then(() => {
-          if ("Notification" in window) {
-            setOsAlertStatus(Notification.permission);
-          }
-        })
-        .catch(() => {
-          // SW registration ignored
-        });
-
-      // Catch-Up: Check if any background deadlines passed while app was shut
       try {
-        const stored = localStorage.getItem("ctu_active_deadlines");
-        if (stored) {
-          const list: StoredDeadline[] = JSON.parse(stored);
-          const now = Date.now();
-          const expired = list.find((item) => item.targetEpochMs <= now);
-          if (expired) {
-            removeDeadline(expired.id);
-            setCountdownLabel(expired.label);
-            setCrisisTimesUp(true);
-            CTUAudio.triggerZeroSound(zeroSound);
-          }
-        }
-      } catch {
-        // Storage unreadable
-      }
-    }
-  }, [removeDeadline, zeroSound]);
+        const stored: StoredDeadline[] = JSON.parse(localStorage.getItem("ctu_active_deadlines") || "[]");
+        const filtered = stored.filter((s) => s.id !== alarm.id);
+        filtered.push({
+          id: alarm.id,
+          label: alarm.label,
+          targetEpochMs: nextTime.getTime(),
+          type: "alarm",
+          days: alarm.days,
+        });
+        localStorage.setItem("ctu_active_deadlines", JSON.stringify(filtered));
+      } catch {}
+    },
+    [osAlertStatus, postToWorker]
+  );
 
-  // Request Notification Permissions
-  const handleRequestOsAlerts = async () => {
+  const cancelAlarmBackground = useCallback(
+    (id: string) => {
+      postToWorker({ type: "CANCEL_ALERT", id });
+      try {
+        const stored: StoredDeadline[] = JSON.parse(localStorage.getItem("ctu_active_deadlines") || "[]");
+        localStorage.setItem("ctu_active_deadlines", JSON.stringify(stored.filter((s) => s.id !== id)));
+      } catch {}
+    },
+    [postToWorker]
+  );
+
+  // Request OS Notification Permissions
+  const handleRequestOSAlerts = async () => {
     unlockAudio();
     if (typeof window === "undefined" || !("Notification" in window)) {
       alert("Notification API not supported by this browser.");
@@ -373,125 +321,32 @@ function CTUTerminalV74() {
       const permission = await Notification.requestPermission();
       setOsAlertStatus(permission);
       if (permission === "granted") {
-        if ("vibrate" in navigator) {
-          navigator.vibrate([100, 50, 100]);
+        for (const t of timers) {
+          if (t.running) scheduleTimerBackground(t);
         }
-        alarms.filter((a) => a.armed).forEach(scheduleAlarmBackground);
-        const activeT = timers.find((t) => t.id === activeTimerId && t.running);
-        if (activeT) {
-          scheduleTimerBackground(activeT.id, activeT.label, activeT.remainingSec);
+        for (const a of alarms) {
+          if (a.armed) scheduleAlarmBackground(a);
         }
       }
-    } catch {
-      // Ignored
-    }
-  };
-
-  // Hydrate persistence from localStorage on mount
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    try {
-      const savedTimers = localStorage.getItem("ctu_timers");
-      if (savedTimers) setTimers(JSON.parse(savedTimers));
-
-      const savedAlarms = localStorage.getItem("ctu_alarms");
-      if (savedAlarms) setAlarms(JSON.parse(savedAlarms));
-
-      const savedVol = localStorage.getItem("ctu_volume");
-      if (savedVol !== null) {
-        const v = parseFloat(savedVol);
-        setMasterVol(v);
-        CTUAudio.setMasterVolume(v);
-      }
-
-      const savedZeroSound = localStorage.getItem("ctu_zero_sound");
-      if (savedZeroSound) setZeroSound(savedZeroSound as ZeroSoundType);
-
-      const savedMusic = localStorage.getItem("ctu_credits_music");
-      if (savedMusic !== null) setCreditsMusic(savedMusic === "true");
-
-      const savedMode = localStorage.getItem("ctu_credits_mode");
-      if (savedMode === "watercolor" || savedMode === "video") setCreditsMode(savedMode);
-    } catch {
-      // Storage fallback
-    }
-  }, []);
-
-  // Persist timers on state change
-  useEffect(() => {
-    try {
-      localStorage.setItem("ctu_timers", JSON.stringify(timers));
-    } catch {}
-  }, [timers]);
-
-  // Persist alarms on state change
-  useEffect(() => {
-    try {
-      localStorage.setItem("ctu_alarms", JSON.stringify(alarms));
-    } catch {}
-  }, [alarms]);
-
-  // Handle Master Volume Change
-  const handleVolumeChange = (val: number) => {
-    setMasterVol(val);
-    CTUAudio.setMasterVolume(val);
-    try {
-      localStorage.setItem("ctu_volume", val.toString());
     } catch {}
   };
 
-  // Credits Music Toggle
-  const handleCreditsMusicToggle = () => {
-    setCreditsMusic((prev) => {
-      const next = !prev;
-      try {
-        localStorage.setItem("ctu_credits_music", String(next));
-      } catch {}
-      if (!next) {
-        CTUAudio.stopCreditsAudio();
-      } else if (creditsOpen) {
-        CTUAudio.playCreditsAudio();
-      }
-      return next;
-    });
-  };
-
-  // Credits View Mode Toggle
-  const handleCreditsModeChange = (mode: "watercolor" | "video") => {
-    setCreditsMode(mode);
-    try {
-      localStorage.setItem("ctu_credits_mode", mode);
-    } catch {}
-  };
-
-  // 1-Second Master Engine Heartbeat (Clocks, Ticker, Timers, Alarms, Live Lockscreen HUD)
+  // Operational Clock Loop (1-second tick)
   useEffect(() => {
     const timer = setInterval(() => {
-      const d = new Date();
-      setNowDate(d);
+      const current = new Date();
+      setNowDate(current);
       setColonVisible((prev) => !prev);
 
-      // Decrement active running timers
+      // Decrement running timers
       setTimers((prev) =>
         prev.map((t) => {
           if (!t.running) return t;
-          const nextRemaining = t.remainingSec - 1;
-
-          // 10-Second Takeover Trigger
-          if (nextRemaining === 10) {
-            setCountdownLabel(t.label);
-            setCountdownRemaining(10);
-            setCountdownActive(true);
-            CTUAudio.playCountdownSound();
-          }
-
-          if (nextRemaining <= 0) {
+          if (t.remainingSec <= 1) {
             cancelTimerBackground(t.id);
-            setCountdownActive(false);
-            setCrisisTimesUp(true);
+            setCountdownTakeover(false);
+            setCrisisOverlay(true);
             setCountdownLabel(t.label);
-            CTUAudio.stopCountdownSound();
             CTUAudio.triggerZeroSound(zeroSound);
             return {
               ...t,
@@ -502,239 +357,229 @@ function CTUTerminalV74() {
             };
           }
 
-          return { ...t, remainingSec: nextRemaining };
+          const nextSec = t.remainingSec - 1;
+
+          // 10-Second Countdown Takeover
+          if (nextSec <= 10 && nextSec > 0) {
+            setCountdownTakeover(true);
+            setCountdownRemaining(nextSec);
+            setCountdownLabel(t.label);
+
+            if (lastCountdownSecondRef.current !== nextSec) {
+              lastCountdownSecondRef.current = nextSec;
+              const intensity = nextSec <= 3 ? 3 : nextSec <= 5 ? 2 : 1;
+              CTUAudio.playCountdownSound(intensity);
+            }
+          } else if (nextSec > 10 && t.id === activeTimerId && countdownTakeover) {
+            setCountdownTakeover(false);
+          }
+
+          return { ...t, remainingSec: nextSec };
         })
       );
 
-      // Evaluate Bangkok time alarms with weekly day checks
-      try {
-        const bkkFormatter = new Intl.DateTimeFormat("en-US", {
-          timeZone: "Asia/Bangkok",
-          hour: "numeric",
-          minute: "numeric",
-          second: "numeric",
-          weekday: "short",
-          hour12: false,
-        });
-        const parts = bkkFormatter.formatToParts(d);
-        const curH = parseInt(parts.find((p) => p.type === "hour")?.value || "0", 10);
-        const curM = parseInt(parts.find((p) => p.type === "minute")?.value || "0", 10);
-        const curS = parseInt(parts.find((p) => p.type === "second")?.value || "0", 10);
-        const curDayStr = parts.find((p) => p.type === "weekday")?.value || "Sun";
-        const dayMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
-        const curDay = dayMap[curDayStr] ?? 0;
+      // Evaluate Daily Alarms in Bangkok Time (Asia/Bangkok)
+      const bkkFormatter = new Intl.DateTimeFormat("en-US", {
+        timeZone: "Asia/Bangkok",
+        hour: "numeric",
+        minute: "numeric",
+        second: "numeric",
+        hour12: false,
+        weekday: "short",
+      });
+      const parts = bkkFormatter.formatToParts(current);
+      const bkkHour = parseInt(parts.find((p) => p.type === "hour")?.value || "0", 10);
+      const bkkMinute = parseInt(parts.find((p) => p.type === "minute")?.value || "0", 10);
+      const bkkSecond = parseInt(parts.find((p) => p.type === "second")?.value || "0", 10);
 
-        alarms.forEach((a) => {
-          if (a.armed && curS === 0 && a.hour === curH && a.minute === curM) {
-            const allowedDays = a.days && a.days.length > 0 ? a.days : [0, 1, 2, 3, 4, 5, 6];
-            if (allowedDays.includes(curDay)) {
-              setCountdownLabel(a.label);
-              setCountdownRemaining(10);
-              setCountdownActive(true);
-              CTUAudio.playCountdownSound();
+      const dayMap: Record<string, number> = {
+        Sun: 0,
+        Mon: 1,
+        Tue: 2,
+        Wed: 3,
+        Thu: 4,
+        Fri: 5,
+        Sat: 6,
+      };
+      const weekdayStr = parts.find((p) => p.type === "weekday")?.value || "Sun";
+      const bkkDay = dayMap[weekdayStr] ?? 0;
+
+      if (bkkSecond === 0) {
+        for (const alarm of alarms) {
+          if (!alarm.armed) continue;
+          if (alarm.hour === bkkHour && alarm.minute === bkkMinute && alarm.days.includes(bkkDay)) {
+            const key = `${alarm.id}-${current.toISOString().slice(0, 10)}-${bkkHour}:${bkkMinute}`;
+            if (!lastAlarmTriggerRef.current[key]) {
+              lastAlarmTriggerRef.current[key] = "triggered";
+              setCountdownLabel(alarm.label);
+              setCrisisOverlay(true);
+              CTUAudio.triggerZeroSound(zeroSound);
             }
           }
-        });
-      } catch {
-        // Timezone parser fallback
+        }
       }
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [alarms, cancelTimerBackground, zeroSound]);
+  }, [alarms, activeTimerId, cancelTimerBackground, countdownTakeover, zeroSound]);
 
-  // Rotate watercolor images in Credits modal every 6 seconds
+  // Live Lockscreen HUD Synchronization
   useEffect(() => {
-    if (!creditsOpen || creditsMode !== "watercolor") return;
-    const interval = setInterval(() => {
-      setCreditsImageOffset((prev) => (prev + 6) % WATERCOLOR_IMAGES.length);
-    }, 6000);
-    return () => clearInterval(interval);
-  }, [creditsOpen, creditsMode]);
+    if (osAlertStatus !== "granted") return;
 
-  // Dispatch Live Lockscreen Notification HUD updates whenever running timer or alarm state changes
-  useEffect(() => {
-    if (typeof window === "undefined" || osAlertStatus !== "granted") return;
-
-    const runningTimer = timers.find((t) => t.id === activeTimerId && t.running);
-    const nextArmedAlarm = alarms.find((a) => a.armed);
-
-    if (runningTimer) {
-      const h = Math.floor(runningTimer.remainingSec / 3600);
-      const m = Math.floor((runningTimer.remainingSec % 3600) / 60);
-      const s = runningTimer.remainingSec % 60;
-      const timeStr = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-
-      postToWorker({
-        type: "UPDATE_LOCKSCREEN_HUD",
-        title: `[CTU TIMER] ${runningTimer.label}: ${timeStr}`,
-        body: `Active Tactical Watch • Next Alarm: ${nextArmedAlarm ? `${String(nextArmedAlarm.hour).padStart(2, "0")}:${String(nextArmedAlarm.minute).padStart(2, "0")} BKK` : "NONE"}`,
-      });
-    } else if (nextArmedAlarm) {
-      postToWorker({
-        type: "UPDATE_LOCKSCREEN_HUD",
-        title: `[CTU ALARM ARMED] ${nextArmedAlarm.label}`,
-        body: `Scheduled: ${String(nextArmedAlarm.hour).padStart(2, "0")}:${String(nextArmedAlarm.minute).padStart(2, "0")} Bangkok Time (${formatDaysSummary(nextArmedAlarm.days)})`,
-      });
+    const running = timers.filter((t) => t.running);
+    if (running.length > 0) {
+      const closest = [...running].sort((a, b) => a.remainingSec - b.remainingSec)[0];
+      if (closest) {
+        const m = Math.floor(closest.remainingSec / 60);
+        const s = closest.remainingSec % 60;
+        postToWorker({
+          type: "UPDATE_LOCKSCREEN_HUD",
+          title: `[CTU ACTIVE HUD] ${closest.label.toUpperCase()}`,
+          body: `Time remaining: ${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")} • Tap to expand terminal`,
+        });
+      }
     } else {
-      postToWorker({ type: "CLEAR_LOCKSCREEN_HUD" });
+      const armed = alarms.filter((a) => a.armed);
+      if (armed.length > 0) {
+        const nextTarget = armed[0];
+        if (nextTarget) {
+          postToWorker({
+            type: "UPDATE_LOCKSCREEN_HUD",
+            title: `[CTU DEFENSE NET] ${nextTarget.label.toUpperCase()}`,
+            body: `Target: ${String(nextTarget.hour).padStart(2, "0")}:${String(nextTarget.minute).padStart(2, "0")} Bangkok Time`,
+          });
+        }
+      } else {
+        postToWorker({ type: "CLEAR_LOCKSCREEN_HUD" });
+      }
     }
-  }, [activeTimerId, alarms, osAlertStatus, postToWorker, timers]);
+  }, [timers, alarms, osAlertStatus, postToWorker]);
 
-  // Active Timer Ref & Formatting
+  // Active Timer Reference
   const activeTimer = useMemo(() => {
-    return timers.find((t) => t.id === activeTimerId) || timers[0] || INITIAL_TIMERS[0];
-  }, [activeTimerId, timers]);
+    return (
+      timers.find((t) => t.id === activeTimerId) ||
+      timers[0] || {
+        id: "timer-fallback",
+        label: "TACTICAL TIMER",
+        durationSec: 25 * 60,
+        remainingSec: 25 * 60,
+        running: false,
+        timesUp: false,
+        status: "STANDBY",
+      }
+    );
+  }, [timers, activeTimerId]);
 
-  const formatTime = (totalSec: number) => {
-    const s = Math.max(0, totalSec);
-    const hours = Math.floor(s / 3600);
-    const minutes = Math.floor((s % 3600) / 60);
-    const seconds = s % 60;
+  // Format Digits
+  const formatDigits = (totalSec: number) => {
+    const clamped = Math.max(0, totalSec);
+    const h = Math.floor(clamped / 3600);
+    const m = Math.floor((clamped % 3600) / 60);
+    const s = clamped % 60;
     return {
-      h: hours.toString().padStart(2, "0"),
-      m: minutes.toString().padStart(2, "0"),
-      s: seconds.toString().padStart(2, "0"),
+      h: String(h).padStart(2, "0"),
+      m: String(m).padStart(2, "0"),
+      s: String(s).padStart(2, "0"),
     };
   };
 
-  // Bangkok Time Formatter (Primary Ops Zone)
+  const primaryDigits = formatDigits(activeTimer.remainingSec);
+
+  // Bangkok Live Time String
   const bangkokTime = useMemo(() => {
-    if (!nowDate) return { time: "--:--:--", date: "CALIBRATING..." };
-    try {
-      const tf = new Intl.DateTimeFormat("en-US", {
-        timeZone: "Asia/Bangkok",
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-        hour12: false,
-      }).format(nowDate);
-
-      const df = new Intl.DateTimeFormat("en-US", {
-        timeZone: "Asia/Bangkok",
-        weekday: "short",
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      })
-        .format(nowDate)
-        .toUpperCase();
-
-      return { time: tf, date: df };
-    } catch {
-      return { time: "19:38:00", date: "BANGKOK THEATER" };
-    }
-  }, [nowDate]);
-
-  // Zulu UTC Time
-  const zuluTime = useMemo(() => {
-    if (!nowDate) return "--:--:--Z";
-    try {
-      return (
-        new Intl.DateTimeFormat("en-US", {
-          timeZone: "UTC",
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-          hour12: false,
-        }).format(nowDate) + "Z"
-      );
-    } catch {
-      return "--:--:--Z";
-    }
-  }, [nowDate]);
-
-  // Sorted Theaters for World Ticker (Ascending Local Time)
-  const sortedTheaters = useMemo(() => {
-    if (!nowDate) return GLOBAL_THEATERS;
-    return [...GLOBAL_THEATERS].sort((a, b) => {
-      try {
-        const timeA = new Intl.DateTimeFormat("en-US", {
-          timeZone: a.zone,
-          hour: "numeric",
-          minute: "numeric",
-          second: "numeric",
-          hour12: false,
-        }).format(nowDate);
-
-        const timeB = new Intl.DateTimeFormat("en-US", {
-          timeZone: b.zone,
-          hour: "numeric",
-          minute: "numeric",
-          second: "numeric",
-          hour12: false,
-        }).format(nowDate);
-
-        return timeA.localeCompare(timeB);
-      } catch {
-        return 0;
-      }
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Bangkok",
+      hour: "numeric",
+      minute: "numeric",
+      second: "numeric",
+      hour12: false,
+      year: "numeric",
+      month: "short",
+      day: "2-digit",
     });
+    const parts = formatter.formatToParts(nowDate);
+    const h = parts.find((p) => p.type === "hour")?.value || "00";
+    const m = parts.find((p) => p.type === "minute")?.value || "00";
+    const s = parts.find((p) => p.type === "second")?.value || "00";
+    const month = parts.find((p) => p.type === "month")?.value || "";
+    const day = parts.find((p) => p.type === "day")?.value || "";
+    const year = parts.find((p) => p.type === "year")?.value || "";
+    return {
+      time: `${h}:${m}:${s}`,
+      date: `${day} ${month.toUpperCase()} ${year}`,
+    };
   }, [nowDate]);
 
-  const getTheaterTime = (zone: string) => {
-    if (!nowDate) return "--:--";
-    try {
-      return new Intl.DateTimeFormat("en-US", {
-        timeZone: zone,
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: false,
-      }).format(nowDate);
-    } catch {
-      return "--:--";
-    }
-  };
+  // Zulu / UTC Time String
+  const zuluTime = useMemo(() => {
+    const h = String(nowDate.getUTCHours()).padStart(2, "0");
+    const m = String(nowDate.getUTCMinutes()).padStart(2, "0");
+    const s = String(nowDate.getUTCSeconds()).padStart(2, "0");
+    return `${h}:${m}:${s}Z`;
+  }, [nowDate]);
 
-  // Primary Timer Controls
-  const handleStartPrimary = () => {
+  // Execution Handlers
+  const handleExecuteTimer = (id: string) => {
     unlockAudio();
     setTimers((prev) =>
       prev.map((t) => {
-        if (t.id === activeTimer.id) {
-          scheduleTimerBackground(t.id, t.label, t.remainingSec);
-          return { ...t, running: true, timesUp: false, status: "ENGAGED" };
+        if (t.id === id) {
+          const updated = {
+            ...t,
+            running: true,
+            timesUp: false,
+            status: "IN PROGRESS",
+            remainingSec: t.remainingSec === 0 ? t.durationSec : t.remainingSec,
+          };
+          scheduleTimerBackground(updated);
+          return updated;
         }
         return t;
       })
     );
   };
 
-  const handlePausePrimary = () => {
+  const handlePauseTimer = (id: string) => {
     unlockAudio();
-    cancelTimerBackground(activeTimer.id);
+    cancelTimerBackground(id);
     setTimers((prev) =>
-      prev.map((t) => (t.id === activeTimer.id ? { ...t, running: false, status: "PAUSED" } : t))
+      prev.map((t) => (t.id === id ? { ...t, running: false, status: "HOLD" } : t))
     );
   };
 
-  const handleResetPrimary = () => {
+  const handleResetTimer = (id: string) => {
     unlockAudio();
-    cancelTimerBackground(activeTimer.id);
-    setCountdownActive(false);
-    setCrisisTimesUp(false);
+    cancelTimerBackground(id);
+    if (countdownTakeover) setCountdownTakeover(false);
     CTUAudio.stopCountdownSound();
     setTimers((prev) =>
       prev.map((t) =>
-        t.id === activeTimer.id
-          ? { ...t, running: false, remainingSec: t.durationSec, timesUp: false, status: "STANDBY" }
+        t.id === id
+          ? {
+              ...t,
+              running: false,
+              timesUp: false,
+              status: "STANDBY",
+              remainingSec: t.durationSec,
+            }
           : t
       )
     );
   };
 
-  // Arm Preset into Active Timer
-  const handleApplyPreset = (presetSec: number, presetLabel: string) => {
+  const handleQuickPreset = (seconds: number) => {
     unlockAudio();
     cancelTimerBackground(activeTimer.id);
+    if (countdownTakeover) setCountdownTakeover(false);
     setTimers((prev) =>
       prev.map((t) =>
         t.id === activeTimer.id
           ? {
               ...t,
-              durationSec: presetSec,
-              remainingSec: presetSec,
-              label: presetLabel,
+              durationSec: seconds,
+              remainingSec: seconds,
               running: false,
               timesUp: false,
               status: "STANDBY",
@@ -744,8 +589,24 @@ function CTUTerminalV74() {
     );
   };
 
-  // Add / Edit Timers
-  const handleOpenAddTimer = () => {
+  // Samsung Picker Trigger
+  const handleEditTimer = (timer: OperationalTimer) => {
+    unlockAudio();
+    setPickerMode("timer");
+    setEditingItemId(timer.id);
+    const h = Math.floor(timer.durationSec / 3600);
+    const m = Math.floor((timer.durationSec % 3600) / 60);
+    const s = timer.durationSec % 60;
+    setPickerInitial({
+      hours: h,
+      minutes: m,
+      seconds: s,
+      totalSeconds: timer.durationSec,
+    });
+    setPickerOpen(true);
+  };
+
+  const handleAddTimer = () => {
     unlockAudio();
     setPickerMode("timer");
     setEditingItemId(null);
@@ -758,57 +619,17 @@ function CTUTerminalV74() {
     setPickerOpen(true);
   };
 
-  const handleEditTimer = (timer: OperationalTimer) => {
-    unlockAudio();
-    setPickerMode("timer");
-    setEditingItemId(timer.id);
-    const d = formatTime(timer.durationSec);
-    setPickerInitial({
-      hours: parseInt(d.h, 10),
-      minutes: parseInt(d.m, 10),
-      seconds: parseInt(d.s, 10),
-      totalSeconds: timer.durationSec,
-    });
-    setPickerOpen(true);
-  };
-
   const handleDeleteTimer = (id: string) => {
     unlockAudio();
     cancelTimerBackground(id);
     setTimers((prev) => {
-      const filtered = prev.filter((t) => t.id !== id);
-      if (filtered.length === 0) {
-        return [
-          {
-            id: "timer-1",
-            label: "TACTICAL SPRINT",
-            durationSec: 25 * 60,
-            remainingSec: 25 * 60,
-            running: false,
-            timesUp: false,
-            status: "STANDBY",
-          },
-        ];
+      const remaining = prev.filter((t) => t.id !== id);
+      if (remaining.length === 0) return INITIAL_TIMERS;
+      if (activeTimerId === id && remaining[0]) {
+        setActiveTimerId(remaining[0].id);
       }
-      if (activeTimerId === id) {
-        setActiveTimerId(filtered[0].id);
-      }
-      return filtered;
+      return remaining;
     });
-  };
-
-  // Add / Edit Alarms
-  const handleOpenAddAlarm = () => {
-    unlockAudio();
-    setPickerMode("alarm");
-    setEditingItemId(null);
-    setPickerInitial({
-      hours: 8,
-      minutes: 0,
-      seconds: 0,
-      days: [0, 1, 2, 3, 4, 5, 6],
-    });
-    setPickerOpen(true);
   };
 
   const handleEditAlarm = (alarm: OperationalAlarm) => {
@@ -819,7 +640,22 @@ function CTUTerminalV74() {
       hours: alarm.hour,
       minutes: alarm.minute,
       seconds: 0,
-      days: alarm.days && alarm.days.length > 0 ? alarm.days : [0, 1, 2, 3, 4, 5, 6],
+      days: alarm.days,
+      totalSeconds: alarm.hour * 3600 + alarm.minute * 60,
+    });
+    setPickerOpen(true);
+  };
+
+  const handleAddAlarm = () => {
+    unlockAudio();
+    setPickerMode("alarm");
+    setEditingItemId(null);
+    setPickerInitial({
+      hours: 8,
+      minutes: 0,
+      seconds: 0,
+      days: [1, 2, 3, 4, 5],
+      totalSeconds: 8 * 3600,
     });
     setPickerOpen(true);
   };
@@ -829,13 +665,13 @@ function CTUTerminalV74() {
     setAlarms((prev) =>
       prev.map((a) => {
         if (a.id === id) {
-          const nextArmed = !a.armed;
-          if (nextArmed) {
+          const nextState = !a.armed;
+          if (nextState) {
             scheduleAlarmBackground({ ...a, armed: true });
           } else {
             cancelAlarmBackground(a.id);
           }
-          return { ...a, armed: nextArmed };
+          return { ...a, armed: nextState };
         }
         return a;
       })
@@ -871,7 +707,7 @@ function CTUTerminalV74() {
       } else {
         const newTimer: OperationalTimer = {
           id: `timer-${Date.now()}`,
-          label: `MISSION SPRINT ${totalSec >= 60 ? `${Math.round(totalSec / 60)}M` : `${totalSec}S`}`,
+          label: `OPS: ${String(vals.hours).padStart(2, "0")}:${String(vals.minutes).padStart(2, "0")}:${String(vals.seconds).padStart(2, "0")}`,
           durationSec: totalSec,
           remainingSec: totalSec,
           running: false,
@@ -882,7 +718,7 @@ function CTUTerminalV74() {
         setActiveTimerId(newTimer.id);
       }
     } else {
-      const selectedDays = vals.days && vals.days.length > 0 ? vals.days : [0, 1, 2, 3, 4, 5, 6];
+      const days = vals.days && vals.days.length > 0 ? vals.days : [0, 1, 2, 3, 4, 5, 6];
       if (editingItemId) {
         setAlarms((prev) =>
           prev.map((a) => {
@@ -891,10 +727,9 @@ function CTUTerminalV74() {
                 ...a,
                 hour: vals.hours,
                 minute: vals.minutes,
-                days: selectedDays,
-                armed: true,
+                days,
               };
-              scheduleAlarmBackground(updated);
+              if (updated.armed) scheduleAlarmBackground(updated);
               return updated;
             }
             return a;
@@ -903,20 +738,73 @@ function CTUTerminalV74() {
       } else {
         const newAlarm: OperationalAlarm = {
           id: `alarm-${Date.now()}`,
-          label: `OPERATIONAL ALERT ${String(vals.hours).padStart(2, "0")}:${String(vals.minutes).padStart(2, "0")}`,
+          label: `TACTICAL: ${String(vals.hours).padStart(2, "0")}:${String(vals.minutes).padStart(2, "0")}`,
           hour: vals.hours,
           minute: vals.minutes,
-          days: selectedDays,
+          days,
           armed: true,
         };
-        scheduleAlarmBackground(newAlarm);
         setAlarms((prev) => [...prev, newAlarm]);
+        scheduleAlarmBackground(newAlarm);
       }
     }
     setPickerOpen(false);
   };
 
-  // Modals & Panels Controls
+  // Snooze and Disarm Handlers
+  const handleSnooze = () => {
+    unlockAudio();
+    setCrisisOverlay(false);
+    setCountdownTakeover(false);
+    CTUAudio.stopCrisisAudio();
+    CTUAudio.stopCountdownSound();
+    setTimers((prev) =>
+      prev.map((t) =>
+        t.id === activeTimerId
+          ? {
+              ...t,
+              remainingSec: 5 * 60,
+              running: true,
+              timesUp: false,
+              status: "SNOOZE (5M)",
+            }
+          : t
+      )
+    );
+  };
+
+  const handleDisarm = () => {
+    unlockAudio();
+    setCrisisOverlay(false);
+    setCountdownTakeover(false);
+    CTUAudio.stopCrisisAudio();
+    CTUAudio.stopCountdownSound();
+    setTimers((prev) =>
+      prev.map((t) =>
+        t.id === activeTimerId
+          ? {
+              ...t,
+              remainingSec: t.durationSec,
+              running: false,
+              timesUp: false,
+              status: "STANDBY",
+            }
+          : t
+      )
+    );
+  };
+
+  const handleOpenCredits = () => {
+    unlockAudio();
+    setCreditsOpen(true);
+    CTUAudio.playCreditsAudio();
+  };
+
+  const handleCloseCredits = () => {
+    setCreditsOpen(false);
+    CTUAudio.stopCreditsAudio();
+  };
+
   const handleOpenOpening = () => {
     unlockAudio();
     setOpeningOpen(true);
@@ -926,156 +814,84 @@ function CTUTerminalV74() {
     setOpeningOpen(false);
   };
 
-  const handleOpenCredits = () => {
-    unlockAudio();
-    setCreditsOpen(true);
-    if (creditsMusic) {
-      CTUAudio.playCreditsAudio();
-    }
-  };
-
-  const handleCloseCredits = () => {
-    setCreditsOpen(false);
-    CTUAudio.stopCreditsAudio();
-  };
-
-  const handleSnoozeCrisis = () => {
-    unlockAudio();
-    setCrisisTimesUp(false);
-    setCountdownActive(false);
-    CTUAudio.stopCountdownSound();
-    CTUAudio.stopCrisisAudio();
-    // Add 5 minutes to active timer
-    setTimers((prev) =>
-      prev.map((t) =>
-        t.id === activeTimer.id
-          ? {
-              ...t,
-              remainingSec: 5 * 60,
-              running: true,
-              timesUp: false,
-              status: "ENGAGED (SNOOZED)",
-            }
-          : t
-      )
-    );
-  };
-
-  const handleDisarmCrisis = () => {
-    unlockAudio();
-    setCrisisTimesUp(false);
-    setCountdownActive(false);
-    CTUAudio.stopCountdownSound();
-    CTUAudio.stopCrisisAudio();
-    cancelTimerBackground(activeTimer.id);
-    setTimers((prev) =>
-      prev.map((t) =>
-        t.id === activeTimer.id
-          ? { ...t, running: false, remainingSec: t.durationSec, timesUp: false, status: "STANDBY" }
-          : t
-      )
-    );
-  };
-
-  // Play test sound for Zero audio select
-  const handleZeroSoundChange = (val: ZeroSoundType) => {
-    setZeroSound(val);
-    try {
-      localStorage.setItem("ctu_zero_sound", val);
-    } catch {}
-    CTUAudio.triggerZeroSound(val);
-  };
-
-  const primaryDigits = formatTime(activeTimer.remainingSec);
-
   return (
-    <div
+    <main
       onClick={unlockAudio}
-      className="min-h-screen bg-black text-[#ffcc00] font-mono selection:bg-[#ffcc00] selection:text-black flex flex-col p-2 sm:p-4 select-none"
+      className="min-h-screen bg-black text-[#ffcc00] font-mono select-none overflow-x-hidden p-2 sm:p-4 md:p-6"
     >
-      {/* Hidden Audio Elements */}
-      <audio ref={countdownAudioRef} src="/24 Alarm Countdown.mp3" preload="auto" />
-      <audio ref={zeroAudioRef} src="/24 At Zero theme.mp3" preload="auto" />
-
-      {/* Top Banner / Tactical Telemetry Header */}
-      <header className="border border-[#ffcc00] p-2.5 sm:p-3 bg-black flex flex-wrap items-center justify-between gap-2 shadow-[0_0_15px_rgba(255,204,0,0.15)] mb-3">
-        <div className="flex items-center gap-2 sm:gap-3">
-          <div className="w-2.5 h-2.5 bg-[#ffcc00] animate-pulse rounded-none" />
-          <h1 className="text-xs sm:text-sm font-black tracking-widest text-[#ffcc00]">
-            CTU TACTICAL OPERATIONAL COMMAND • 24 v74
-          </h1>
+      {/* Top Banner & Security Header */}
+      <header className="border-2 border-[#ffcc00] bg-black p-3 mb-4 shadow-[0_0_20px_rgba(255,204,0,0.15)] flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-3">
+          <div className="w-4 h-4 bg-[#ffcc00] flex items-center justify-center font-black text-black text-xs">
+            24
+          </div>
+          <div>
+            <h1 className="text-sm sm:text-base font-black tracking-widest text-[#ffcc00]">
+              CTU OPERATIONAL COMMAND TERMINAL
+            </h1>
+            <p className="text-[10px] tracking-wider text-[#ffcc00]/70">
+              COUNTER TERRORIST UNIT • SOUTHEAST ASIA DIVISION • DIRECTIVE 74
+            </p>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2 sm:gap-3 flex-wrap justify-end text-xs font-bold">
-          {/* OS Background Alerts Link Button */}
-          <button
-            onClick={handleRequestOsAlerts}
-            className={`px-2.5 py-1 text-[11px] font-bold border transition-all flex items-center gap-1.5 ${
-              osAlertStatus === "granted"
-                ? "border-[#ffcc00] bg-[#ffcc00]/20 text-[#ffcc00] shadow-[0_0_10px_rgba(255,204,0,0.3)]"
-                : "border-gray-700 bg-black text-gray-400 hover:border-[#ffcc00] hover:text-[#ffcc00]"
-            }`}
-            title="Enable Service Worker notifications and vibration"
-          >
-            <span>{osAlertStatus === "granted" ? "● OS ALERTS ARMED" : "○ LINK OS ALERTS"}</span>
-          </button>
+        <div className="flex items-center gap-2">
+          {osAlertStatus !== "granted" ? (
+            <button
+              onClick={handleRequestOSAlerts}
+              className="px-2.5 py-1 bg-amber-500/20 border border-[#ffcc00] text-[#ffcc00] text-xs font-bold tracking-wider hover:bg-[#ffcc00] hover:text-black transition flex items-center gap-1.5 animate-pulse"
+              title="Enable background notifications when tab is closed"
+            >
+              <span>LINK OS ALERTS</span>
+            </button>
+          ) : (
+            <span className="px-2.5 py-1 border border-[#ffcc00]/40 text-[#ffcc00]/80 text-[11px] font-bold">
+              OS ALERTS: ARMED
+            </span>
+          )}
 
           <button
             onClick={handleOpenOpening}
-            className="border border-[#ffcc00]/80 bg-[#1a1600] px-2.5 py-1 hover:bg-[#ffcc00] hover:text-black transition tracking-wider"
+            className="px-2 py-1 border border-[#ffcc00]/60 text-xs font-bold hover:bg-[#ffcc00] hover:text-black transition"
           >
-            ▶ 24 OPENING
+            OPENING FEED
           </button>
           <button
             onClick={handleOpenCredits}
-            className="border border-[#ffcc00]/80 bg-[#1a1600] px-2.5 py-1 hover:bg-[#ffcc00] hover:text-black transition tracking-wider"
+            className="px-2 py-1 border border-[#ffcc00]/60 text-xs font-bold hover:bg-[#ffcc00] hover:text-black transition"
           >
-            ★ 24 CREDITS
+            CREDITS
           </button>
         </div>
       </header>
 
-      {/* OS Notification Alert Status Callout (Prominent Banner when not granted) */}
-      {osAlertStatus !== "granted" && (
-        <div className="border border-[#ffcc00]/60 bg-[#1a1600]/80 p-2.5 mb-3 flex items-center justify-between flex-wrap gap-2 text-xs">
-          <div className="flex items-center gap-2 text-[#ffcc00]">
-            <span className="text-amber-400 font-black">⚠ NOTICE:</span>
-            <span>OS background alerts are unlinked. Alarms will not pop up in your notifications when the browser is closed.</span>
-          </div>
-          <button
-            onClick={handleRequestOsAlerts}
-            className="bg-[#ffcc00] text-black font-black px-3 py-1 text-xs hover:bg-[#ffe066] transition shadow-[0_0_10px_rgba(255,204,0,0.3)]"
-          >
-            ENABLE OS NOTIFICATIONS
-          </button>
-        </div>
-      )}
-
-      {/* Moving Global Theater World Clock Ticker */}
-      <div className="border-t border-b border-[#ffcc00]/40 bg-black/90 py-1.5 overflow-hidden whitespace-nowrap mb-3 relative">
-        <div className="world-ticker-track flex items-center gap-6 sm:gap-8 text-xs tracking-wider">
-          {sortedTheaters.concat(sortedTheaters).map((th, i) => (
-            <div
-              key={`${th.code}-${i}`}
-              className={`inline-flex items-center gap-1.5 px-2 py-0.5 border ${
-                th.isHome
-                  ? "border-[#ffcc00] bg-[#ffcc00]/20 text-[#ffcc00] font-black"
-                  : "border-transparent text-[#ffcc00]/80"
-              }`}
-            >
-              <span className="font-mono font-bold tracking-wider">{th.city}:</span>
-              <span className="font-mono tabular-nums">{getTheaterTime(th.zone)}</span>
+      {/* World Theaters Chronological Ticker */}
+      <div className="w-full bg-black/80 border border-[#ffcc00]/30 py-1 px-2 mb-4 overflow-x-auto whitespace-nowrap scrollbar-none flex items-center gap-6 text-[11px] text-[#ffcc00]/70">
+        <span className="font-bold text-[#ffcc00] tracking-widest">WORLD THEATERS:</span>
+        {WORLD_THEATERS.map((wt) => {
+          const tStr = new Intl.DateTimeFormat("en-US", {
+            timeZone: wt.tz,
+            hour: "numeric",
+            minute: "numeric",
+            second: "numeric",
+            hour12: false,
+          }).format(nowDate);
+          return (
+            <div key={wt.city} className="inline-flex items-center gap-1.5">
+              <span className="text-[#ffcc00]/50">{wt.city}:</span>
+              <strong className="text-[#ffcc00] font-mono">{tStr}</strong>
             </div>
-          ))}
-        </div>
+          );
+        })}
       </div>
 
-      {/* Main Tactical Grid: Live Clock + Primary Operational Countdown */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4 mb-3 sm:mb-4">
-        {/* Bangkok Live Mission Clock (CTU Active Theater) */}
+      {/* Main Grid: Mission Clock & Operational Countdown Console */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+        {/* Mission Clock Panel */}
         <section className="border-2 border-[#ffcc00] bg-black p-3 sm:p-4 flex flex-col justify-between shadow-[0_0_25px_rgba(255,204,0,0.2)]">
           <div className="flex items-center justify-between border-b border-[#ffcc00]/40 pb-2">
             <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-[#ffcc00] animate-ping" />
               <span className="text-xs font-black tracking-widest text-[#ffcc00]">
                 ACTIVE THEATER: BANGKOK HQ (UTC+7)
               </span>
@@ -1087,7 +903,7 @@ function CTUTerminalV74() {
 
           {/* Rescaled tactical mission clock digits */}
           <div className="flex flex-col items-center justify-center my-3 sm:my-4 py-1">
-            <div className="text-4xl sm:text-5xl md:text-6xl font-black text-[#ffcc00] tracking-tight tabular-nums glow text-center">
+            <div className="text-3xl sm:text-4xl md:text-5xl font-black text-[#ffcc00] tracking-tight tabular-nums glow text-center">
               {bangkokTime.time.split(":").map((part, idx, arr) => (
                 <span key={idx}>
                   {part}
@@ -1137,7 +953,7 @@ function CTUTerminalV74() {
             className="flex flex-col items-center justify-center my-3 sm:my-4 py-1 cursor-pointer group"
             title="Tap to adjust operational duration"
           >
-            <div className="text-4xl sm:text-5xl md:text-6xl font-black text-[#ffcc00] tracking-tight tabular-nums glow group-hover:scale-[1.02] transition-transform text-center">
+            <div className="text-3xl sm:text-4xl md:text-5xl font-black text-[#ffcc00] tracking-tight tabular-nums glow group-hover:scale-[1.02] transition-transform text-center">
               {primaryDigits.h}:{primaryDigits.m}:{primaryDigits.s}
             </div>
             <div className="mt-1.5 text-[10px] tracking-widest text-[#ffcc00]/60 group-hover:text-[#ffcc00] transition">
@@ -1149,263 +965,307 @@ function CTUTerminalV74() {
           <div className="border-t border-[#ffcc00]/30 pt-3 flex items-center justify-center gap-2 sm:gap-4">
             {!activeTimer.running ? (
               <button
-                onClick={handleStartPrimary}
-                className="flex-1 py-2 sm:py-2.5 bg-[#ffcc00] text-black font-black text-sm tracking-widest hover:bg-[#ffe066] transition shadow-[0_0_15px_rgba(255,204,0,0.4)]"
+                onClick={() => handleExecuteTimer(activeTimer.id)}
+                className="bg-[#ffcc00] text-black font-black text-xs sm:text-sm tracking-widest py-2 px-6 hover:bg-[#ffcc00]/80 active:scale-95 transition shadow-[0_0_15px_rgba(255,204,0,0.4)]"
               >
                 EXECUTE
               </button>
             ) : (
               <button
-                onClick={handlePausePrimary}
-                className="flex-1 py-2 sm:py-2.5 bg-yellow-600 text-black font-black text-sm tracking-widest hover:bg-yellow-500 transition"
+                onClick={() => handlePauseTimer(activeTimer.id)}
+                className="bg-black border-2 border-[#ffcc00] text-[#ffcc00] font-black text-xs sm:text-sm tracking-widest py-2 px-6 hover:bg-[#ffcc00]/20 active:scale-95 transition"
               >
-                PAUSE
+                HOLD
               </button>
             )}
+
             <button
-              onClick={handleResetPrimary}
-              className="py-2 sm:py-2.5 px-4 sm:px-6 border border-[#ffcc00] text-[#ffcc00] font-black text-sm tracking-widest hover:bg-[#ffcc00]/20 transition"
+              onClick={() => handleResetTimer(activeTimer.id)}
+              className="border border-[#ffcc00]/50 text-[#ffcc00]/80 font-bold text-xs sm:text-sm tracking-widest py-2 px-4 hover:border-[#ffcc00] hover:text-[#ffcc00] active:scale-95 transition"
             >
               RESET
+            </button>
+
+            <button
+              onClick={() => handleEditTimer(activeTimer)}
+              className="border border-[#ffcc00]/50 text-[#ffcc00]/80 font-bold text-xs sm:text-sm tracking-widest py-2 px-4 hover:border-[#ffcc00] hover:text-[#ffcc00] active:scale-95 transition"
+            >
+              MODIFY
             </button>
           </div>
         </section>
       </div>
 
       {/* Quick-Arm Tactical Presets */}
-      <div className="border border-[#ffcc00]/40 bg-black p-3 mb-3 sm:mb-4">
-        <div className="text-xs font-bold tracking-widest text-[#ffcc00]/80 mb-2">
-          ARM AN OPERATION PRESET:
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {CTU_PRESETS.map((p) => (
+      <div className="border border-[#ffcc00]/40 bg-black p-2.5 mb-4 flex items-center justify-between flex-wrap gap-2">
+        <span className="text-xs font-black tracking-widest text-[#ffcc00]">
+          QUICK-ARM PRESETS:
+        </span>
+        <div className="flex items-center gap-2 flex-wrap">
+          {QUICK_PRESETS.map((p) => (
             <button
               key={p.label}
-              onClick={() => handleApplyPreset(p.sec, p.label)}
-              className="px-3 py-1.5 border border-[#ffcc00]/40 text-xs font-bold text-[#ffcc00] hover:border-[#ffcc00] hover:bg-[#ffcc00]/10 transition"
+              onClick={() => handleQuickPreset(p.seconds)}
+              className="px-2.5 py-1 border border-[#ffcc00]/40 text-xs font-bold tracking-wider hover:bg-[#ffcc00] hover:text-black transition"
             >
-              {p.label} ({Math.round(p.sec / 60)}M)
+              {p.label} ({p.seconds / 60}M)
             </button>
           ))}
         </div>
       </div>
 
-      {/* Multi-Timer & Multi-Alarm Queues */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 mb-3 sm:mb-4">
-        {/* Multi-Timers Console */}
-        <section className="border border-[#ffcc00]/60 bg-black p-3 flex flex-col gap-2">
-          <div className="flex items-center justify-between border-b border-[#ffcc00]/30 pb-2">
-            <span className="text-xs font-bold tracking-widest text-[#ffcc00]">
-              OPERATION QUEUE ({timers.length} ACTIVE)
-            </span>
-            <button
-              onClick={handleOpenAddTimer}
-              className="text-[11px] font-bold border border-[#ffcc00] px-2 py-0.5 hover:bg-[#ffcc00]/20 transition"
-            >
-              + ADD OPERATION
-            </button>
-          </div>
+      {/* Tactical Queues: Multi-Timers & Weekly Alarms */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+        {/* Multi-Timer Operational Queue */}
+        <section className="border border-[#ffcc00]/40 bg-black p-3 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between border-b border-[#ffcc00]/30 pb-2 mb-2">
+              <span className="text-xs font-black tracking-widest text-[#ffcc00]">
+                ACTIVE TIMERS QUEUE ({timers.length})
+              </span>
+              <button
+                onClick={handleAddTimer}
+                className="px-2 py-0.5 border border-[#ffcc00] text-[11px] font-black hover:bg-[#ffcc00] hover:text-black transition"
+              >
+                + ADD TIMER
+              </button>
+            </div>
 
-          <div className="flex flex-col gap-2 max-h-64 overflow-y-auto pr-1">
-            {timers.map((t) => {
-              const dig = formatTime(t.remainingSec);
-              const isFocused = t.id === activeTimerId;
-              return (
-                <div
-                  key={t.id}
-                  onClick={() => setActiveTimerId(t.id)}
-                  className={`p-2 border cursor-pointer flex items-center justify-between transition ${
-                    isFocused
-                      ? "border-[#ffcc00] bg-[#ffcc00]/10 shadow-[0_0_10px_rgba(255,204,0,0.2)]"
-                      : "border-[#ffcc00]/30 bg-black hover:border-[#ffcc00]/60"
-                  }`}
-                >
-                  <div className="flex flex-col">
-                    <span className="text-xs font-bold tracking-wider">{t.label}</span>
-                    <span className="text-[10px] text-[#ffcc00]/60">{t.status}</span>
-                  </div>
-
-                  <div className="flex items-center gap-3">
-                    <span className="text-base font-black tabular-nums tracking-tight">
-                      {dig.h}:{dig.m}:{dig.s}
-                    </span>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDeleteTimer(t.id);
-                      }}
-                      className="text-xs text-red-500 hover:text-red-400 font-bold px-1"
-                      title="Delete operation"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-
-        {/* Multi-Alarms Console with Samsung Weekly Day Scheduling */}
-        <section className="border border-[#ffcc00]/60 bg-black p-3 flex flex-col gap-2">
-          <div className="flex items-center justify-between border-b border-[#ffcc00]/30 pb-2">
-            <span className="text-xs font-bold tracking-widest text-[#ffcc00]">
-              WEEKLY ALARMS ({alarms.filter((a) => a.armed).length} ARMED)
-            </span>
-            <button
-              onClick={handleOpenAddAlarm}
-              className="text-[11px] font-bold border border-[#ffcc00] px-2 py-0.5 hover:bg-[#ffcc00]/20 transition"
-            >
-              + ADD ALARM
-            </button>
-          </div>
-
-          <div className="flex flex-col gap-2 max-h-64 overflow-y-auto pr-1">
-            {alarms.map((a) => {
-              const timeStr = `${a.hour.toString().padStart(2, "0")}:${a.minute.toString().padStart(2, "0")}`;
-              const alarmDays = a.days && a.days.length > 0 ? a.days : [0, 1, 2, 3, 4, 5, 6];
-              const summary = formatDaysSummary(alarmDays);
-
-              return (
-                <div
-                  key={a.id}
-                  onClick={() => handleEditAlarm(a)}
-                  className="p-2.5 border border-[#ffcc00]/30 bg-black flex flex-col gap-2 hover:border-[#ffcc00]/60 transition cursor-pointer group"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex flex-col">
-                      <span className="text-xs font-bold tracking-wider group-hover:text-[#ffcc00] transition-colors">
-                        {a.label}
-                      </span>
-                      <span className="text-[10px] text-[#ffcc00]/60">
-                        BANGKOK (UTC+7) • {summary}
-                      </span>
+            <div className="flex flex-col gap-2 max-h-60 overflow-y-auto pr-1">
+              {timers.map((t) => {
+                const d = formatDigits(t.remainingSec);
+                const isFocused = t.id === activeTimerId;
+                return (
+                  <div
+                    key={t.id}
+                    onClick={() => setActiveTimerId(t.id)}
+                    className={`p-2 border flex items-center justify-between cursor-pointer transition ${
+                      isFocused
+                        ? "border-[#ffcc00] bg-[#ffcc00]/10 shadow-[0_0_12px_rgba(255,204,0,0.2)]"
+                        : "border-[#ffcc00]/20 hover:border-[#ffcc00]/50"
+                    }`}
+                  >
+                    <div>
+                      <div className="text-xs font-bold text-[#ffcc00]">{t.label}</div>
+                      <div className="text-[10px] text-[#ffcc00]/60">
+                        STATUS: {t.status}
+                      </div>
                     </div>
 
                     <div className="flex items-center gap-3">
-                      <span className="text-lg font-black tabular-nums tracking-tight text-[#ffcc00]">
-                        {timeStr}
+                      <span className="font-mono text-base font-black text-[#ffcc00] tabular-nums">
+                        {d.h}:{d.m}:{d.s}
                       </span>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleToggleAlarm(a.id);
-                        }}
-                        className={`text-[10px] font-bold px-2 py-0.5 border transition-all ${
-                          a.armed
-                            ? "border-[#ffcc00] text-[#ffcc00] bg-[#ffcc00]/20 shadow-[0_0_8px_rgba(255,204,0,0.3)]"
-                            : "border-gray-700 text-gray-500 bg-transparent"
-                        }`}
-                      >
-                        {a.armed ? "ARMED" : "OFF"}
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteAlarm(a.id);
-                        }}
-                        className="text-xs text-red-500 hover:text-red-400 font-bold px-1"
-                        title="Delete alarm"
-                      >
-                        ✕
-                      </button>
+
+                      <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                        {!t.running ? (
+                          <button
+                            onClick={() => handleExecuteTimer(t.id)}
+                            className="px-2 py-0.5 text-[10px] font-black border border-[#ffcc00] hover:bg-[#ffcc00] hover:text-black transition"
+                          >
+                            RUN
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => handlePauseTimer(t.id)}
+                            className="px-2 py-0.5 text-[10px] font-black border border-[#ffcc00]/60 hover:bg-[#ffcc00]/20 transition"
+                          >
+                            PAUSE
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleEditTimer(t)}
+                          className="px-1.5 py-0.5 text-[10px] border border-[#ffcc00]/40 text-[#ffcc00]/70 hover:text-[#ffcc00] transition"
+                        >
+                          EDIT
+                        </button>
+                        <button
+                          onClick={() => handleDeleteTimer(t.id)}
+                          className="px-1.5 py-0.5 text-[10px] border border-red-800 text-red-500 hover:bg-red-950 transition"
+                        >
+                          ✕
+                        </button>
+                      </div>
                     </div>
                   </div>
+                );
+              })}
+            </div>
+          </div>
+        </section>
 
-                  {/* Tactile 7-Day Illuminated Mini-Chips (Sunday-first) */}
-                  <div className="flex items-center gap-1.5 pt-1 border-t border-[#ffcc00]/10">
-                    {WEEK_DAYS.map((d) => {
-                      const isArmed = alarmDays.includes(d.day);
-                      return (
-                        <span
-                          key={d.day}
-                          className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-mono font-bold transition-all ${
-                            isArmed
-                              ? "bg-[#ffcc00] text-black shadow-[0_0_6px_rgba(255,204,0,0.5)] font-black"
-                              : "border border-gray-800 text-gray-600 bg-black/40"
+        {/* Weekly Recurring Alarms Queue */}
+        <section className="border border-[#ffcc00]/40 bg-black p-3 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between border-b border-[#ffcc00]/30 pb-2 mb-2">
+              <span className="text-xs font-black tracking-widest text-[#ffcc00]">
+                WEEKLY ALARMS ({alarms.length})
+              </span>
+              <button
+                onClick={handleAddAlarm}
+                className="px-2 py-0.5 border border-[#ffcc00] text-[11px] font-black hover:bg-[#ffcc00] hover:text-black transition"
+              >
+                + ADD ALARM
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-2 max-h-60 overflow-y-auto pr-1">
+              {alarms.map((a) => {
+                const dayInitials = ["S", "M", "T", "W", "T", "F", "S"];
+                return (
+                  <div
+                    key={a.id}
+                    className="p-2 border border-[#ffcc00]/20 hover:border-[#ffcc00]/50 flex items-center justify-between transition"
+                  >
+                    <div>
+                      <div className="text-xs font-bold text-[#ffcc00]">{a.label}</div>
+                      <div className="flex items-center gap-1 mt-1">
+                        {dayInitials.map((initial, idx) => (
+                          <span
+                            key={idx}
+                            className={`w-3.5 h-3.5 rounded-full text-[9px] flex items-center justify-center font-bold ${
+                              a.days.includes(idx)
+                                ? "bg-[#ffcc00] text-black"
+                                : "text-[#ffcc00]/30 border border-[#ffcc00]/20"
+                            }`}
+                          >
+                            {initial}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      <span className="font-mono text-lg font-black text-[#ffcc00] tabular-nums">
+                        {String(a.hour).padStart(2, "0")}:{String(a.minute).padStart(2, "0")}
+                      </span>
+
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => handleToggleAlarm(a.id)}
+                          className={`px-2 py-0.5 text-[10px] font-black border transition ${
+                            a.armed
+                              ? "bg-[#ffcc00] text-black border-[#ffcc00]"
+                              : "border-[#ffcc00]/40 text-[#ffcc00]/40"
                           }`}
                         >
-                          {d.short}
-                        </span>
-                      );
-                    })}
+                          {a.armed ? "ARMED" : "OFF"}
+                        </button>
+                        <button
+                          onClick={() => handleEditAlarm(a)}
+                          className="px-1.5 py-0.5 text-[10px] border border-[#ffcc00]/40 text-[#ffcc00]/70 hover:text-[#ffcc00] transition"
+                        >
+                          EDIT
+                        </button>
+                        <button
+                          onClick={() => handleDeleteAlarm(a.id)}
+                          className="px-1.5 py-0.5 text-[10px] border border-red-800 text-red-500 hover:bg-red-950 transition"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
         </section>
       </div>
 
-      {/* Surveillance Matrix & Audio Matrix */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4 mb-4">
-        {/* Surveillance Matrix */}
-        <section className="border border-[#ffcc00]/40 bg-black p-3">
-          <div className="text-xs font-bold tracking-widest text-[#ffcc00] border-b border-[#ffcc00]/30 pb-2 mb-2">
-            TACTICAL SURVEILLANCE FEED (SPLIT-SCREEN)
+      {/* Audio Matrix & Operational Settings */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+        {/* Audio Synthesis Matrix */}
+        <section className="border border-[#ffcc00]/30 bg-black p-3">
+          <div className="flex items-center justify-between border-b border-[#ffcc00]/30 pb-2 mb-3">
+            <span className="text-xs font-black tracking-widest text-[#ffcc00]">
+              AUDIO MATRIX & HARNESS
+            </span>
+            <span className="text-[10px] text-[#ffcc00]/60">SYNTHESIZED WEB AUDIO</span>
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            {SURVEILLANCE_CHANNELS.map((ch) => (
-              <div key={ch.id} className="border border-[#ffcc00]/30 bg-black/80 p-2 flex flex-col justify-between h-24">
-                <div className="flex items-center justify-between text-[10px]">
-                  <span className="font-bold text-[#ffcc00]">{ch.id}</span>
-                  <span className="text-[9px] text-[#ffcc00]/60">{ch.status}</span>
-                </div>
-                <div className="text-[11px] font-mono text-[#ffcc00]/80 tracking-tight">
-                  {ch.name}
-                </div>
-                <div className="w-full bg-[#ffcc00]/10 h-1 overflow-hidden">
-                  <div className="bg-[#ffcc00] h-full w-2/3 animate-pulse" />
-                </div>
+
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-[#ffcc00]/80">MASTER VOLUME</span>
+              <div className="flex items-center gap-3 w-48">
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={masterVol}
+                  onChange={(e) => {
+                    const val = parseInt(e.target.value, 10);
+                    setMasterVol(val);
+                    CTUAudio.setMasterVolume(val / 100);
+                  }}
+                  className="w-full accent-[#ffcc00] cursor-pointer"
+                />
+                <span className="text-xs font-bold text-[#ffcc00] w-8 text-right">
+                  {masterVol}%
+                </span>
               </div>
-            ))}
+            </div>
+
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-[#ffcc00]/80">CRISIS ZERO SOUND</span>
+              <select
+                value={zeroSound}
+                onChange={(e) => {
+                  const val = e.target.value as ZeroSoundType;
+                  setZeroSound(val);
+                  CTUAudio.triggerZeroSound(val);
+                }}
+                className="bg-black border border-[#ffcc00] text-[#ffcc00] text-xs font-bold p-1 focus:outline-none"
+              >
+                {Object.entries(ZERO_SOUND_LABELS).map(([k, label]) => (
+                  <option key={k} value={k}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-center justify-between pt-2 border-t border-[#ffcc00]/20">
+              <span className="text-xs text-[#ffcc00]/80">TEST AUDIO NODES</span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => CTUAudio.tick()}
+                  className="px-2 py-0.5 border border-[#ffcc00]/40 text-xs hover:bg-[#ffcc00] hover:text-black transition"
+                >
+                  TICK
+                </button>
+                <button
+                  onClick={() => CTUAudio.chirp()}
+                  className="px-2 py-0.5 border border-[#ffcc00]/40 text-xs hover:bg-[#ffcc00] hover:text-black transition"
+                >
+                  CHIRP
+                </button>
+                <button
+                  onClick={() => CTUAudio.triggerZeroSound(zeroSound)}
+                  className="px-2 py-0.5 border border-[#ffcc00] text-xs font-bold bg-[#ffcc00]/20 hover:bg-[#ffcc00] hover:text-black transition"
+                >
+                  ZERO
+                </button>
+              </div>
+            </div>
           </div>
         </section>
 
-        {/* Audio Calibration & At Zero Selector */}
-        <section className="border border-[#ffcc00]/40 bg-black p-3 flex flex-col justify-between">
+        {/* Security Matrix Protocol Status */}
+        <section className="border border-[#ffcc00]/30 bg-black p-3 flex flex-col justify-between">
           <div>
-            <div className="text-xs font-bold tracking-widest text-[#ffcc00] border-b border-[#ffcc00]/30 pb-2 mb-3">
-              AUDIO TELEMETRY & ZERO SOUND CALIBRATION
+            <div className="flex items-center justify-between border-b border-[#ffcc00]/30 pb-2 mb-3">
+              <span className="text-xs font-black tracking-widest text-[#ffcc00]">
+                TACTICAL PROTOCOL SPECIFICATION
+              </span>
+              <span className="text-[10px] text-[#ffcc00]/60">DEFCON 2</span>
             </div>
 
-            {/* Master Volume Slider */}
-            <div className="mb-4">
-              <div className="flex items-center justify-between text-xs mb-1">
-                <span>MASTER GAIN:</span>
-                <span className="font-bold text-[#ffcc00]">{Math.round(masterVol * 100)}%</span>
-              </div>
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.05"
-                value={masterVol}
-                onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
-                className="w-full"
-              />
-            </div>
-
-            {/* Zero Sound Selector */}
-            <div>
-              <div className="text-xs font-bold text-[#ffcc00]/80 mb-1.5">
-                CRISIS AT ZERO SOUND:
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-                {(Object.keys(ZERO_SOUND_LABELS) as ZeroSoundType[]).map((st) => (
-                  <button
-                    key={st}
-                    onClick={() => handleZeroSoundChange(st)}
-                    className={`p-1.5 text-[11px] font-bold border transition text-left ${
-                      zeroSound === st
-                        ? "border-[#ffcc00] bg-[#ffcc00]/20 text-[#ffcc00]"
-                        : "border-[#ffcc00]/20 text-[#ffcc00]/60 hover:border-[#ffcc00]/50"
-                    }`}
-                  >
-                    {ZERO_SOUND_LABELS[st]}
-                  </button>
-                ))}
-              </div>
+            <div className="text-xs text-[#ffcc00]/70 space-y-1.5">
+              <p>• PRIMARY THEATER: BANGKOK HEADQUARTERS (UTC+7)</p>
+              <p>• BACKGROUND EXECUTION: SERVICE WORKER DRIFT-FREE ENGINE</p>
+              <p>• LOCKSCREEN HUD: LIVE TICKER WITH DIRECT SNOOZE / DISARM</p>
+              <p>• 10-SECOND TAKEOVER: RED PULSE & ESCALATING STINGER HARNESS</p>
             </div>
           </div>
 
@@ -1417,13 +1277,16 @@ function CTUTerminalV74() {
       </div>
 
       {/* Samsung HH:MM:SS Unified Time Picker Modal */}
-      <SamsungTimePicker
-        isOpen={pickerOpen}
-        mode={pickerMode}
-        initialValues={pickerInitial}
-        onConfirm={handlePickerConfirm}
-        onCancel={() => setPickerOpen(false)}
-      />
+      {pickerOpen && (
+        <SamsungTimePicker
+          isOpen={pickerOpen}
+          mode={pickerMode}
+          initialValues={pickerInitial}
+          onConfirm={handlePickerConfirm}
+          onSave={handlePickerConfirm}
+          onCancel={() => setPickerOpen(false)}
+        />
+      )}
 
       {/* 24 Opening Video Modal */}
       {openingOpen && (
@@ -1440,9 +1303,9 @@ function CTUTerminalV74() {
                 ✕ CLOSE
               </button>
             </div>
-            <div className="relative aspect-video w-full bg-black overflow-hidden flex items-center justify-center">
+            <div className="relative aspect-video bg-black flex items-center justify-center border border-[#ffcc00]/30 overflow-hidden">
               <video
-                src="/24 Opening.mp4"
+                src="/24 Countdown.mp4"
                 autoPlay
                 controls
                 playsInline
@@ -1453,96 +1316,45 @@ function CTUTerminalV74() {
         </div>
       )}
 
-      {/* 24 Ending Credits Modal */}
+      {/* 24 Watercolor Ending Credits Modal */}
       {creditsOpen && (
-        <div className="fixed inset-0 z-50 bg-black/95 flex flex-col items-center justify-center p-2 sm:p-4">
-          <div className="w-full max-w-5xl h-[85vh] border-2 border-[#ffcc00] bg-black p-3 relative flex flex-col shadow-[0_0_30px_rgba(255,204,0,0.3)]">
+        <div className="fixed inset-0 z-50 bg-black/95 flex flex-col items-center justify-center p-4">
+          <div className="w-full max-w-4xl border-2 border-[#ffcc00] bg-black p-3 relative flex flex-col shadow-[0_0_30px_rgba(255,204,0,0.3)]">
             <div className="flex items-center justify-between border-b border-[#ffcc00] pb-2 mb-2">
-              <div className="flex items-center gap-3">
-                <span className="text-xs font-black tracking-widest text-[#ffcc00]">
-                  24 ENDING CREDITS SEQUENCE
-                </span>
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => handleCreditsModeChange("watercolor")}
-                    className={`text-[10px] px-2 py-0.5 border font-bold ${
-                      creditsMode === "watercolor"
-                        ? "border-[#ffcc00] bg-[#ffcc00] text-black"
-                        : "border-[#ffcc00]/40 text-[#ffcc00]"
-                    }`}
-                  >
-                    WATERCOLORS
-                  </button>
-                  <button
-                    onClick={() => handleCreditsModeChange("video")}
-                    className={`text-[10px] px-2 py-0.5 border font-bold ${
-                      creditsMode === "video"
-                        ? "border-[#ffcc00] bg-[#ffcc00] text-black"
-                        : "border-[#ffcc00]/40 text-[#ffcc00]"
-                    }`}
-                  >
-                    ORIGINAL VIDEO
-                  </button>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={handleCreditsMusicToggle}
-                  className={`text-[10px] px-2 py-0.5 border font-bold ${
-                    creditsMusic ? "border-[#ffcc00] text-[#ffcc00]" : "border-gray-600 text-gray-500"
-                  }`}
-                >
-                  MUSIC: {creditsMusic ? "ON" : "OFF"}
-                </button>
-                <button
-                  onClick={handleCloseCredits}
-                  className="px-2 py-0.5 border border-[#ffcc00] text-xs font-black hover:bg-[#ffcc00] hover:text-black transition"
-                >
-                  ✕ CLOSE
-                </button>
-              </div>
+              <span className="text-xs font-black tracking-widest text-[#ffcc00]">
+                CTU DEBRIEF • 24 ENDING CREDITS (WATERCOLOR GRID)
+              </span>
+              <button
+                onClick={handleCloseCredits}
+                className="px-2 py-0.5 border border-[#ffcc00] text-xs font-black hover:bg-[#ffcc00] hover:text-black transition"
+              >
+                ✕ CLOSE
+              </button>
             </div>
-
-            <div className="relative flex-1 bg-black overflow-hidden flex items-center justify-center">
-              {creditsMode === "video" ? (
-                <video
-                  src="/24 Closing.mp4"
-                  autoPlay
-                  controls
-                  playsInline
-                  className="w-full h-full object-contain"
-                />
-              ) : (
-                <div className="relative w-full h-full grid grid-cols-2 sm:grid-cols-3 gap-2 p-2 overflow-hidden">
-                  {WATERCOLOR_IMAGES.slice(creditsImageOffset, creditsImageOffset + 6).map((img, idx) => (
-                    <div
-                      key={idx}
-                      className="relative overflow-hidden border border-[#ffcc00]/30 bg-black/60 rounded"
-                    >
-                      <img
-                        src={img}
-                        alt="CTU Historical Watercolor"
-                        className="w-full h-full object-cover ken watercolor"
-                      />
-                    </div>
-                  ))}
-                  {/* Rolling Amber Typography Overlay */}
-                  <div className="absolute inset-0 pointer-events-none flex flex-col items-center text-center justify-center font-mono text-[#ffcc00] tracking-widest text-sm font-black space-y-4 glow">
-                    <p>COUNTER TERRORIST UNIT</p>
-                    <p className="text-xs text-[#ffcc00]/80">LOS ANGELES HEADQUARTERS</p>
-                    <p className="text-xs text-[#ffcc00]/60">MISSION CONCLUDED • ARCHIVE LOCKED</p>
-                  </div>
+            <div className="grid grid-cols-4 sm:grid-cols-8 gap-1 p-2 max-h-[70vh] overflow-y-auto">
+              {Array.from({ length: 32 }, (_, i) => (
+                <div
+                  key={i}
+                  className="aspect-square bg-neutral-900 border border-[#ffcc00]/20 flex items-center justify-center overflow-hidden"
+                >
+                  <img
+                    src={`/24_accurate_watercolors_final/${String(i + 1).padStart(2, "0")}.webp`}
+                    alt={`Credit Frame ${i + 1}`}
+                    className="w-full h-full object-cover filter contrast-125"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLElement).style.display = "none";
+                    }}
+                  />
                 </div>
-              )}
+              ))}
             </div>
           </div>
         </div>
       )}
 
-      {/* 10-Second Countdown Takeover Overlay */}
-      {countdownActive && (
-        <div className="fixed inset-0 z-50 bg-black/95 flex flex-col items-center justify-center p-4">
+      {/* 10-Second Crisis Countdown Takeover Modal */}
+      {countdownTakeover && (
+        <div className="fixed inset-0 z-40 bg-black/90 flex flex-col items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="text-center max-w-md w-full border-2 border-[#ffcc00] bg-black p-6 shadow-[0_0_50px_rgba(255,204,0,0.5)]">
             <div className="text-xs font-black tracking-widest text-[#ffcc00] border-b border-[#ffcc00]/40 pb-2">
               [CRISIS PROTOCOL ACTIVE] {countdownLabel.toUpperCase()}
@@ -1554,19 +1366,16 @@ function CTUTerminalV74() {
             >
               00:00:{String(countdownRemaining).padStart(2, "0")}
             </div>
-            <p className="text-xs text-[#ffcc00]/80 mb-4 tracking-widest">
-              FINAL SECONDS BEFORE ZERO. PREPARE FOR IMPACT.
-            </p>
-            <div className="flex gap-2">
+            <div className="flex items-center justify-center gap-3 mt-4">
               <button
-                onClick={handleSnoozeCrisis}
-                className="flex-1 py-2 border border-[#ffcc00] text-[#ffcc00] text-xs font-black hover:bg-[#ffcc00]/20"
+                onClick={handleSnooze}
+                className="bg-[#ffcc00] text-black font-black text-xs px-4 py-2 hover:bg-[#ffcc00]/80 transition"
               >
                 SNOOZE 5M
               </button>
               <button
-                onClick={handleDisarmCrisis}
-                className="flex-1 py-2 bg-[#ffcc00] text-black text-xs font-black hover:bg-[#ffe066]"
+                onClick={handleDisarm}
+                className="border border-[#ffcc00] text-[#ffcc00] font-black text-xs px-4 py-2 hover:bg-[#ffcc00]/20 transition"
               >
                 DISARM
               </button>
@@ -1575,36 +1384,36 @@ function CTUTerminalV74() {
         </div>
       )}
 
-      {/* At Zero Crisis Overlay */}
-      {crisisTimesUp && (
+      {/* Critical Zero Emergency Overlay */}
+      {crisisOverlay && (
         <div className="fixed inset-0 z-50 bg-black/95 flex flex-col items-center justify-center p-4">
           <div className="text-center max-w-md w-full border-2 border-red-600 bg-black p-6 shadow-[0_0_50px_rgba(239,68,68,0.7)] animate-pulse">
             <div className="text-xs font-black tracking-widest text-red-500 border-b border-red-800 pb-2">
               [CRITICAL EMERGENCY] TIME EXPIRED
             </div>
-            <div className="text-4xl sm:text-5xl md:text-6xl font-black text-red-600 tracking-tight my-4">
+            <div className="text-3xl sm:text-4xl md:text-5xl font-black text-red-600 tracking-tight my-4">
               00:00:00
             </div>
             <p className="text-xs text-red-400 mb-6 tracking-widest">
               {countdownLabel.toUpperCase() || "OPERATION"} HAS REACHED ZERO.
             </p>
-            <div className="flex gap-3">
+            <div className="flex items-center justify-center gap-3">
               <button
-                onClick={handleSnoozeCrisis}
-                className="flex-1 py-2.5 border border-red-500 text-red-500 text-xs font-black hover:bg-red-950/40"
+                onClick={handleSnooze}
+                className="bg-red-600 text-white font-black text-xs px-5 py-2.5 hover:bg-red-700 transition"
               >
-                STAND DOWN (+5M)
+                STAND-DOWN (SNOOZE 5M)
               </button>
               <button
-                onClick={handleDisarmCrisis}
-                className="flex-1 py-2.5 bg-red-600 text-black text-xs font-black hover:bg-red-500"
+                onClick={handleDisarm}
+                className="border-2 border-red-600 text-red-500 font-black text-xs px-5 py-2.5 hover:bg-red-950 transition"
               >
-                ACKNOWLEDGE & DISARM
+                TERMINATE ALARM
               </button>
             </div>
           </div>
         </div>
       )}
-    </div>
+    </main>
   );
 }
