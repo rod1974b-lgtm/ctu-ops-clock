@@ -10,7 +10,7 @@ export type AudioSettings = {
   snooze: number;
 };
 
-export const defaultAudio = {
+export const defaultAudio: AudioSettings = {
   enabled: true,
   volume: 0.85,
   ambient: 28,
@@ -24,14 +24,16 @@ export const defaultAudio = {
 export type ZeroSoundType = "voice" | "boom" | "alarm" | "ctu_beep" | "stinger";
 
 /**
- * Browser audio engine for the CTU terminal. Static methods preserve the
- * existing route API; instance methods support the mission hook.
+ * Browser audio engine for the CTU tactical terminal.
+ * Provides both singleton instance methods and static facade methods for zero-effort calls.
  */
 export class CTUAudio {
   private static sharedInstance: CTUAudio | null = null;
 
-  private static get shared(): CTUAudio {
-    if (!CTUAudio.sharedInstance) CTUAudio.sharedInstance = new CTUAudio();
+  public static get shared(): CTUAudio {
+    if (!CTUAudio.sharedInstance) {
+      CTUAudio.sharedInstance = new CTUAudio();
+    }
     return CTUAudio.sharedInstance;
   }
 
@@ -39,9 +41,7 @@ export class CTUAudio {
   private masterGain: GainNode | null = null;
   private zeroAudio: HTMLAudioElement | null = null;
   private creditsAudio: HTMLAudioElement | null = null;
-  private countdownTracks: Array<HTMLAudioElement | null> = [null, null, null];
   private volume = defaultAudio.volume;
-  private activeNodes = new Set<OscillatorNode>();
 
   constructor() {
     this.initContext();
@@ -50,369 +50,285 @@ export class CTUAudio {
 
   private initContext() {
     if (typeof window === "undefined" || this.ctx) return;
-
     try {
-      const AudioContextConstructor =
+      const AudioCtx =
         window.AudioContext ||
         (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-      if (!AudioContextConstructor) return;
-
-      this.ctx = new AudioContextConstructor();
+      if (!AudioCtx) return;
+      this.ctx = new AudioCtx();
       this.masterGain = this.ctx.createGain();
-      this.masterGain.gain.value = this.volume;
+      this.masterGain.gain.setValueAtTime(this.volume, this.ctx.currentTime);
       this.masterGain.connect(this.ctx.destination);
     } catch {
-      this.ctx = null;
-      this.masterGain = null;
-    }
-  }
-
-  private createAudioElement(src: string, loop: boolean): HTMLAudioElement | null {
-    if (typeof Audio === "undefined") return null;
-    try {
-      const audio = new Audio(src);
-      audio.preload = "auto";
-      audio.loop = loop;
-      audio.volume = this.volume;
-      return audio;
-    } catch {
-      return null;
+      // AudioContext unavailable
     }
   }
 
   private initMedia() {
     if (typeof window === "undefined") return;
-    if (!this.zeroAudio) {
-      this.zeroAudio = this.createAudioElement("/24 At Zero theme.mp3", true);
+    try {
+      this.zeroAudio = new Audio("/24 At Zero theme.mp3");
+      this.zeroAudio.loop = true;
+      this.zeroAudio.volume = this.volume;
+    } catch {
+      this.zeroAudio = null;
     }
-    if (!this.creditsAudio) {
-      this.creditsAudio = this.createAudioElement("/24 At Zero theme.mp3", true);
-    }
-    if (this.countdownTracks.every((track) => track === null)) {
-      this.countdownTracks = [
-        this.createAudioElement("/24 Alarm Countdown.mp3", true),
-        this.createAudioElement("/24 Alarm Countdown.mp3", true),
-        this.createAudioElement("/24 Alarm Countdown.mp3", true),
-      ];
+
+    try {
+      this.creditsAudio = new Audio("/24 At Zero theme.mp3");
+      this.creditsAudio.loop = true;
+      this.creditsAudio.volume = this.volume;
+    } catch {
+      this.creditsAudio = null;
     }
   }
 
-  public async unlock(): Promise<void> {
+  public resumeContext(): void {
     this.initContext();
-    this.initMedia();
-    if (this.ctx?.state === "suspended") {
-      try {
-        await this.ctx.resume();
-      } catch {
-        // The browser may still require a later user gesture.
-      }
-    }
-    if (typeof window !== "undefined" && "speechSynthesis" in window) {
-      try {
-        if (window.speechSynthesis.paused) window.speechSynthesis.resume();
-      } catch {
-        // Speech synthesis is optional in some browsers.
-      }
+    if (this.ctx && this.ctx.state === "suspended") {
+      this.ctx.resume().catch(() => {});
     }
   }
 
-  public unlockAudio(): void {
-    void this.unlock();
-  }
-
-  public getAudioContext(): AudioContext | null {
-    this.initContext();
-    return this.ctx;
-  }
-
-  public setVolume(volume: number): void {
-    this.volume = Math.max(0, Math.min(1, volume));
+  public setVolume(vol: number): void {
+    this.volume = Math.max(0, Math.min(1, vol));
     if (this.masterGain && this.ctx) {
       this.masterGain.gain.setValueAtTime(this.volume, this.ctx.currentTime);
     }
-    this.initMedia();
-    for (const audio of [this.zeroAudio, this.creditsAudio, ...this.countdownTracks]) {
-      if (audio) audio.volume = this.volume;
+    if (this.zeroAudio) {
+      this.zeroAudio.volume = this.volume;
+    }
+    if (this.creditsAudio) {
+      this.creditsAudio.volume = this.volume;
     }
   }
 
-  /** Plays the original alarm track once, twice at five seconds, three times at three. */
-  public playCountdownAlert(intensity: 1 | 2 | 3 = 1): void {
-    void this.unlock();
-    this.countdownTracks.forEach((audio, index) => {
-      if (!audio) return;
-      if (index < intensity) {
-        try {
-          audio.playbackRate = 1;
-          audio.volume = Math.min(1, this.volume * (index === 0 ? 1 : 0.9));
-          if (audio.paused) {
-            if (index > 0) audio.currentTime = index === 1 ? 0.18 : 0.36;
-            else audio.currentTime = 0;
-            void audio.play().catch(() => undefined);
-          }
-        } catch {
-          // Media playback may be unavailable until the next user gesture.
-        }
-      } else {
-        this.pauseAndReset(audio);
+  public playCountdown(intensity: 1 | 2 | 3 = 1): void {
+    if (typeof window === "undefined") return;
+    try {
+      for (let i = 0; i < intensity; i++) {
+        setTimeout(() => {
+          const track = new Audio("/24 Alarm Countdown.mp3");
+          track.volume = Math.min(1, this.volume * 0.95);
+          track.play().catch(() => {});
+        }, i * 70);
       }
-    });
+    } catch {
+      this.beep(880, 0.08);
+    }
   }
 
-  public stopCountdownAlert(): void {
-    this.countdownTracks.forEach((audio) => {
-      if (audio) this.pauseAndReset(audio);
-    });
+  public stopCountdown(): void {
+    // Single-shot sounds finish cleanly
   }
 
-  public playCountdownAlertForSecond(secondsRemaining: number): void {
-    const intensity: 1 | 2 | 3 = secondsRemaining <= 3 ? 3 : secondsRemaining <= 5 ? 2 : 1;
-    this.playCountdownAlert(intensity);
+  public playZeroSound(soundType: ZeroSoundType = "voice"): void {
+    this.resumeContext();
+    if (this.zeroAudio) {
+      this.zeroAudio.currentTime = 0;
+      this.zeroAudio.play().catch(() => {});
+    }
+
+    if (soundType === "voice" && typeof window !== "undefined" && "speechSynthesis" in window) {
+      try {
+        window.speechSynthesis.cancel();
+        const utter = new SpeechSynthesisUtterance("Zero");
+        utter.rate = 0.9;
+        utter.pitch = 0.8;
+        utter.volume = this.volume;
+        window.speechSynthesis.speak(utter);
+      } catch {
+        // Speech synthesis fallback
+      }
+    } else if (soundType === "boom") {
+      this.playBoom();
+    } else if (soundType === "alarm") {
+      this.playAlarmKlaxon();
+    } else if (soundType === "ctu_beep") {
+      this.beep(1200, 0.15);
+    } else if (soundType === "stinger") {
+      this.playStingerChord();
+    }
   }
 
-  public playZeroVoiceAndTheme(): void {
-    void this.unlock();
-    this.stopCountdownAlert();
+  public stopCrisis(): void {
+    if (this.zeroAudio) {
+      this.zeroAudio.pause();
+      this.zeroAudio.currentTime = 0;
+    }
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       try {
         window.speechSynthesis.cancel();
-        const utterance = new SpeechSynthesisUtterance("Zero");
-        utterance.rate = 1;
-        utterance.pitch = 0.85;
-        utterance.volume = Math.max(0.85, this.volume);
-        window.speechSynthesis.speak(utterance);
-      } catch {
-        // The original theme still plays if speech synthesis is unavailable.
-      }
+      } catch {}
     }
-    this.playMediaFromStart(this.zeroAudio);
   }
 
-  public playAtZero(): void {
-    this.playZeroVoiceAndTheme();
-  }
-
-  public playZeroTheme(): void {
-    this.playZeroVoiceAndTheme();
-  }
-
-  public playZeroSound(sound: ZeroSoundType): void {
-    if (sound === "voice") {
-      this.playZeroVoiceAndTheme();
-      return;
+  public startCredits(): void {
+    if (!this.creditsAudio) this.initMedia();
+    if (this.creditsAudio) {
+      this.creditsAudio.currentTime = 0;
+      this.creditsAudio.play().catch(() => {});
     }
-    void this.unlock();
-    this.stopCountdownAlert();
-    this.stopZeroTheme();
-    this.playSynthesizedCue(sound);
   }
 
-  public stopZeroTheme(): void {
-    if (this.zeroAudio) this.pauseAndReset(this.zeroAudio);
-    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+  public stopCredits(): void {
+    if (this.creditsAudio) {
+      this.creditsAudio.pause();
+      this.creditsAudio.currentTime = 0;
+    }
+  }
+
+  public tick(): void {
+    this.beep(1000, 0.03, 0.15);
+  }
+
+  public chirp(): void {
+    this.beep(1760, 0.04, 0.2);
+  }
+
+  public beep(freq = 880, duration = 0.05, relativeVol = 0.3): void {
+    this.resumeContext();
+    if (!this.ctx || !this.masterGain) return;
+    try {
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+      gain.gain.setValueAtTime(this.volume * relativeVol, this.ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.0001, this.ctx.currentTime + duration);
+      osc.connect(gain);
+      gain.connect(this.masterGain);
+      osc.start();
+      osc.stop(this.ctx.currentTime + duration);
+    } catch {}
+  }
+
+  private playBoom(): void {
+    this.resumeContext();
+    if (!this.ctx || !this.masterGain) return;
+    try {
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(150, this.ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(30, this.ctx.currentTime + 1.2);
+      gain.gain.setValueAtTime(this.volume * 0.8, this.ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 1.2);
+      osc.connect(gain);
+      gain.connect(this.masterGain);
+      osc.start();
+      osc.stop(this.ctx.currentTime + 1.2);
+    } catch {}
+  }
+
+  private playAlarmKlaxon(): void {
+    this.resumeContext();
+    if (!this.ctx || !this.masterGain) return;
+    try {
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = "sawtooth";
+      osc.frequency.setValueAtTime(700, this.ctx.currentTime);
+      osc.frequency.linearRampToValueAtTime(950, this.ctx.currentTime + 0.25);
+      gain.gain.setValueAtTime(this.volume * 0.5, this.ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.3);
+      osc.connect(gain);
+      gain.connect(this.masterGain);
+      osc.start();
+      osc.stop(this.ctx.currentTime + 0.3);
+    } catch {}
+  }
+
+  private playStingerChord(): void {
+    this.resumeContext();
+    if (!this.ctx || !this.masterGain) return;
+    const freqs = [220, 277.18, 329.63, 415.3];
+    for (const f of freqs) {
       try {
-        window.speechSynthesis.cancel();
-      } catch {
-        // Speech synthesis is optional.
-      }
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = "sawtooth";
+        osc.frequency.setValueAtTime(f, this.ctx.currentTime);
+        gain.gain.setValueAtTime(this.volume * 0.2, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.8);
+        osc.connect(gain);
+        gain.connect(this.masterGain);
+        osc.start();
+        osc.stop(this.ctx.currentTime + 0.8);
+      } catch {}
     }
-    this.stopSynthesizedCues();
-  }
-
-  public stopAtZero(): void {
-    this.stopZeroTheme();
-  }
-
-  public chirp(durationSeconds = 0.08): void {
-    this.playTone(880, 0.12, Math.max(0.04, durationSeconds));
-  }
-
-  /** Keeps the timer hook compatible while remaining silent outside its alert window. */
-  public tick(level: 1 | 2 | 3, settings: AudioSettings, secondsRemaining: number): void {
-    if (!settings.enabled || this.volume <= 0) return;
-    if (level === 3) {
-      this.stopCountdownAlert();
-      return;
-    }
-    if (level === 2 && secondsRemaining <= 10) {
-      this.playCountdownAlertForSecond(secondsRemaining);
-      return;
-    }
-    this.stopCountdownAlert();
-  }
-
-  public playAlertCountdown(): void {
-    this.playCountdownAlert(1);
-  }
-
-  public stopAlert(): void {
-    this.stopCountdownAlert();
-  }
-
-  public startCreditsAudio(): void {
-    void this.unlock();
-    if (this.creditsAudio) void this.creditsAudio.play().catch(() => undefined);
-  }
-
-  public stopCreditsAudio(): void {
-    if (this.creditsAudio) this.pauseAndReset(this.creditsAudio);
   }
 
   public stopAll(): void {
-    this.stopCountdownAlert();
-    this.stopZeroTheme();
-    this.stopCreditsAudio();
+    this.stopCrisis();
+    this.stopCredits();
+    this.stopCountdown();
   }
 
-  private pauseAndReset(audio: HTMLAudioElement): void {
-    try {
-      audio.pause();
-      audio.currentTime = 0;
-      audio.playbackRate = 1;
-    } catch {
-      // Ignore media elements that have not loaded metadata yet.
-    }
-  }
+  // --- Static Facade Methods ---
 
-  private playMediaFromStart(audio: HTMLAudioElement | null): void {
-    if (!audio) return;
-    try {
-      audio.currentTime = 0;
-      audio.volume = this.volume;
-      void audio.play().catch(() => undefined);
-    } catch {
-      // Playback can fail when the browser blocks media.
-    }
-  }
-
-  private playSynthesizedCue(sound: Exclude<ZeroSoundType, "voice">): void {
-    if (!this.ctx || !this.masterGain || this.volume <= 0) return;
-    const now = this.ctx.currentTime;
-    if (sound === "boom") {
-      this.playTone(105, 0.9, 0.65, "sawtooth", 42);
-    } else if (sound === "alarm") {
-      [0, 0.3, 0.6].forEach((offset) => this.playTone(740, 0.4, 0.18, "square", 520, offset));
-    } else if (sound === "ctu_beep") {
-      [0, 0.18].forEach((offset) => this.playTone(880, 0.32, 0.09, "sine", 660, offset));
-    } else {
-      this.playTone(523, 0.35, 0.55, "sine", 392);
-      this.playTone(659, 0.25, 0.55, "sine", 494);
-    }
-    void now;
-  }
-
-  private playTone(
-    frequency: number,
-    peak: number,
-    duration: number,
-    type: OscillatorType = "sine",
-    endFrequency = frequency,
-    delay = 0,
-  ): void {
-    if (!this.ctx || !this.masterGain || this.volume <= 0) return;
-    try {
-      const start = this.ctx.currentTime + delay;
-      const oscillator = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-      oscillator.type = type;
-      oscillator.frequency.setValueAtTime(frequency, start);
-      oscillator.frequency.exponentialRampToValueAtTime(Math.max(1, endFrequency), start + duration);
-      gain.gain.setValueAtTime(0.0001, start);
-      gain.gain.exponentialRampToValueAtTime(Math.max(0.0002, peak), start + 0.015);
-      gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
-      oscillator.connect(gain);
-      gain.connect(this.masterGain);
-      this.activeNodes.add(oscillator);
-      oscillator.onended = () => {
-        this.activeNodes.delete(oscillator);
-        oscillator.disconnect();
-        gain.disconnect();
-      };
-      oscillator.start(start);
-      oscillator.stop(start + duration + 0.02);
-    } catch {
-      // Audio hardware may be unavailable; timers remain functional without sound.
-    }
-  }
-
-  private stopSynthesizedCues(): void {
-    for (const oscillator of this.activeNodes) {
-      try {
-        oscillator.stop();
-      } catch {
-        // It may already have ended.
-      }
-    }
-    this.activeNodes.clear();
-  }
-
-  // Complete static facade ensuring all terminal and modal calls execute reliably
   public static unlock(): void {
-    void CTUAudio.shared.unlock();
+    CTUAudio.shared.resumeContext();
   }
 
   public static unlockAudio(): void {
-    void CTUAudio.shared.unlock();
+    CTUAudio.shared.resumeContext();
   }
 
-  public static setVolume(volume: number): void {
-    CTUAudio.shared.setVolume(volume);
+  public static setMasterVolume(v: number): void {
+    CTUAudio.shared.setVolume(v);
   }
 
-  public static setMasterVolume(volume: number): void {
-    CTUAudio.shared.setVolume(volume);
+  public static setVolume(v: number): void {
+    CTUAudio.shared.setVolume(v);
   }
 
-  public static resumeContext(): void {
-    void CTUAudio.shared.unlock();
+  public static playCountdownSound(intensity: 1 | 2 | 3 = 1): void {
+    CTUAudio.shared.playCountdown(intensity);
   }
 
-  public static playCountdown(secondsRemaining: number): void {
-    CTUAudio.shared.playCountdownAlertForSecond(secondsRemaining);
-  }
-
-  public static playCountdownSound(secondsRemaining = 10): void {
-    CTUAudio.shared.playCountdownAlertForSecond(secondsRemaining);
+  public static playCountdown(intensity: 1 | 2 | 3 = 1): void {
+    CTUAudio.shared.playCountdown(intensity);
   }
 
   public static stopCountdownSound(): void {
-    CTUAudio.shared.stopCountdownAlert();
+    CTUAudio.shared.stopCountdown();
   }
 
-  public static playZeroSound(sound: ZeroSoundType): void {
+  public static triggerZeroSound(sound?: ZeroSoundType): void {
     CTUAudio.shared.playZeroSound(sound);
   }
 
-  public static triggerZeroSound(sound: ZeroSoundType = "voice"): void {
+  public static playZeroSound(sound?: ZeroSoundType): void {
     CTUAudio.shared.playZeroSound(sound);
   }
 
-  public static startCreditsAudio(): void {
-    CTUAudio.shared.startCreditsAudio();
+  public static stopCrisisAudio(): void {
+    CTUAudio.shared.stopCrisis();
   }
 
   public static playCreditsAudio(): void {
-    CTUAudio.shared.startCreditsAudio();
+    CTUAudio.shared.startCredits();
+  }
+
+  public static startCreditsAudio(): void {
+    CTUAudio.shared.startCredits();
   }
 
   public static stopCreditsAudio(): void {
-    CTUAudio.shared.stopCreditsAudio();
+    CTUAudio.shared.stopCredits();
   }
 
-  public static tick(
-    level: 1 | 2 | 3 = 1,
-    settings: AudioSettings = defaultAudio,
-    secondsRemaining = 60
-  ): void {
-    CTUAudio.shared.tick(level, settings, secondsRemaining);
+  public static tick(): void {
+    CTUAudio.shared.tick();
   }
 
-  public static chirp(durationSeconds = 0.08): void {
-    CTUAudio.shared.chirp(durationSeconds);
+  public static chirp(): void {
+    CTUAudio.shared.chirp();
   }
 
-  public static beep(durationSeconds = 0.12): void {
-    CTUAudio.shared.chirp(durationSeconds);
+  public static beep(freq?: number, duration?: number): void {
+    CTUAudio.shared.beep(freq, duration);
   }
 
   public static stopAll(): void {
