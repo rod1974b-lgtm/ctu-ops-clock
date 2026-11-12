@@ -18,10 +18,12 @@ self.addEventListener("message", (event) => {
   if (data.type === "SCHEDULE_ALERT") {
     const { id, title, label, body, subtext, delayMs, targetEpochMs, epochMs } = data;
     const finalId = id || "ctu-alert";
-    const finalTitle = title || (label ? `[CTU CRISIS ALERT] ${label.toUpperCase()} AT ZERO` : "[CTU CRISIS ALERT] OPERATION EXPIRED");
+    const finalTitle =
+      title ||
+      (label ? `[CTU CRISIS ALERT] ${label.toUpperCase()} AT ZERO` : "[CTU CRISIS ALERT] OPERATION EXPIRED");
     const finalBody = body || subtext || "Mission deadline reached. Tactical override active.";
     const finalDelay = typeof delayMs === "number" ? Math.max(0, delayMs) : 0;
-    const finalEpoch = targetEpochMs || epochMs || (Date.now() + finalDelay);
+    const finalEpoch = targetEpochMs || epochMs || Date.now() + finalDelay;
 
     if (activeAlerts.has(finalId)) {
       clearTimeout(activeAlerts.get(finalId));
