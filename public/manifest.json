@@ -1,17 +1,39 @@
 {
+  "$schema": "https://json.schemastore.org/web-manifest.json",
+  "id": "ctu-operational-terminal-24",
   "short_name": "CTU Ops",
   "name": "CTU 24 Operational Terminal",
-  "description": "Counter Terrorist Unit tactical mission timer and multi-alarm terminal.",
-  "start_url": "/",
+  "description": "Counter Terrorist Unit tactical mission timer, multi-alarm terminal, and background surveillance hub.",
+  "start_url": "/?source=pwa",
+  "scope": "/",
   "display": "standalone",
-  "orientation": "any",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "orientation": "portrait-primary",
   "theme_color": "#000000",
   "background_color": "#000000",
+  "lang": "en-US",
+  "categories": ["utilities", "productivity"],
   "icons": [
     {
       "src": "/favicon.ico",
-      "sizes": "64x64 32x32 24x24 16x16",
+      "sizes": "16x16 24x24 32x32 48x48 64x64",
       "type": "image/x-icon"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Tactical Sprint (25m)",
+      "short_name": "Sprint 25m",
+      "description": "Arm 25-minute mission sprint countdown",
+      "url": "/?preset=sprint25",
+      "icons": [{ "src": "/favicon.ico", "sizes": "64x64" }]
+    },
+    {
+      "name": "Stand-Down (5m)",
+      "short_name": "Stand-Down",
+      "description": "Arm 5-minute tactical stand-down",
+      "url": "/?preset=standdown5",
+      "icons": [{ "src": "/favicon.ico", "sizes": "64x64" }]
     }
   ]
 }
