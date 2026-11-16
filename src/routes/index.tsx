@@ -1,10 +1,11 @@
 // src/routes/index.tsx — COMPLETE DROP-IN REPLACEMENT FILE
 // Requires: public/sw.js, src/components/samsung-time-picker, src/lib/ctu-audio, src/lib/mission-engine
 // FEATURES:
-//  1) Tactical Screen Wake Lock: keeps phone screens active during running timers so the terminal doesn't sleep.
-//  2) Auto-reacquires wake lock when returning from background or switching tabs.
-//  3) Wall-clock deadline synchronization for background timer calculation on reopen.
-//  4) Service Worker alerts for background notifications when PWA is installed.
+//  1) Samsung-style Live Notification Tray HUD: sticky status-bar countdown with Disarm action.
+//  2) MediaSession audio keep-alive to resist Android OS deep-sleep process suspension.
+//  3) Fixed nextAlarm calculation without runtime TypeError.
+//  4) Tactical Screen Wake Lock: keeps display awake while operations are running.
+//  5) Wall-clock deadline synchronization for background timer calculation on reopen.
 
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -59,7 +60,7 @@ interface StoredDeadline {
   label: string;
   targetEpochMs: number;
   type: "timer" | "alarm";
-  days?: number[];
+  days?: number[] | undefined;
 }
 
 const INITIAL_TIMERS: OperationalTimer[] = [
@@ -93,7 +94,7 @@ const WORLD_THEATERS = [
   { city: "SYDNEY", tz: "Australia/Sydney" },
 ];
 
-// ---------- Background alarms (inlined so this file is self-contained) ----------
+// ---------- Background alarms helper functions ----------
 const DEADLINES_KEY = "ctu_active_deadlines";
 function loadDeadlines(): StoredDeadline[] {
   try {
@@ -175,7 +176,6 @@ async function rescheduleAllDeadlines(onMissed?: (d: StoredDeadline) => void) {
   }
   await postToWorker({ type: "CHECK_MISSED" });
 }
-// ------------------------------------------------------------------------------
 
 function CTUTerminalV74() {
   const [mounted, setMounted] = useState(false);
@@ -243,7 +243,7 @@ function CTUTerminalV74() {
     }
   }, [audioUnlocked]);
 
-  // Request native Screen Wake Lock to prevent phone screen from locking/dimming
+  // Request Screen Wake Lock
   const requestWakeLock = useCallback(async () => {
     if (typeof window === "undefined" || !("wakeLock" in navigator)) return;
     try {
@@ -260,7 +260,6 @@ function CTUTerminalV74() {
     }
   }, []);
 
-  // Release screen wake lock when no missions are active
   const releaseWakeLock = useCallback(async () => {
     try {
       if (wakeLockRef.current && !wakeLockRef.current.released) {
@@ -271,7 +270,6 @@ function CTUTerminalV74() {
     setWakeLockActive(false);
   }, []);
 
-  // Synchronize screen wake lock with running timers or manual override
   useEffect(() => {
     const hasRunningTimer = timers.some((t) => t.running);
     const shouldLock = manualWakeLockOverride !== null ? manualWakeLockOverride : hasRunningTimer;
@@ -287,6 +285,7 @@ function CTUTerminalV74() {
   const fireTimerZero = useCallback((timer: OperationalTimer) => {
     timerDeadlinesRef.current.delete(timer.id);
     void cancelBackgroundAlert(timer.id);
+    void postToWorker({ type: "CLEAR_LOCKSCREEN_HUD" });
     setCountdownTakeover(false);
     setCrisisOverlay(true);
     setCountdownLabel(timer.label);
@@ -381,7 +380,7 @@ function CTUTerminalV74() {
         type: "timer",
         targetEpochMs: target,
         title: `[CTU CRISIS ALERT] ${timer.label.toUpperCase()} AT ZERO`,
-        body: `Operation reached zero. Return to tactical terminal immediately.`,
+        body: `Operation "${timer.label}" reached zero. Immediate action required.`,
       });
     },
     [osAlertStatus]
@@ -389,19 +388,22 @@ function CTUTerminalV74() {
 
   const cancelTimerBackground = useCallback((id: string) => {
     void cancelBackgroundAlert(id);
+    void postToWorker({ type: "CLEAR_LOCKSCREEN_HUD" });
   }, []);
 
+  // Fixed nextAlarm call with proper Bangkok timezone calculation
   const scheduleAlarmBackground = useCallback(
     (alarm: OperationalAlarm) => {
       if (osAlertStatus !== "granted" || !alarm.armed) return;
-      const nextTime = nextAlarm(new Date(), [{ hour: alarm.hour, minute: alarm.minute, days: alarm.days }]);
-      if (!nextTime) return;
+      const timeStr = `${String(alarm.hour).padStart(2, "0")}:${String(alarm.minute).padStart(2, "0")}`;
+      const nextTimeMs = nextAlarm(timeStr, Date.now(), alarm.days);
+      if (!nextTimeMs) return;
       void scheduleBackgroundAlert({
         id: alarm.id,
         label: alarm.label,
         type: "alarm",
         days: alarm.days,
-        targetEpochMs: nextTime.getTime(),
+        targetEpochMs: nextTimeMs,
         title: `[CTU ALARM DISPATCH] ${alarm.label.toUpperCase()}`,
         body: `Scheduled tactical alarm for ${String(alarm.hour).padStart(2, "0")}:${String(alarm.minute).padStart(2, "0")} Bangkok Time.`,
       });
@@ -433,7 +435,7 @@ function CTUTerminalV74() {
     } catch {}
   };
 
-  // 1-second operational tick
+  // 1-second operational tick with live Samsung notification tray updates
   useEffect(() => {
     const tick = setInterval(() => {
       const current = new Date();
@@ -519,6 +521,43 @@ function CTUTerminalV74() {
       }
     );
   }, [timers, activeTimerId]);
+
+  // Update Samsung Notification Tray HUD while active timer is running
+  useEffect(() => {
+    if (!mounted || osAlertStatus !== "granted") return;
+
+    if (activeTimer.running && activeTimer.remainingSec > 0) {
+      const h = Math.floor(activeTimer.remainingSec / 3600);
+      const m = Math.floor((activeTimer.remainingSec % 3600) / 60);
+      const s = activeTimer.remainingSec % 60;
+      const formatted =
+        h > 0
+          ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
+          : `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+
+      void postToWorker({
+        type: "UPDATE_LOCKSCREEN_HUD",
+        title: `[CTU TIMER] ${activeTimer.label}`,
+        body: `${formatted} REMAINING — TAP TO EXPAND HUD`,
+        id: activeTimer.id,
+        targetEpochMs: timerDeadlinesRef.current.get(activeTimer.id) ?? Date.now() + activeTimer.remainingSec * 1000,
+      });
+
+      // Register MediaSession metadata to resist deep sleep
+      if ("mediaSession" in navigator) {
+        try {
+          navigator.mediaSession.metadata = new MediaMetadata({
+            title: `[CTU TIMER] ${activeTimer.label}`,
+            artist: "CTU Tactical Operations",
+            album: `${formatted} Remaining`,
+            artwork: [{ src: "/favicon.ico", sizes: "192x192", type: "image/png" }],
+          });
+        } catch {}
+      }
+    } else if (!activeTimer.running) {
+      void postToWorker({ type: "CLEAR_LOCKSCREEN_HUD" });
+    }
+  }, [activeTimer.running, activeTimer.remainingSec, activeTimer.label, activeTimer.id, mounted, osAlertStatus]);
 
   const formatDigits = (totalSec: number) => {
     const clamped = Math.max(0, totalSec);
