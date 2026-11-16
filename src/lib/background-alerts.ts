@@ -2,8 +2,9 @@
 // Manages:
 //  1) Service Worker registration and communication
 //  2) Persistent deadline tracking (localStorage + IndexedDB synchronization)
-//  3) Web Push subscription creation for background OS wakeups
-//  4) Automatic missed deadline audit on app re-entry
+//  3) Live notification tray HUD updates for Samsung / Android status bar
+//  4) Web Push subscription creation for background OS wakeups
+//  5) Automatic missed deadline audit on app re-entry
 
 export interface StoredDeadline {
   id: string;
@@ -116,7 +117,29 @@ export async function postToWorker(msg: unknown): Promise<void> {
   }
 }
 
-// Web Push Registration (For waking dark / locked phone screens)
+// Live Status Bar / Notification Shade HUD updates
+export async function updateLockscreenHUD(
+  title: string,
+  body: string,
+  id: string,
+  targetEpochMs: number
+): Promise<void> {
+  await postToWorker({
+    type: "UPDATE_LOCKSCREEN_HUD",
+    title,
+    body,
+    id,
+    targetEpochMs,
+  });
+}
+
+export async function clearLockscreenHUD(): Promise<void> {
+  await postToWorker({
+    type: "CLEAR_LOCKSCREEN_HUD",
+  });
+}
+
+// Web Push Registration
 export async function subscribeToWebPush(
   vapidPublicKey?: string
 ): Promise<PushSubscription | null> {
@@ -138,7 +161,7 @@ export async function subscribeToWebPush(
       const convertedKey = urlBase64ToUint8Array(vapidPublicKey);
       subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: convertedKey,
+        applicationServerKey: convertedKey.buffer as ArrayBuffer,
       });
     }
 
