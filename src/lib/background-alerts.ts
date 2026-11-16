@@ -1,10 +1,4 @@
-// src/lib/background-alerts.ts — CTU Client-Side Background Alerts & Push Coordination
-// Manages:
-//  1) Service Worker registration and communication
-//  2) Persistent deadline tracking (localStorage + IndexedDB synchronization)
-//  3) Live notification tray HUD updates for Samsung / Android status bar
-//  4) Web Push subscription creation for background OS wakeups
-//  5) Automatic missed deadline audit on app re-entry
+// src/lib/background-alerts.ts — CTU Client-Side Background Alerts, HUD & Phone Intent Wiring
 
 export interface StoredDeadline {
   id: string;
@@ -14,37 +8,11 @@ export interface StoredDeadline {
   days?: number[] | undefined;
 }
 
-export interface PushSubscriptionJSON {
-  endpoint: string;
-  keys: {
-    p256dh: string;
-    auth: string;
-  };
-}
-
 const DEADLINES_KEY = "ctu_active_deadlines";
-const PUSH_SUB_KEY = "ctu_web_push_subscription";
 const SW_URL = "/sw.js";
 
 let registrationPromise: Promise<ServiceWorkerRegistration | null> | null = null;
 
-// Helper to convert base64 URL VAPID key to Uint8Array
-function urlBase64ToUint8Array(base64String: string): Uint8Array {
-  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding)
-    .replace(/-/g, "+")
-    .replace(/_/g, "/");
-
-  const rawData = window.atob(base64);
-  const outputArray = new Uint8Array(rawData.length);
-
-  for (let i = 0; i < rawData.length; ++i) {
-    outputArray[i] = rawData.charCodeAt(i);
-  }
-  return outputArray;
-}
-
-// Deadline Storage Management
 export function loadDeadlines(): StoredDeadline[] {
   if (typeof window === "undefined") return [];
   try {
@@ -75,7 +43,6 @@ export function removeDeadline(id: string): void {
   saveDeadlines(filtered);
 }
 
-// Service Worker Registration
 export function registerCTUWorker(): Promise<ServiceWorkerRegistration | null> {
   if (typeof window === "undefined" || !("serviceWorker" in navigator)) {
     return Promise.resolve(null);
@@ -99,7 +66,6 @@ export function registerCTUWorker(): Promise<ServiceWorkerRegistration | null> {
   return registrationPromise;
 }
 
-// Dispatch message to active Service Worker safely
 export async function postToWorker(msg: unknown): Promise<void> {
   try {
     const registration = await registerCTUWorker();
@@ -139,116 +105,74 @@ export async function clearLockscreenHUD(): Promise<void> {
   });
 }
 
-// Web Push Registration
-export async function subscribeToWebPush(
-  vapidPublicKey?: string
-): Promise<PushSubscription | null> {
-  if (
-    typeof window === "undefined" ||
-    !("serviceWorker" in navigator) ||
-    !("PushManager" in window)
-  ) {
-    return null;
-  }
-
-  try {
-    const registration = await registerCTUWorker();
-    if (!registration) return null;
-
-    let subscription = await registration.pushManager.getSubscription();
-
-    if (!subscription && vapidPublicKey) {
-      const convertedKey = urlBase64ToUint8Array(vapidPublicKey);
-      subscription = await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: convertedKey.buffer as ArrayBuffer,
-      });
-    }
-
-    if (subscription) {
-      localStorage.setItem(PUSH_SUB_KEY, JSON.stringify(subscription.toJSON()));
-    }
-
-    return subscription;
-  } catch (err) {
-    console.warn("[CTU] Web Push subscription failed or was refused:", err);
-    return null;
-  }
-}
-
-export function getSavedPushSubscription(): PushSubscriptionJSON | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = localStorage.getItem(PUSH_SUB_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-}
-
-// High-level Alert Scheduling API
-export async function scheduleBackgroundAlert(input: {
+export async function scheduleBackgroundAlert(deadline: {
   id: string;
   label: string;
-  title: string;
-  body: string;
   targetEpochMs: number;
   type: "timer" | "alarm";
   days?: number[] | undefined;
+  title?: string;
+  body?: string;
 }): Promise<void> {
   upsertDeadline({
-    id: input.id,
-    label: input.label,
-    targetEpochMs: input.targetEpochMs,
-    type: input.type,
-    days: input.days,
+    id: deadline.id,
+    label: deadline.label,
+    targetEpochMs: deadline.targetEpochMs,
+    type: deadline.type,
+    days: deadline.days,
   });
 
   await postToWorker({
-    type: "SCHEDULE_ALERT",
-    id: input.id,
-    label: input.label,
-    title: input.title,
-    body: input.body,
-    targetEpochMs: input.targetEpochMs,
-    epochMs: input.targetEpochMs,
+    type: "ARM_DEADLINE",
+    deadline,
   });
 }
 
 export async function cancelBackgroundAlert(id: string): Promise<void> {
   removeDeadline(id);
-  await postToWorker({ type: "CANCEL_ALERT", id });
+  await postToWorker({
+    type: "CANCEL_DEADLINE",
+    id,
+  });
 }
 
-// Reschedule all active deadlines & catch up on any missed during sleep
-export async function rescheduleAllDeadlines(
-  onMissed?: (deadline: StoredDeadline) => void
-): Promise<void> {
-  const now = Date.now();
-  const all = loadDeadlines();
+// Wire alarm or timer into native Samsung / Android phone clock
+export function syncWithNativePhoneClock(
+  type: "timer" | "alarm",
+  options: {
+    durationSec?: number;
+    hour?: number;
+    minute?: number;
+    label?: string;
+  }
+): void {
+  if (typeof window === "undefined") return;
 
-  for (const deadline of all) {
-    if (deadline.targetEpochMs <= now) {
-      removeDeadline(deadline.id);
-      onMissed?.(deadline);
-    } else {
-      await postToWorker({
-        type: "SCHEDULE_ALERT",
-        id: deadline.id,
-        label: deadline.label,
-        title:
-          deadline.type === "alarm"
-            ? `[CTU ALARM DISPATCH] ${deadline.label.toUpperCase()}`
-            : `[CTU CRISIS ALERT] ${deadline.label.toUpperCase()} AT ZERO`,
-        body:
-          deadline.type === "alarm"
-            ? "Scheduled tactical alarm."
-            : "Operation reached zero.",
-        targetEpochMs: deadline.targetEpochMs,
-        epochMs: deadline.targetEpochMs,
-      });
+  const label = encodeURIComponent(options.label || "CTU MISSION");
+
+  if (type === "timer" && options.durationSec && options.durationSec > 0) {
+    // Android intent to set a native system timer
+    const intentUrl = `intent:#Intent;action=android.intent.action.SET_TIMER;i.android.intent.extra.alarm.LENGTH=${options.durationSec};S.android.intent.extra.alarm.MESSAGE=${label};B.android.intent.extra.alarm.SKIP_UI=true;end`;
+    const fallbackUrl = `intent:#Intent;action=android.intent.action.SET_TIMER;i.android.intent.extra.alarm.LENGTH=${options.durationSec};S.android.intent.extra.alarm.MESSAGE=${label};end`;
+
+    try {
+      window.location.href = intentUrl;
+    } catch {
+      try {
+        window.location.href = fallbackUrl;
+      } catch {}
+    }
+  } else if (type === "alarm" && typeof options.hour === "number" && typeof options.minute === "number") {
+    // Android intent to set a native system alarm
+    const intentUrl = `intent:#Intent;action=android.intent.action.SET_ALARM;i.android.intent.extra.alarm.HOUR=${options.hour};i.android.intent.extra.alarm.MINUTES=${options.minute};S.android.intent.extra.alarm.MESSAGE=${label};B.android.intent.extra.alarm.SKIP_UI=true;end`;
+    const fallbackUrl = `intent:#Intent;action=android.intent.action.SET_ALARM;i.android.intent.extra.alarm.HOUR=${options.hour};i.android.intent.extra.alarm.MINUTES=${options.minute};S.android.intent.extra.alarm.MESSAGE=${label};end`;
+
+    try {
+      window.location.href = intentUrl;
+    } catch {
+      try {
+        window.location.href = fallbackUrl;
+      } catch {}
     }
   }
-
-  await postToWorker({ type: "CHECK_MISSED" });
 }
