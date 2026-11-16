@@ -1,10 +1,10 @@
 // src/routes/index.tsx — FULL REPLACEMENT FILE
-// CTU Tactical Operational Command (24 Theme v74)
-// Features:
-//  1) Tactical Screen Wake Lock API keeping device display active during running operations.
-//  2) Samsung HH:MM:SS drum picker with live numeric editing and stable keying.
-//  3) Wall-clock deadline synchronization for background timer calculation on reopen.
-//  4) Service Worker alerts for background notifications when PWA is installed.
+// CTU Tactical Operational Command (24 Theme v75)
+// Fixes:
+//  1) Decoupled mount registration effect from timers state (eliminates "Maximum update depth exceeded").
+//  2) Dedicated Screen Wake Lock effect that tracks running state without cycle triggers.
+//  3) Stable master 1-second heartbeat interval using refs for tick reconciliation.
+//  4) Pure state reducers with side-effects executed cleanly outside state updaters.
 
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -13,9 +13,9 @@ import { CTUAudio } from "@/lib/ctu-audio";
 import { nextAlarm } from "@/lib/mission-engine";
 
 export const Route = createFileRoute("/")({
-  component: CTUTerminalV74,
+  component: CTUTerminalV75,
   head: () => ({
-    title: "CTU Tactical Operational Command | 24 v74",
+    title: "CTU Tactical Operational Command | 24 v75",
     meta: [
       { name: "description", content: "24-style CTU operational command terminal with multi-alarm and live wake lock." },
       { property: "og:title", content: "CTU Tactical Operational Command" },
@@ -86,8 +86,9 @@ const WORLD_THEATERS = [
   { city: "SYDNEY", tz: "Australia/Sydney" },
 ];
 
-// ---------- Background alarms (inlined so this file is self-contained) ----------
+// ---------- Background alert helpers (inlined for self-contained execution) ----------
 const DEADLINES_KEY = "ctu_active_deadlines";
+
 function loadDeadlines(): StoredDeadline[] {
   try {
     const p = JSON.parse(localStorage.getItem(DEADLINES_KEY) || "[]");
@@ -96,14 +97,17 @@ function loadDeadlines(): StoredDeadline[] {
     return [];
   }
 }
+
 function saveDeadlines(list: StoredDeadline[]) {
   try {
     localStorage.setItem(DEADLINES_KEY, JSON.stringify(list));
   } catch {}
 }
+
 function upsertDeadline(d: StoredDeadline) {
   saveDeadlines([...loadDeadlines().filter((x) => x.id !== d.id), d]);
 }
+
 function removeDeadline(id: string) {
   saveDeadlines(loadDeadlines().filter((x) => x.id !== id));
 }
@@ -169,9 +173,9 @@ async function rescheduleAllDeadlines(onMissed?: (d: StoredDeadline) => void) {
   }
   await postToWorker({ type: "CHECK_MISSED" });
 }
-// ------------------------------------------------------------------------------
+// -------------------------------------------------------------------------------------
 
-function CTUTerminalV74() {
+function CTUTerminalV75() {
   const [mounted, setMounted] = useState(false);
   const [nowDate, setNowDate] = useState<Date>(() => new Date());
   const [colonVisible, setColonVisible] = useState(true);
@@ -230,6 +234,16 @@ function CTUTerminalV74() {
   const zeroSoundRef = useRef(zeroSound);
   zeroSoundRef.current = zeroSound;
 
+  // Stable references for timer interval loop
+  const timersRef = useRef(timers);
+  timersRef.current = timers;
+  const alarmsRef = useRef(alarms);
+  alarmsRef.current = alarms;
+  const activeTimerIdRef = useRef(activeTimerId);
+  activeTimerIdRef.current = activeTimerId;
+  const countdownTakeoverRef = useRef(countdownTakeover);
+  countdownTakeoverRef.current = countdownTakeover;
+
   const unlockAudio = useCallback(() => {
     if (!audioUnlocked) {
       CTUAudio.unlock();
@@ -262,21 +276,7 @@ function CTUTerminalV74() {
     } catch {}
   }, []);
 
-  const fireTimerZero = useCallback((timer: OperationalTimer) => {
-    cancelTimerBackground(timer.id);
-    timerDeadlinesRef.current.delete(timer.id);
-    setCountdownTakeover(false);
-    setCrisisOverlay(true);
-    setCountdownLabel(timer.label);
-    CTUAudio.triggerZeroSound(zeroSoundRef.current);
-    setTimers((prev) =>
-      prev.map((t) =>
-        t.id === timer.id ? { ...t, remainingSec: 0, running: false, timesUp: true, status: "EXPIRED" } : t
-      )
-    );
-  }, []);
-
-  // Client mount
+  // 1. One-time client mount effect: registers worker and catches up on deadlines
   useEffect(() => {
     setMounted(true);
     if (typeof window !== "undefined" && "Notification" in window) {
@@ -312,11 +312,21 @@ function CTUTerminalV74() {
         CTUAudio.triggerZeroSound(zeroSoundRef.current);
       });
     });
+  }, []);
+
+  // 2. Dedicated Screen Wake Lock effect: tracks running status without re-running on every second
+  const isAnyTimerRunning = useMemo(() => timers.some((t) => t.running), [timers]);
+
+  useEffect(() => {
+    if (isAnyTimerRunning || manualWakeLockOverride) {
+      void requestWakeLock();
+    } else {
+      void releaseWakeLock();
+    }
 
     const onVisible = () => {
       if (document.visibilityState === "visible") {
-        const hasRunning = timers.some((t) => t.running);
-        if (hasRunning || manualWakeLockOverride) {
+        if (isAnyTimerRunning || manualWakeLockOverride) {
           void requestWakeLock();
         }
       }
@@ -325,11 +335,10 @@ function CTUTerminalV74() {
     document.addEventListener("visibilitychange", onVisible);
     return () => {
       document.removeEventListener("visibilitychange", onVisible);
-      void releaseWakeLock();
     };
-  }, [manualWakeLockOverride, releaseWakeLock, requestWakeLock, timers]);
+  }, [isAnyTimerRunning, manualWakeLockOverride, requestWakeLock, releaseWakeLock]);
 
-  // Persist timers & alarms to localStorage
+  // 3. Persist timers & alarms to localStorage
   useEffect(() => {
     if (!mounted) return;
     try {
@@ -396,24 +405,27 @@ function CTUTerminalV74() {
       const res = await Notification.requestPermission();
       setOsAlertStatus(res);
       if (res === "granted") {
-        for (const t of timers) {
+        for (const t of timersRef.current) {
           if (t.running) scheduleTimerBackground(t);
         }
-        for (const a of alarms) {
+        for (const a of alarmsRef.current) {
           if (a.armed) scheduleAlarmBackground(a);
         }
       }
     } catch {}
   };
 
-  // Master 1-second Operational Heartbeat
+  // 4. Stable Master 1-Second Operational Heartbeat (Runs continuously without re-attaching)
   useEffect(() => {
     const tick = setInterval(() => {
       const now = new Date();
       setNowDate(now);
       setColonVisible((p) => !p);
 
-      // Reconcile wall-clock timer deadlines
+      const expiredTimers: OperationalTimer[] = [];
+      let enteredCountdown: { remaining: number; label: string } | null = null;
+
+      // Reconcile wall-clock timer deadlines purely
       setTimers((prev) => {
         let changed = false;
         const next = prev.map((timer) => {
@@ -426,14 +438,12 @@ function CTUTerminalV74() {
           if (currentRemaining !== timer.remainingSec) changed = true;
 
           if (currentRemaining <= 0) {
-            fireTimerZero(timer);
+            expiredTimers.push(timer);
             return { ...timer, remainingSec: 0, running: false, timesUp: true, status: "EXPIRED" as const };
           }
 
-          if (currentRemaining <= 10 && timer.id === activeTimerId && !countdownTakeover) {
-            setCountdownTakeover(true);
-            setCountdownRemaining(currentRemaining);
-            setCountdownLabel(timer.label);
+          if (currentRemaining <= 10 && timer.id === activeTimerIdRef.current && !countdownTakeoverRef.current) {
+            enteredCountdown = { remaining: currentRemaining, label: timer.label };
           }
 
           return { ...timer, remainingSec: currentRemaining };
@@ -442,8 +452,24 @@ function CTUTerminalV74() {
         return changed ? next : prev;
       });
 
+      // Execute side-effects cleanly outside of the setTimers reducer
+      for (const expired of expiredTimers) {
+        cancelTimerBackground(expired.id);
+        timerDeadlinesRef.current.delete(expired.id);
+        setCountdownTakeover(false);
+        setCrisisOverlay(true);
+        setCountdownLabel(expired.label);
+        CTUAudio.triggerZeroSound(zeroSoundRef.current);
+      }
+
+      if (enteredCountdown) {
+        setCountdownTakeover(true);
+        setCountdownRemaining(enteredCountdown.remaining);
+        setCountdownLabel(enteredCountdown.label);
+      }
+
       // Synchronize countdown audio
-      const currentActive = timers.find((t) => t.id === activeTimerId);
+      const currentActive = timersRef.current.find((t) => t.id === activeTimerIdRef.current);
       if (currentActive && currentActive.running && currentActive.remainingSec <= 10 && currentActive.remainingSec > 0) {
         setCountdownRemaining(currentActive.remainingSec);
         if (lastCountdownSecondRef.current !== currentActive.remainingSec) {
@@ -473,7 +499,7 @@ function CTUTerminalV74() {
 
       if (bkkSecond === 0) {
         const timeKey = `${bkkHour}:${bkkMinute}`;
-        for (const alarm of alarms) {
+        for (const alarm of alarmsRef.current) {
           if (alarm.armed && alarm.hour === bkkHour && alarm.minute === bkkMinute) {
             if (alarm.days.includes(currentBkkDay) && lastAlarmTriggerRef.current[alarm.id] !== timeKey) {
               lastAlarmTriggerRef.current[alarm.id] = timeKey;
@@ -488,7 +514,7 @@ function CTUTerminalV74() {
     }, 1000);
 
     return () => clearInterval(tick);
-  }, [alarms, activeTimerId, countdownTakeover, fireTimerZero, scheduleAlarmBackground, timers]);
+  }, [cancelTimerBackground, scheduleAlarmBackground]);
 
   const activeTimer = useMemo(() => {
     return (
@@ -547,12 +573,13 @@ function CTUTerminalV74() {
     unlockAudio();
     const timer = timers.find((t) => t.id === id);
     if (!timer) return;
-    const deadline = Date.now() + timer.remainingSec * 1000;
+    const startingSec = timer.remainingSec <= 0 ? (timer.durationSec > 0 ? timer.durationSec : 25 * 60) : timer.remainingSec;
+    const deadline = Date.now() + startingSec * 1000;
     timerDeadlinesRef.current.set(id, deadline);
     scheduleTimerBackground(timer, deadline);
 
     setTimers((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, running: true, timesUp: false, status: "ACTIVE" } : t))
+      prev.map((t) => (t.id === id ? { ...t, remainingSec: startingSec, running: true, timesUp: false, status: "ACTIVE" } : t))
     );
   };
 
