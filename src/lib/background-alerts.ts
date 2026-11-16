@@ -1,4 +1,4 @@
-// src/lib/background-alerts.ts — CTU Client-Side Background Alerts, HUD & Phone Intent Wiring
+// src/lib/background-alerts.ts — CTU Client-Side Background Alerts, Web Push & Phone Intent Wiring
 
 export interface StoredDeadline {
   id: string;
@@ -83,6 +83,65 @@ export async function postToWorker(msg: unknown): Promise<void> {
   }
 }
 
+// Subscribe to Web Push via PushManager and sync with backend
+export async function enableWebPushSubscription(): Promise<PushSubscription | null> {
+  if (typeof window === "undefined" || !("PushManager" in window)) {
+    return null;
+  }
+
+  try {
+    const registration = await registerCTUWorker();
+    if (!registration) return null;
+
+    // Fetch server VAPID key
+    let vapidKey: string | null = null;
+    try {
+      const res = await fetch("/api/public/push");
+      if (res.ok) {
+        const json = await res.json();
+        vapidKey = json.vapidPublicKey || null;
+      }
+    } catch {
+      // VAPID endpoint unavailable
+    }
+
+    let subscription = await registration.pushManager.getSubscription();
+    if (!subscription && vapidKey) {
+      const urlBase64ToUint8Array = (base64String: string) => {
+        const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+        const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+        const rawData = window.atob(base64);
+        const outputArray = new Uint8Array(rawData.length);
+        for (let i = 0; i < rawData.length; ++i) {
+          outputArray[i] = rawData.charCodeAt(i);
+        }
+        return outputArray;
+      };
+
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(vapidKey),
+      });
+    }
+
+    if (subscription) {
+      await fetch("/api/public/push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "subscribe",
+          subscription: subscription.toJSON(),
+        }),
+      });
+    }
+
+    return subscription;
+  } catch (err) {
+    console.warn("[CTU] Web Push subscription failed:", err);
+    return null;
+  }
+}
+
 // Live Status Bar / Notification Shade HUD updates
 export async function updateLockscreenHUD(
   title: string,
@@ -126,6 +185,22 @@ export async function scheduleBackgroundAlert(deadline: {
     type: "ARM_DEADLINE",
     deadline,
   });
+
+  // Sync deadline with backend push scheduler if configured
+  try {
+    await fetch("/api/public/push", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "schedule",
+        alarmId: deadline.id,
+        label: deadline.label,
+        targetEpochMs: deadline.targetEpochMs,
+      }),
+    });
+  } catch {
+    // Offline or server route optional
+  }
 }
 
 export async function cancelBackgroundAlert(id: string): Promise<void> {
@@ -134,9 +209,22 @@ export async function cancelBackgroundAlert(id: string): Promise<void> {
     type: "CANCEL_DEADLINE",
     id,
   });
+
+  try {
+    await fetch("/api/public/push", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "cancel",
+        alarmId: id,
+      }),
+    });
+  } catch {
+    // Offline or server route optional
+  }
 }
 
-// Wire alarm or timer into native Samsung / Android phone clock
+// Wire alarm or timer directly into native Samsung / Android phone clock
 export function syncWithNativePhoneClock(
   type: "timer" | "alarm",
   options: {
@@ -151,7 +239,6 @@ export function syncWithNativePhoneClock(
   const label = encodeURIComponent(options.label || "CTU MISSION");
 
   if (type === "timer" && options.durationSec && options.durationSec > 0) {
-    // Android intent to set a native system timer
     const intentUrl = `intent:#Intent;action=android.intent.action.SET_TIMER;i.android.intent.extra.alarm.LENGTH=${options.durationSec};S.android.intent.extra.alarm.MESSAGE=${label};B.android.intent.extra.alarm.SKIP_UI=true;end`;
     const fallbackUrl = `intent:#Intent;action=android.intent.action.SET_TIMER;i.android.intent.extra.alarm.LENGTH=${options.durationSec};S.android.intent.extra.alarm.MESSAGE=${label};end`;
 
@@ -163,7 +250,6 @@ export function syncWithNativePhoneClock(
       } catch {}
     }
   } else if (type === "alarm" && typeof options.hour === "number" && typeof options.minute === "number") {
-    // Android intent to set a native system alarm
     const intentUrl = `intent:#Intent;action=android.intent.action.SET_ALARM;i.android.intent.extra.alarm.HOUR=${options.hour};i.android.intent.extra.alarm.MINUTES=${options.minute};S.android.intent.extra.alarm.MESSAGE=${label};B.android.intent.extra.alarm.SKIP_UI=true;end`;
     const fallbackUrl = `intent:#Intent;action=android.intent.action.SET_ALARM;i.android.intent.extra.alarm.HOUR=${options.hour};i.android.intent.extra.alarm.MINUTES=${options.minute};S.android.intent.extra.alarm.MESSAGE=${label};end`;
 
