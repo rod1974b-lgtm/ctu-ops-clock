@@ -1,11 +1,10 @@
-// src/routes/index.tsx — COMPLETE DROP-IN REPLACEMENT FILE
-// Requires: public/sw.js, src/components/samsung-time-picker, src/lib/ctu-audio, src/lib/mission-engine
-// FEATURES:
-//  1) Samsung-style Live Notification Tray HUD: sticky status-bar countdown with Disarm action.
-//  2) MediaSession audio keep-alive to resist Android OS deep-sleep process suspension.
-//  3) Fixed nextAlarm calculation without runtime TypeError.
-//  4) Tactical Screen Wake Lock: keeps display awake while operations are running.
-//  5) Wall-clock deadline synchronization for background timer calculation on reopen.
+// src/routes/index.tsx — FULL REPLACEMENT FILE
+// CTU Tactical Operational Command (24 Theme v74)
+// Features:
+//  1) Tactical Screen Wake Lock API keeping device display active during running operations.
+//  2) Samsung HH:MM:SS drum picker with live numeric editing and stable keying.
+//  3) Wall-clock deadline synchronization for background timer calculation on reopen.
+//  4) Service Worker alerts for background notifications when PWA is installed.
 
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -16,37 +15,30 @@ import { nextAlarm } from "@/lib/mission-engine";
 export const Route = createFileRoute("/")({
   component: CTUTerminalV74,
   head: () => ({
+    title: "CTU Tactical Operational Command | 24 v74",
     meta: [
-      { title: "CTU Tactical Operational Command | 24 v74" },
-      { name: "description", content: "Authentic 24 TV Show CTU Tactical Multi-Timer & Alarm System." },
+      { name: "description", content: "24-style CTU operational command terminal with multi-alarm and live wake lock." },
       { property: "og:title", content: "CTU Tactical Operational Command" },
-      { property: "og:description", content: "Authentic 24 TV Show CTU Multi-Timer Terminal." },
+      { property: "og:description", content: "Obsidian & amber real-time mission timer terminal." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
   }),
 });
 
-type ZeroSoundType = "voice" | "boom" | "alarm" | "ctu_beep" | "stinger";
-const ZERO_SOUND_LABELS: Record<ZeroSoundType, string> = {
-  voice: "VOICE: 0 AT ZERO",
-  boom: "BOOM IMPACT",
-  alarm: "ALARM KLAXON",
-  ctu_beep: "CTU BEEP",
-  stinger: "STINGER CHORD",
-};
+type ZeroSoundType = "voice" | "boom" | "silent";
 
-export interface OperationalTimer {
+interface OperationalTimer {
   id: string;
   label: string;
   durationSec: number;
   remainingSec: number;
   running: boolean;
   timesUp: boolean;
-  status: string;
+  status: "STANDBY" | "ACTIVE" | "HOLD" | "EXPIRED";
 }
 
-export interface OperationalAlarm {
+interface OperationalAlarm {
   id: string;
   label: string;
   hour: number;
@@ -60,7 +52,7 @@ interface StoredDeadline {
   label: string;
   targetEpochMs: number;
   type: "timer" | "alarm";
-  days?: number[] | undefined;
+  days?: number[];
 }
 
 const INITIAL_TIMERS: OperationalTimer[] = [
@@ -94,7 +86,7 @@ const WORLD_THEATERS = [
   { city: "SYDNEY", tz: "Australia/Sydney" },
 ];
 
-// ---------- Background alarms helper functions ----------
+// ---------- Background alarms (inlined so this file is self-contained) ----------
 const DEADLINES_KEY = "ctu_active_deadlines";
 function loadDeadlines(): StoredDeadline[] {
   try {
@@ -149,6 +141,7 @@ async function scheduleBackgroundAlert(input: {
     title: input.title,
     body: input.body,
     targetEpochMs: input.targetEpochMs,
+    epochMs: input.targetEpochMs,
   });
 }
 
@@ -176,6 +169,7 @@ async function rescheduleAllDeadlines(onMissed?: (d: StoredDeadline) => void) {
   }
   await postToWorker({ type: "CHECK_MISSED" });
 }
+// ------------------------------------------------------------------------------
 
 function CTUTerminalV74() {
   const [mounted, setMounted] = useState(false);
@@ -243,49 +237,34 @@ function CTUTerminalV74() {
     }
   }, [audioUnlocked]);
 
-  // Request Screen Wake Lock
   const requestWakeLock = useCallback(async () => {
     if (typeof window === "undefined" || !("wakeLock" in navigator)) return;
     try {
-      if (!wakeLockRef.current || wakeLockRef.current.released) {
-        const lock = await (navigator as any).wakeLock.request("screen");
-        wakeLockRef.current = lock;
-        setWakeLockActive(true);
-        lock.addEventListener("release", () => {
+      if (!wakeLockRef.current) {
+        const sentinel = await (navigator as any).wakeLock.request("screen");
+        sentinel.addEventListener("release", () => {
+          wakeLockRef.current = null;
           setWakeLockActive(false);
         });
+        wakeLockRef.current = sentinel;
+        setWakeLockActive(true);
       }
-    } catch {
-      setWakeLockActive(false);
-    }
+    } catch {}
   }, []);
 
   const releaseWakeLock = useCallback(async () => {
     try {
-      if (wakeLockRef.current && !wakeLockRef.current.released) {
+      if (wakeLockRef.current) {
         await wakeLockRef.current.release();
+        wakeLockRef.current = null;
+        setWakeLockActive(false);
       }
     } catch {}
-    wakeLockRef.current = null;
-    setWakeLockActive(false);
   }, []);
 
-  useEffect(() => {
-    const hasRunningTimer = timers.some((t) => t.running);
-    const shouldLock = manualWakeLockOverride !== null ? manualWakeLockOverride : hasRunningTimer;
-
-    if (shouldLock) {
-      void requestWakeLock();
-    } else {
-      void releaseWakeLock();
-    }
-  }, [timers, manualWakeLockOverride, requestWakeLock, releaseWakeLock]);
-
-  // Fire a timer that reached zero
   const fireTimerZero = useCallback((timer: OperationalTimer) => {
+    cancelTimerBackground(timer.id);
     timerDeadlinesRef.current.delete(timer.id);
-    void cancelBackgroundAlert(timer.id);
-    void postToWorker({ type: "CLEAR_LOCKSCREEN_HUD" });
     setCountdownTakeover(false);
     setCrisisOverlay(true);
     setCountdownLabel(timer.label);
@@ -297,7 +276,7 @@ function CTUTerminalV74() {
     );
   }, []);
 
-  // Client mount: register worker, reconcile running timers against wall clock, re-acquire wake lock
+  // Client mount
   useEffect(() => {
     setMounted(true);
     if (typeof window !== "undefined" && "Notification" in window) {
@@ -340,11 +319,6 @@ function CTUTerminalV74() {
         if (hasRunning || manualWakeLockOverride) {
           void requestWakeLock();
         }
-        void rescheduleAllDeadlines((missed) => {
-          setCountdownLabel(missed.label);
-          setCrisisOverlay(true);
-          CTUAudio.triggerZeroSound(zeroSoundRef.current);
-        });
       }
     };
 
@@ -380,7 +354,7 @@ function CTUTerminalV74() {
         type: "timer",
         targetEpochMs: target,
         title: `[CTU CRISIS ALERT] ${timer.label.toUpperCase()} AT ZERO`,
-        body: `Operation "${timer.label}" reached zero. Immediate action required.`,
+        body: `Operation reached zero. Return to tactical terminal immediately.`,
       });
     },
     [osAlertStatus]
@@ -388,22 +362,19 @@ function CTUTerminalV74() {
 
   const cancelTimerBackground = useCallback((id: string) => {
     void cancelBackgroundAlert(id);
-    void postToWorker({ type: "CLEAR_LOCKSCREEN_HUD" });
   }, []);
 
-  // Fixed nextAlarm call with proper Bangkok timezone calculation
   const scheduleAlarmBackground = useCallback(
     (alarm: OperationalAlarm) => {
       if (osAlertStatus !== "granted" || !alarm.armed) return;
-      const timeStr = `${String(alarm.hour).padStart(2, "0")}:${String(alarm.minute).padStart(2, "0")}`;
-      const nextTimeMs = nextAlarm(timeStr, Date.now(), alarm.days);
-      if (!nextTimeMs) return;
+      const nextTime = nextAlarm(new Date(), [{ hour: alarm.hour, minute: alarm.minute, days: alarm.days }]);
+      if (!nextTime) return;
       void scheduleBackgroundAlert({
         id: alarm.id,
         label: alarm.label,
         type: "alarm",
         days: alarm.days,
-        targetEpochMs: nextTimeMs,
+        targetEpochMs: nextTime.getTime(),
         title: `[CTU ALARM DISPATCH] ${alarm.label.toUpperCase()}`,
         body: `Scheduled tactical alarm for ${String(alarm.hour).padStart(2, "0")}:${String(alarm.minute).padStart(2, "0")} Bangkok Time.`,
       });
@@ -422,11 +393,11 @@ function CTUTerminalV74() {
       return;
     }
     try {
-      const permission = await Notification.requestPermission();
-      setOsAlertStatus(permission);
-      if (permission === "granted") {
+      const res = await Notification.requestPermission();
+      setOsAlertStatus(res);
+      if (res === "granted") {
         for (const t of timers) {
-          if (t.running) scheduleTimerBackground(t, timerDeadlinesRef.current.get(t.id));
+          if (t.running) scheduleTimerBackground(t);
         }
         for (const a of alarms) {
           if (a.armed) scheduleAlarmBackground(a);
@@ -435,67 +406,79 @@ function CTUTerminalV74() {
     } catch {}
   };
 
-  // 1-second operational tick with live Samsung notification tray updates
+  // Master 1-second Operational Heartbeat
   useEffect(() => {
     const tick = setInterval(() => {
-      const current = new Date();
-      setNowDate(current);
-      setColonVisible((prev) => !prev);
+      const now = new Date();
+      setNowDate(now);
+      setColonVisible((p) => !p);
 
-      setTimers((prev) =>
-        prev.map((t) => {
-          if (!t.running) return t;
-          const deadline = timerDeadlinesRef.current.get(t.id);
-          const remaining = deadline
-            ? Math.max(0, Math.ceil((deadline - current.getTime()) / 1000))
-            : Math.max(0, t.remainingSec - 1);
+      // Reconcile wall-clock timer deadlines
+      setTimers((prev) => {
+        let changed = false;
+        const next = prev.map((timer) => {
+          if (!timer.running) return timer;
+          const deadline = timerDeadlinesRef.current.get(timer.id);
+          const currentRemaining = deadline
+            ? Math.max(0, Math.ceil((deadline - Date.now()) / 1000))
+            : Math.max(0, timer.remainingSec - 1);
 
-          if (remaining <= 0) {
-            queueMicrotask(() => fireTimerZero(t));
-            return { ...t, remainingSec: 0, running: false, timesUp: true, status: "EXPIRED" };
+          if (currentRemaining !== timer.remainingSec) changed = true;
+
+          if (currentRemaining <= 0) {
+            fireTimerZero(timer);
+            return { ...timer, remainingSec: 0, running: false, timesUp: true, status: "EXPIRED" as const };
           }
 
-          if (remaining <= 10 && remaining > 0) {
+          if (currentRemaining <= 10 && timer.id === activeTimerId && !countdownTakeover) {
             setCountdownTakeover(true);
-            setCountdownRemaining(remaining);
-            setCountdownLabel(t.label);
-            if (lastCountdownSecondRef.current !== remaining) {
-              lastCountdownSecondRef.current = remaining;
-              const intensity = remaining <= 3 ? 3 : remaining <= 5 ? 2 : 1;
-              CTUAudio.playCountdownSound(intensity);
-            }
-          } else if (remaining > 10 && t.id === activeTimerId && countdownTakeover) {
-            setCountdownTakeover(false);
+            setCountdownRemaining(currentRemaining);
+            setCountdownLabel(timer.label);
           }
-          return { ...t, remainingSec: remaining };
-        })
-      );
 
-      // Daily alarms in Bangkok time (Asia/Bangkok)
+          return { ...timer, remainingSec: currentRemaining };
+        });
+
+        return changed ? next : prev;
+      });
+
+      // Synchronize countdown audio
+      const currentActive = timers.find((t) => t.id === activeTimerId);
+      if (currentActive && currentActive.running && currentActive.remainingSec <= 10 && currentActive.remainingSec > 0) {
+        setCountdownRemaining(currentActive.remainingSec);
+        if (lastCountdownSecondRef.current !== currentActive.remainingSec) {
+          lastCountdownSecondRef.current = currentActive.remainingSec;
+          CTUAudio.playCountdownSound(currentActive.remainingSec);
+        }
+      } else {
+        lastCountdownSecondRef.current = null;
+      }
+
+      // Check Alarms against Bangkok time (UTC+7)
       const bkkFormatter = new Intl.DateTimeFormat("en-US", {
         timeZone: "Asia/Bangkok",
         hour: "numeric",
         minute: "numeric",
         second: "numeric",
-        hour12: false,
         weekday: "short",
+        hour12: false,
       });
-      const parts = bkkFormatter.formatToParts(current);
-      const bkkHour = parseInt(parts.find((p) => p.type === "hour")?.value || "0", 10);
-      const bkkMinute = parseInt(parts.find((p) => p.type === "minute")?.value || "0", 10);
-      const bkkSecond = parseInt(parts.find((p) => p.type === "second")?.value || "0", 10);
+      const bkkParts = bkkFormatter.formatToParts(now);
+      const bkkHour = parseInt(bkkParts.find((p) => p.type === "hour")?.value || "0", 10);
+      const bkkMinute = parseInt(bkkParts.find((p) => p.type === "minute")?.value || "0", 10);
+      const bkkSecond = parseInt(bkkParts.find((p) => p.type === "second")?.value || "0", 10);
+      const bkkWk = bkkParts.find((p) => p.type === "weekday")?.value || "Sun";
       const dayMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
-      const bkkDay = dayMap[parts.find((p) => p.type === "weekday")?.value || "Sun"] ?? 0;
+      const currentBkkDay = dayMap[bkkWk] ?? 0;
 
       if (bkkSecond === 0) {
+        const timeKey = `${bkkHour}:${bkkMinute}`;
         for (const alarm of alarms) {
-          if (!alarm.armed) continue;
-          if (alarm.hour === bkkHour && alarm.minute === bkkMinute && alarm.days.includes(bkkDay)) {
-            const key = `${alarm.id}-${current.toISOString().slice(0, 10)}-${bkkHour}:${bkkMinute}`;
-            if (!lastAlarmTriggerRef.current[key]) {
-              lastAlarmTriggerRef.current[key] = "triggered";
-              setCountdownLabel(alarm.label);
+          if (alarm.armed && alarm.hour === bkkHour && alarm.minute === bkkMinute) {
+            if (alarm.days.includes(currentBkkDay) && lastAlarmTriggerRef.current[alarm.id] !== timeKey) {
+              lastAlarmTriggerRef.current[alarm.id] = timeKey;
               setCrisisOverlay(true);
+              setCountdownLabel(alarm.label);
               CTUAudio.triggerZeroSound(zeroSoundRef.current);
               scheduleAlarmBackground(alarm);
             }
@@ -505,7 +488,7 @@ function CTUTerminalV74() {
     }, 1000);
 
     return () => clearInterval(tick);
-  }, [alarms, activeTimerId, countdownTakeover, fireTimerZero, scheduleAlarmBackground]);
+  }, [alarms, activeTimerId, countdownTakeover, fireTimerZero, scheduleAlarmBackground, timers]);
 
   const activeTimer = useMemo(() => {
     return (
@@ -521,43 +504,6 @@ function CTUTerminalV74() {
       }
     );
   }, [timers, activeTimerId]);
-
-  // Update Samsung Notification Tray HUD while active timer is running
-  useEffect(() => {
-    if (!mounted || osAlertStatus !== "granted") return;
-
-    if (activeTimer.running && activeTimer.remainingSec > 0) {
-      const h = Math.floor(activeTimer.remainingSec / 3600);
-      const m = Math.floor((activeTimer.remainingSec % 3600) / 60);
-      const s = activeTimer.remainingSec % 60;
-      const formatted =
-        h > 0
-          ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
-          : `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-
-      void postToWorker({
-        type: "UPDATE_LOCKSCREEN_HUD",
-        title: `[CTU TIMER] ${activeTimer.label}`,
-        body: `${formatted} REMAINING — TAP TO EXPAND HUD`,
-        id: activeTimer.id,
-        targetEpochMs: timerDeadlinesRef.current.get(activeTimer.id) ?? Date.now() + activeTimer.remainingSec * 1000,
-      });
-
-      // Register MediaSession metadata to resist deep sleep
-      if ("mediaSession" in navigator) {
-        try {
-          navigator.mediaSession.metadata = new MediaMetadata({
-            title: `[CTU TIMER] ${activeTimer.label}`,
-            artist: "CTU Tactical Operations",
-            album: `${formatted} Remaining`,
-            artwork: [{ src: "/favicon.ico", sizes: "192x192", type: "image/png" }],
-          });
-        } catch {}
-      }
-    } else if (!activeTimer.running) {
-      void postToWorker({ type: "CLEAR_LOCKSCREEN_HUD" });
-    }
-  }, [activeTimer.running, activeTimer.remainingSec, activeTimer.label, activeTimer.id, mounted, osAlertStatus]);
 
   const formatDigits = (totalSec: number) => {
     const clamped = Math.max(0, totalSec);
@@ -597,19 +543,16 @@ function CTUTerminalV74() {
     return `${String(nowDate.getUTCHours()).padStart(2, "0")}:${String(nowDate.getUTCMinutes()).padStart(2, "0")}:${String(nowDate.getUTCSeconds()).padStart(2, "0")}Z`;
   }, [nowDate]);
 
-  // Handlers
   const handleExecuteTimer = (id: string) => {
     unlockAudio();
+    const timer = timers.find((t) => t.id === id);
+    if (!timer) return;
+    const deadline = Date.now() + timer.remainingSec * 1000;
+    timerDeadlinesRef.current.set(id, deadline);
+    scheduleTimerBackground(timer, deadline);
+
     setTimers((prev) =>
-      prev.map((t) => {
-        if (t.id !== id) return t;
-        const remaining = t.remainingSec === 0 ? t.durationSec : t.remainingSec;
-        const deadline = Date.now() + remaining * 1000;
-        timerDeadlinesRef.current.set(id, deadline);
-        const updated = { ...t, running: true, timesUp: false, status: "IN PROGRESS", remainingSec: remaining };
-        scheduleTimerBackground(updated, deadline);
-        return updated;
-      })
+      prev.map((t) => (t.id === id ? { ...t, running: true, timesUp: false, status: "ACTIVE" } : t))
     );
   };
 
@@ -772,47 +715,23 @@ function CTUTerminalV74() {
   const handleSnooze = () => {
     unlockAudio();
     setCrisisOverlay(false);
-    setCountdownTakeover(false);
     CTUAudio.stopCrisisAudio();
-    CTUAudio.stopCountdownSound();
-    const deadline = Date.now() + 5 * 60 * 1000;
-    timerDeadlinesRef.current.set(activeTimerId, deadline);
-    setTimers((prev) =>
-      prev.map((t) =>
-        t.id === activeTimerId ? { ...t, remainingSec: 5 * 60, running: true, timesUp: false, status: "SNOOZE (5M)" } : t
-      )
-    );
-    void scheduleBackgroundAlert({
-      id: activeTimerId,
-      label: activeTimer.label,
-      type: "timer",
-      targetEpochMs: deadline,
-      title: `[CTU CRISIS ALERT] ${activeTimer.label.toUpperCase()} AT ZERO`,
-      body: `Snooze (5m) reached zero.`,
-    });
   };
 
-  const handleDisarm = () => {
+  const handleDisarmCrisis = () => {
     unlockAudio();
     setCrisisOverlay(false);
     setCountdownTakeover(false);
     CTUAudio.stopCrisisAudio();
-    CTUAudio.stopCountdownSound();
-    cancelTimerBackground(activeTimerId);
-    timerDeadlinesRef.current.delete(activeTimerId);
-    setTimers((prev) =>
-      prev.map((t) =>
-        t.id === activeTimerId ? { ...t, remainingSec: t.durationSec, running: false, timesUp: false, status: "STANDBY" } : t
-      )
-    );
   };
 
-  const handleToggleWakeLockManual = () => {
+  const handleOpenOpening = () => {
     unlockAudio();
-    setManualWakeLockOverride((prev) => {
-      const next = prev === null ? !wakeLockActive : !prev;
-      return next;
-    });
+    setOpeningOpen(true);
+  };
+
+  const handleCloseOpening = () => {
+    setOpeningOpen(false);
   };
 
   const handleOpenCredits = () => {
@@ -820,69 +739,92 @@ function CTUTerminalV74() {
     setCreditsOpen(true);
     CTUAudio.playCreditsAudio();
   };
+
   const handleCloseCredits = () => {
     setCreditsOpen(false);
     CTUAudio.stopCreditsAudio();
   };
-  const handleOpenOpening = () => {
-    unlockAudio();
-    setOpeningOpen(true);
-  };
-  const handleCloseOpening = () => {
-    setOpeningOpen(false);
-  };
 
   return (
-    <main onClick={unlockAudio} className="min-h-screen bg-black text-[#ffcc00] font-mono select-none overflow-x-hidden p-2 sm:p-4 md:p-6">
+    <main className="min-h-screen bg-black text-[#ffcc00] font-mono p-2 sm:p-4 selection:bg-[#ffcc00] selection:text-black">
+      {/* OS Alert Banner (when permission not yet granted) */}
+      {osAlertStatus !== "granted" && (
+        <div className="border border-[#ffcc00] bg-[#ffcc00]/10 p-2 mb-3 flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-[#ffcc00] animate-ping" />
+            <span>OS NOTIFICATIONS DISENGAGED — ALERTS WILL NOT SOUND IN BACKGROUND</span>
+          </div>
+          <button
+            onClick={handleRequestOSAlerts}
+            className="bg-[#ffcc00] text-black font-black px-3 py-1 hover:bg-[#ffcc00]/80 tracking-wider text-[11px]"
+          >
+            LINK OS ALERTS
+          </button>
+        </div>
+      )}
+
+      {/* Top Bar Header */}
       <header className="border-2 border-[#ffcc00] bg-black p-3 mb-4 shadow-[0_0_20px_rgba(255,204,0,0.15)] flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-3">
-          <div className="w-4 h-4 bg-[#ffcc00] flex items-center justify-center font-black text-black text-xs">24</div>
-          <div>
-            <h1 className="text-sm sm:text-base font-black tracking-widest text-[#ffcc00]">CTU OPERATIONAL COMMAND TERMINAL</h1>
-            <p className="text-[10px] tracking-wider text-[#ffcc00]/70">COUNTER TERRORIST UNIT • SOUTHEAST ASIA DIVISION • DIRECTIVE 74</p>
-          </div>
+          <div className="w-3 h-3 bg-[#ffcc00] animate-pulse" />
+          <h1 className="text-sm sm:text-base font-black tracking-widest text-[#ffcc00]">
+            CTU // TACTICAL OPERATIONS COMMAND
+          </h1>
         </div>
-        <div className="flex items-center gap-2">
-          {/* Tactical Screen Wake Lock indicator & manual toggle */}
+        <div className="flex flex-wrap items-center gap-2 text-xs">
           <button
-            onClick={handleToggleWakeLockManual}
-            className={`px-2.5 py-1 border text-[11px] font-bold tracking-wider transition flex items-center gap-1.5 ${
+            onClick={() => {
+              if (wakeLockActive) {
+                setManualWakeLockOverride(false);
+                void releaseWakeLock();
+              } else {
+                setManualWakeLockOverride(true);
+                void requestWakeLock();
+              }
+            }}
+            className={`px-2 py-1 border text-[11px] font-bold tracking-wider transition ${
               wakeLockActive
                 ? "border-[#ffcc00] text-black bg-[#ffcc00] shadow-[0_0_10px_rgba(255,204,0,0.5)]"
                 : "border-[#ffcc00]/40 text-[#ffcc00]/60 hover:border-[#ffcc00] hover:text-[#ffcc00]"
             }`}
-            title="Toggle Screen Wake Lock to prevent phone screen from sleeping during tactical operations"
+            title="Keep device screen active during operations"
           >
-            <span>{wakeLockActive ? "WAKE LOCK: ENGAGED" : "WAKE LOCK: IDLE"}</span>
+            {wakeLockActive ? "[WAKE LOCK: ENGAGED]" : "[WAKE LOCK: IDLE]"}
           </button>
-
-          {osAlertStatus !== "granted" ? (
-            <button
-              onClick={handleRequestOSAlerts}
-              className="px-2.5 py-1 bg-amber-500/20 border border-[#ffcc00] text-[#ffcc00] text-xs font-bold tracking-wider hover:bg-[#ffcc00] hover:text-black transition flex items-center gap-1.5 animate-pulse"
-              title="Enable background notifications when tab is closed"
-            >
-              <span>LINK OS ALERTS</span>
-            </button>
-          ) : (
-            <span className="px-2.5 py-1 border border-[#ffcc00]/40 text-[#ffcc00]/80 text-[11px] font-bold">OS ALERTS: ARMED</span>
-          )}
-          <button onClick={handleOpenOpening} className="px-2 py-1 border border-[#ffcc00]/60 text-xs font-bold hover:bg-[#ffcc00] hover:text-black transition">
-            OPENING FEED
+          <button
+            onClick={handleOpenOpening}
+            className="px-2 py-1 border border-[#ffcc00]/60 text-[11px] font-bold tracking-wider hover:bg-[#ffcc00] hover:text-black transition"
+          >
+            OPENING
           </button>
-          <button onClick={handleOpenCredits} className="px-2 py-1 border border-[#ffcc00]/60 text-xs font-bold hover:bg-[#ffcc00] hover:text-black transition">
+          <button
+            onClick={handleOpenCredits}
+            className="px-2 py-1 border border-[#ffcc00]/60 text-[11px] font-bold tracking-wider hover:bg-[#ffcc00] hover:text-black transition"
+          >
             CREDITS
+          </button>
+          <button
+            onClick={() => {
+              unlockAudio();
+              setZeroSound((p) => (p === "voice" ? "boom" : p === "boom" ? "silent" : "voice"));
+            }}
+            className="px-2 py-1 border border-[#ffcc00]/60 text-[11px] font-bold tracking-wider hover:bg-[#ffcc00] hover:text-black transition"
+          >
+            SOUND: {zeroSound.toUpperCase()}
           </button>
         </div>
       </header>
 
-      {/* World Theaters ticker */}
-      <div className="w-full bg-black/80 border border-[#ffcc00]/30 py-1 mb-4 overflow-hidden flex items-center text-[11px] text-[#ffcc00]/70">
-        <span className="font-bold text-[#ffcc00] tracking-widest shrink-0 bg-black px-2 py-1 z-10">WORLD THEATERS:</span>
-        <div className="flex-1 overflow-hidden">
-          <div className="world-ticker-track">
+      {/* World Theaters Marquee Ticker */}
+      <div className="border border-[#ffcc00]/40 bg-black p-2 mb-4 overflow-hidden text-xs">
+        <div className="flex items-center gap-2 mb-1">
+          <span className="w-1.5 h-1.5 bg-[#ffcc00] rounded-full" />
+          <span className="text-[10px] tracking-widest text-[#ffcc00]/70 font-bold uppercase">WORLD THEATERS:</span>
+        </div>
+        <div className="overflow-hidden whitespace-nowrap relative">
+          <div className="inline-flex gap-6 animate-world-ticker">
             {[0, 1].map((copy) => (
-              <div key={copy} aria-hidden={copy === 1} className="flex items-center gap-6 pr-6 shrink-0">
+              <div key={copy} className="inline-flex gap-6">
                 {WORLD_THEATERS.map((wt) => {
                   const tStr = new Intl.DateTimeFormat("en-US", {
                     timeZone: wt.tz,
@@ -987,32 +929,26 @@ function CTUTerminalV74() {
             >
               RESET
             </button>
-            <button
-              onClick={() => handleEditTimer(activeTimer)}
-              className="border border-[#ffcc00]/50 text-[#ffcc00]/80 font-bold text-xs sm:text-sm tracking-widest py-2 px-4 hover:border-[#ffcc00] hover:text-[#ffcc00] active:scale-95 transition"
-            >
-              MODIFY
-            </button>
           </div>
         </section>
       </div>
 
-      {/* Quick-Arm Presets */}
-      <div className="border border-[#ffcc00]/40 bg-black p-2.5 mb-4 flex items-center justify-between flex-wrap gap-2">
-        <span className="text-[11px] font-bold tracking-widest text-[#ffcc00]/70">QUICK-ARM PRESETS:</span>
+      {/* Quick Tactical Presets */}
+      <div className="border border-[#ffcc00]/40 bg-black p-3 mb-4 flex flex-wrap items-center justify-between gap-2">
+        <span className="text-xs font-bold tracking-wider text-[#ffcc00]/70">QUICK ARMED PRESETS:</span>
         <div className="flex flex-wrap gap-2">
-          {QUICK_PRESETS.map((p) => (
+          {QUICK_PRESETS.map((preset) => (
             <button
-              key={p.label}
-              onClick={() => handleQuickPreset(p.seconds)}
-              className="border border-[#ffcc00]/50 px-3 py-1 text-xs font-bold tracking-wider text-[#ffcc00] hover:bg-[#ffcc00] hover:text-black transition"
+              key={preset.label}
+              onClick={() => handleQuickPreset(preset.seconds)}
+              className="px-3 py-1 border border-[#ffcc00]/60 text-xs font-bold hover:bg-[#ffcc00] hover:text-black transition"
             >
-              {p.label} • {p.seconds / 60}M
+              {preset.label} ({preset.seconds / 60}M)
             </button>
           ))}
           <button
             onClick={handleAddTimer}
-            className="bg-[#ffcc00] text-black px-3 py-1 text-xs font-black tracking-wider hover:bg-[#ffcc00]/80 transition"
+            className="px-3 py-1 bg-[#ffcc00] text-black text-xs font-black hover:bg-[#ffcc00]/80 transition"
           >
             + NEW TIMER
           </button>
@@ -1132,72 +1068,69 @@ function CTUTerminalV74() {
             ))}
           </div>
           <div className="border-t border-[#ffcc00]/30 mt-3 pt-3 space-y-2">
-            <div className="flex items-center justify-between text-[11px]">
-              <span className="font-bold tracking-wider text-[#ffcc00]/70">ZERO SOUND</span>
-              <span className="text-[#ffcc00]">{ZERO_SOUND_LABELS[zeroSound]}</span>
+            <div className="text-[11px] text-[#ffcc00]/80 font-bold uppercase tracking-wider">
+              OPERATIONAL MASTER VOLUME
             </div>
-            <div className="flex flex-wrap gap-1.5">
-              {(Object.keys(ZERO_SOUND_LABELS) as ZeroSoundType[]).map((s) => (
-                <button
-                  key={s}
-                  onClick={() => {
-                    setZeroSound(s);
-                    CTUAudio.triggerZeroSound(s);
-                  }}
-                  className={`px-2 py-1 border text-[10px] font-bold tracking-wider ${
-                    zeroSound === s ? "bg-[#ffcc00] text-black border-[#ffcc00]" : "border-[#ffcc00]/50 text-[#ffcc00] hover:bg-[#ffcc00]/20"
-                  }`}
-                >
-                  {ZERO_SOUND_LABELS[s]}
-                </button>
-              ))}
-            </div>
-            <div className="flex items-center gap-2 text-[11px]">
-              <span className="font-bold tracking-wider text-[#ffcc00]/70">VOLUME</span>
+            <div className="flex items-center gap-3">
               <input
                 type="range"
-                min={0}
-                max={100}
+                min="0"
+                max="100"
                 value={masterVol}
-                onChange={(e) => setMasterVol(Number(e.target.value))}
-                className="flex-1 accent-[#ffcc00]"
+                onChange={(e) => {
+                  const v = parseInt(e.target.value, 10);
+                  setMasterVol(v);
+                  CTUAudio.setMasterVolume(v / 100);
+                }}
+                className="w-full accent-[#ffcc00] cursor-pointer"
               />
-              <span className="tabular-nums">{masterVol}%</span>
+              <span className="text-xs font-black tabular-nums">{masterVol}%</span>
             </div>
-            <p className="text-[10px] text-[#ffcc00]/50 leading-relaxed">
-              Screen Wake Lock is active while missions run. Background alerts need: installed PWA + OS Alerts: ARMED.
-            </p>
           </div>
         </section>
       </div>
 
-      <footer className="text-center text-[10px] tracking-widest text-[#ffcc00]/50 pb-4">
-        CTU • SOUTHEAST ASIA DIVISION • DIRECTIVE 74 • SCREEN WAKE LOCK & BACKGROUND ALERTS
-      </footer>
-
       {/* 10-Second Countdown Takeover */}
       {countdownTakeover && (
-        <div className="fixed inset-0 z-40 bg-black/90 flex flex-col items-center justify-center pointer-events-none">
-          <p className="text-xs tracking-widest text-[#ffcc00] font-bold animate-pulse">{countdownLabel}</p>
+        <div className="fixed inset-0 z-40 bg-black/95 flex flex-col items-center justify-center p-4 border-4 border-red-600 animate-pulse">
+          <div className="text-xs sm:text-sm font-black text-red-500 tracking-[0.3em] uppercase">
+            TACTICAL CRISIS IMMINENT // {countdownLabel}
+          </div>
           <div className="text-8xl sm:text-9xl font-black text-red-600 tracking-tighter tabular-nums mt-2 drop-shadow-[0_0_40px_rgba(255,0,0,0.8)]">
             {countdownRemaining}
           </div>
-          <p className="text-xs tracking-widest text-red-500 font-bold mt-4 animate-pulse">IMMINENT ZERO REACH</p>
+          <div className="text-xs text-red-400/80 tracking-widest mt-2">SECONDS TO DEADLINE ZERO</div>
+          <button
+            onClick={handleDisarmCrisis}
+            className="mt-6 border-2 border-red-600 text-red-500 hover:bg-red-600 hover:text-black font-black px-6 py-2 text-xs tracking-widest transition"
+          >
+            DISARM COUNTDOWN
+          </button>
         </div>
       )}
 
       {/* Crisis Overlay at Zero */}
       {crisisOverlay && (
-        <div className="fixed inset-0 z-50 bg-red-950/90 border-4 border-red-600 flex flex-col items-center justify-center p-4">
-          <p className="text-xs font-bold tracking-widest text-white/80">CTU CRISIS INTERVENTION</p>
-          <p className="text-2xl sm:text-3xl font-black text-white mt-2">{countdownLabel}</p>
-          <p className="text-sm text-white/80 mt-1">OPERATION REACHED ZERO</p>
-          <div className="flex gap-3 mt-6">
-            <button onClick={handleSnooze} className="bg-white text-black font-black px-6 py-2 text-sm tracking-widest hover:bg-neutral-200 transition">
-              SNOOZE 5M
+        <div className="fixed inset-0 z-50 bg-black/95 flex flex-col items-center justify-center p-4 border-4 border-red-600">
+          <div className="text-sm font-black text-red-500 tracking-widest uppercase">
+            [CRISIS ALERT] // {countdownLabel}
+          </div>
+          <div className="text-6xl sm:text-7xl md:text-8xl font-black text-red-600 my-4 tracking-tight tabular-nums drop-shadow-[0_0_50px_rgba(255,0,0,0.9)] text-center">
+            00:00:00
+          </div>
+          <div className="text-xs text-red-400 tracking-widest mb-6">TARGET DEADLINE HAS BEEN REACHED</div>
+          <div className="flex gap-4">
+            <button
+              onClick={handleSnooze}
+              className="bg-[#ffcc00] text-black font-black px-6 py-2 text-xs tracking-widest hover:bg-[#ffcc00]/80 transition"
+            >
+              SNOOZE (5M)
             </button>
-            <button onClick={handleDisarm} className="border-2 border-white text-white font-black px-6 py-2 text-sm tracking-widest hover:bg-white/10 transition">
-              DISARM
+            <button
+              onClick={handleDisarmCrisis}
+              className="border-2 border-red-600 text-red-500 hover:bg-red-600 hover:text-black font-black px-6 py-2 text-xs tracking-widest transition"
+            >
+              DISARM TERMINAL
             </button>
           </div>
         </div>
@@ -1206,17 +1139,13 @@ function CTUTerminalV74() {
       {/* Samsung HH:MM:SS Picker */}
       {pickerOpen && (
         <SamsungTimePicker
-          {...({
-            open: pickerOpen,
-            isOpen: pickerOpen,
-            mode: pickerMode,
-            initial: pickerInitial,
-            initialValues: pickerInitial,
-            value: pickerInitial,
-            onConfirm: handlePickerConfirm,
-            onClose: () => setPickerOpen(false),
-            onCancel: () => setPickerOpen(false),
-          } as any)}
+          key={`${pickerMode}-${editingItemId ?? "new"}`}
+          isOpen={pickerOpen}
+          mode={pickerMode}
+          initialValues={pickerInitial}
+          initialFocus="minutes"
+          onConfirm={handlePickerConfirm}
+          onCancel={() => setPickerOpen(false)}
         />
       )}
 
@@ -1229,19 +1158,19 @@ function CTUTerminalV74() {
               CTU tactical terminal online. All timers are wall-clock driven. Screen Wake Lock keeps the terminal display active during operations.
             </p>
             <button onClick={handleCloseOpening} className="mt-4 bg-[#ffcc00] text-black font-black px-4 py-2 text-xs tracking-widest hover:bg-[#ffcc00]/80">
-              CLOSE
+              ACKNOWLEDGE
             </button>
           </div>
         </div>
       )}
 
-      {/* Credits Modal */}
+      {/* Ending Credits Modal */}
       {creditsOpen && (
         <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4" onClick={handleCloseCredits}>
           <div className="border-2 border-[#ffcc00] bg-black p-5 max-w-md w-full" onClick={(e) => e.stopPropagation()}>
-            <h2 className="font-black tracking-widest">CREDITS</h2>
+            <h2 className="font-black tracking-widest">MISSION CREDITS</h2>
             <p className="text-xs text-[#ffcc00]/70 mt-2 leading-relaxed">
-              CTU Tactical Operational Command — fan-made terminal inspired by 24. Not affiliated with FOX / Disney.
+              24-inspired CTU Operational Command Terminal. Built with React, Tailwind, and Web Audio. Not affiliated with FOX / Disney.
             </p>
             <button onClick={handleCloseCredits} className="mt-4 bg-[#ffcc00] text-black font-black px-4 py-2 text-xs tracking-widest hover:bg-[#ffcc00]/80">
               CLOSE
