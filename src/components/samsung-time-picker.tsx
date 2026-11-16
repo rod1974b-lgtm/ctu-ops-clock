@@ -6,7 +6,7 @@ export type SamsungTimePickerValues = {
   minutes: number;
   seconds: number;
   totalSeconds?: number;
-  days?: number[] | undefined;
+  days?: number[] | undefined; // 0 = Sun, 1 = Mon, ..., 6 = Sat
 };
 
 export interface SamsungTimePickerProps {
@@ -111,11 +111,9 @@ function DrumColumn({
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const raw = e.target.value.replace(/\D/g, "").slice(0, 2);
     setTypedValue(raw);
-    if (raw.length > 0) {
-      const num = parseInt(raw, 10);
-      if (!isNaN(num)) {
-        onChange(Math.min(max, Math.max(0, num)));
-      }
+    const num = raw === "" ? 0 : parseInt(raw, 10);
+    if (!isNaN(num)) {
+      onChange(Math.min(max, Math.max(0, num)));
     }
   };
 
@@ -317,8 +315,6 @@ export function SamsungTimePicker({
   const selectedDaysRef = useRef(selectedDays);
   selectedDaysRef.current = selectedDays;
 
-  // Track serialized signature of props so we ONLY sync when external input changes,
-  // NEVER on internal re-renders or array identity changes.
   const prevSyncSigRef = useRef<string>("");
   const currentSyncSig = `${mode}:${isOpen}:${effectiveHours}:${effectiveMinutes}:${effectiveSeconds}:${effectiveDays.join(",")}`;
 
@@ -423,48 +419,50 @@ export function SamsungTimePicker({
 
         {mode === "alarm" && (
           <div className="mt-5 border-t border-[#ffcc00]/25 pt-4">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[10px] tracking-widest text-[#ffcc00]/80 font-bold uppercase">REPEATING DAYS:</span>
-              <span className="text-[10px] tracking-wider text-[#ffcc00] font-black">{getDaysSummary()}</span>
+            <div className="flex items-center justify-between text-[11px] font-bold tracking-wider text-[#ffcc00]/80 mb-2">
+              <span>REPEATING DAYS:</span>
+              <span className="text-[10px] text-[#ffcc00] font-mono">{getDaysSummary()}</span>
             </div>
-            <div className="flex justify-between items-center gap-1.5 mt-2">
-              {WEEK_DAYS.map((w) => {
-                const active = selectedDays.includes(w.day);
+
+            <div className="grid grid-cols-7 gap-1.5">
+              {WEEK_DAYS.map((wd) => {
+                const isChecked = selectedDays.includes(wd.day);
                 return (
                   <button
-                    key={w.day}
+                    key={wd.day}
                     type="button"
-                    onClick={() => toggleDay(w.day)}
-                    className={`flex-1 h-9 rounded-full text-xs font-black transition flex items-center justify-center border ${
-                      active
-                        ? "bg-[#ffcc00] text-black border-[#ffcc00] shadow-[0_0_12px_rgba(255,204,0,0.5)] scale-105"
-                        : "bg-black/60 text-[#ffcc00]/40 border-[#ffcc00]/20 hover:border-[#ffcc00]/60 hover:text-[#ffcc00]"
+                    onClick={() => toggleDay(wd.day)}
+                    className={`h-9 rounded-full flex flex-col items-center justify-center text-xs font-black transition-all ${
+                      isChecked
+                        ? "bg-[#ffcc00] text-black shadow-[0_0_12px_rgba(255,204,0,0.4)] scale-105"
+                        : "bg-neutral-900 border border-neutral-700 text-neutral-400 hover:border-[#ffcc00]/50"
                     }`}
                   >
-                    {w.label}
+                    <span>{wd.label}</span>
                   </button>
                 );
               })}
             </div>
-            <div className="flex justify-center gap-2 mt-3 text-[9px] font-bold">
+
+            <div className="mt-2.5 flex justify-center gap-2">
               <button
                 type="button"
                 onClick={() => setSelectedDays([0, 1, 2, 3, 4, 5, 6])}
-                className="px-2 py-0.5 border border-[#ffcc00]/30 text-[#ffcc00]/80 hover:bg-[#ffcc00]/15"
+                className="text-[10px] font-bold tracking-wider px-2 py-0.5 rounded border border-[#ffcc00]/30 text-[#ffcc00]/80 hover:bg-[#ffcc00]/10 hover:text-[#ffcc00]"
               >
                 ALL
               </button>
               <button
                 type="button"
                 onClick={() => setSelectedDays([1, 2, 3, 4, 5])}
-                className="px-2 py-0.5 border border-[#ffcc00]/30 text-[#ffcc00]/80 hover:bg-[#ffcc00]/15"
+                className="text-[10px] font-bold tracking-wider px-2 py-0.5 rounded border border-[#ffcc00]/30 text-[#ffcc00]/80 hover:bg-[#ffcc00]/10 hover:text-[#ffcc00]"
               >
                 MON–FRI
               </button>
               <button
                 type="button"
                 onClick={() => setSelectedDays([0, 6])}
-                className="px-2 py-0.5 border border-[#ffcc00]/30 text-[#ffcc00]/80 hover:bg-[#ffcc00]/15"
+                className="text-[10px] font-bold tracking-wider px-2 py-0.5 rounded border border-[#ffcc00]/30 text-[#ffcc00]/80 hover:bg-[#ffcc00]/10 hover:text-[#ffcc00]"
               >
                 SAT–SUN
               </button>
@@ -472,11 +470,11 @@ export function SamsungTimePicker({
           </div>
         )}
 
-        <div className="mt-5 pt-3 border-t border-[#ffcc00]/30 flex gap-3">
+        <div className="mt-5 flex gap-2">
           <button
             type="button"
             onClick={onCancel}
-            className="flex-1 py-2.5 border border-[#ffcc00]/50 text-[#ffcc00]/80 hover:bg-[#ffcc00]/10 font-bold tracking-widest text-xs rounded transition"
+            className="flex-1 py-2.5 border border-[#ffcc00]/40 text-[#ffcc00]/80 hover:bg-[#ffcc00]/10 font-bold tracking-widest text-xs rounded transition"
           >
             CANCEL
           </button>
