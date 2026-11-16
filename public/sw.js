@@ -1,11 +1,5 @@
-// public/sw.js — CTU Background Operations & Web Push Service Worker
-// Scope: / (served from root)
-// Provides:
-//  1) Live Ongoing Status-Bar Notification (Samsung-style live countdown HUD).
-//  2) Local deadline persistence in IndexedDB with TimestampTrigger hardware alarm integration.
-//  3) Background Web Push listener ('push') to wake dark/locked phone screens.
-//  4) Catch-up and firing of overdue alarms whenever the worker activates.
-//  5) Interactive notification actions (OPEN TERMINAL, SNOOZE 5M, DISARM).
+// public/sw.js — CTU Background Operations & Samsung Notification HUD
+// Scope: /
 
 const DB_NAME = "ctu-alarms-db";
 const STORE_NAME = "deadlines";
@@ -69,7 +63,7 @@ async function dbGetAll() {
 
 const liveTimers = new Map();
 
-// Clear the persistent live countdown notification
+// Clear the persistent live countdown notification in the shade
 async function clearLockscreenHUD() {
   try {
     const notifications = await self.registration.getNotifications({ tag: HUD_TAG });
@@ -81,7 +75,7 @@ async function clearLockscreenHUD() {
   }
 }
 
-// Display ongoing countdown in the Android / Samsung notification drawer
+// Display ongoing live countdown in Android notification shade
 async function showLockscreenHUD(payload) {
   const title = payload.title || "[CTU TACTICAL TIMER]";
   const body = payload.body || "Mission in progress...";
@@ -99,7 +93,7 @@ async function showLockscreenHUD(payload) {
       url: "/",
     },
     actions: [
-      { action: "open", title: "OPEN HUD" },
+      { action: "open", title: "OPEN TERMINAL" },
       { action: "disarm", title: "DISARM" },
     ],
   };
@@ -118,7 +112,9 @@ async function showTacticalNotification(deadline) {
   }
 
   const title = deadline.title || "[CTU CRISIS ALERT] MISSION AT ZERO";
-  const body = deadline.body || `Operation "${deadline.label || "TACTICAL"}" reached zero. Immediate action required.`;
+  const body =
+    deadline.body ||
+    `Operation "${deadline.label || "TACTICAL"}" reached zero. Immediate action required.`;
 
   const options = {
     body,
@@ -157,7 +153,6 @@ async function armDeadline(deadline) {
     clearTimeout(liveTimers.get(deadline.id));
   }
 
-  // Attempt Chromium Notification Triggers API (delegates to Android AlarmManager)
   if ("showTrigger" in Notification.prototype && typeof self.TimestampTrigger !== "undefined") {
     try {
       const trigger = new self.TimestampTrigger(deadline.targetEpochMs);
@@ -176,33 +171,28 @@ async function armDeadline(deadline) {
       );
       return;
     } catch {
-      // Fallback to in-memory timer
+      // Fallback
     }
   }
 
-  const safeDelay = Math.min(remainingMs, 2147483647);
-  const timeoutId = setTimeout(() => {
-    showTacticalNotification(deadline).catch((err) =>
-      console.error("[SW] Notification display error:", err)
-    );
-  }, safeDelay);
+  const timerId = setTimeout(async () => {
+    liveTimers.delete(deadline.id);
+    await showTacticalNotification(deadline);
+  }, remainingMs);
 
-  liveTimers.set(deadline.id, timeoutId);
+  liveTimers.set(deadline.id, timerId);
 }
 
-async function checkMissedDeadlines() {
-  const all = await dbGetAll();
-  const now = Date.now();
-  for (const deadline of all) {
-    if (deadline.targetEpochMs <= now) {
-      await showTacticalNotification(deadline);
-    } else {
-      await armDeadline(deadline);
-    }
+async function cancelDeadline(id) {
+  await dbDelete(id);
+  if (liveTimers.has(id)) {
+    clearTimeout(liveTimers.get(id));
+    liveTimers.delete(id);
   }
+  const notifs = await self.registration.getNotifications({ tag: id });
+  for (const n of notifs) n.close();
 }
 
-// Lifecycle Events
 self.addEventListener("install", (event) => {
   event.waitUntil(self.skipWaiting());
 });
@@ -211,142 +201,91 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(
     (async () => {
       await self.clients.claim();
-      await checkMissedDeadlines();
+      const stored = await dbGetAll();
+      const now = Date.now();
+      for (const d of stored) {
+        if (d.targetEpochMs <= now) {
+          await showTacticalNotification(d);
+        } else {
+          await armDeadline(d);
+        }
+      }
     })()
   );
 });
 
-// Incoming messages from the CTU Terminal client
 self.addEventListener("message", (event) => {
-  const msg = event.data || {};
+  const data = event.data;
+  if (!data || typeof data !== "object") return;
 
-  if (msg.type === "SKIP_WAITING") {
-    self.skipWaiting();
+  switch (data.type) {
+    case "SKIP_WAITING":
+      self.skipWaiting();
+      break;
+
+    case "ARM_DEADLINE":
+      if (data.deadline && data.deadline.id && data.deadline.targetEpochMs) {
+        event.waitUntil(armDeadline(data.deadline));
+      }
+      break;
+
+    case "CANCEL_DEADLINE":
+      if (data.id) {
+        event.waitUntil(cancelDeadline(data.id));
+      }
+      break;
+
+    case "UPDATE_LOCKSCREEN_HUD":
+      event.waitUntil(showLockscreenHUD(data));
+      break;
+
+    case "CLEAR_LOCKSCREEN_HUD":
+      event.waitUntil(clearLockscreenHUD());
+      break;
+
+    default:
+      break;
+  }
+});
+
+self.addEventListener("notificationclick", (event) => {
+  const notification = event.notification;
+  const action = event.action;
+  const data = notification.data || {};
+
+  notification.close();
+
+  if (action === "disarm") {
+    if (data.id) {
+      event.waitUntil(cancelDeadline(data.id));
+    }
     return;
   }
 
-  if (msg.type === "UPDATE_LOCKSCREEN_HUD") {
-    event.waitUntil(showLockscreenHUD(msg));
-    return;
-  }
-
-  if (msg.type === "CLEAR_LOCKSCREEN_HUD") {
-    event.waitUntil(clearLockscreenHUD());
-    return;
-  }
-
-  if (msg.type === "SCHEDULE_ALERT") {
-    const targetEpochMs = msg.targetEpochMs ?? msg.epochMs;
-    if (!targetEpochMs || !msg.id) return;
-
+  if (action === "snooze") {
+    const snoozeTarget = Date.now() + 5 * 60 * 1000;
     event.waitUntil(
       armDeadline({
-        id: msg.id,
-        label: msg.label || "Tactical Alert",
-        title: msg.title || "[CTU CRISIS ALERT]",
-        body: msg.body || "Mission reached zero.",
-        targetEpochMs,
+        id: data.id || `snooze-${Date.now()}`,
+        label: `${data.label || "ALARM"} (SNOOZED)`,
+        targetEpochMs: snoozeTarget,
+        title: "[CTU SNOOZE EXPIRED]",
+        body: "Snooze window of 5 minutes elapsed. Tactical attention required.",
       })
     );
     return;
   }
 
-  if (msg.type === "CANCEL_ALERT") {
-    if (liveTimers.has(msg.id)) {
-      clearTimeout(liveTimers.get(msg.id));
-      liveTimers.delete(msg.id);
-    }
-    event.waitUntil(dbDelete(msg.id));
-    return;
-  }
-
-  if (msg.type === "CHECK_MISSED") {
-    event.waitUntil(checkMissedDeadlines());
-    return;
-  }
-});
-
-// Web Push event listener — wakes mobile device from deep sleep
-self.addEventListener("push", (event) => {
-  let payload = {};
-  try {
-    payload = event.data ? event.data.json() : {};
-  } catch {
-    payload = {
-      title: "[CTU CRISIS ALERT]",
-      body: event.data ? event.data.text() : "Tactical alarm dispatched from server.",
-    };
-  }
-
-  const deadline = {
-    id: payload.id || `push-${Date.now()}`,
-    label: payload.label || "TACTICAL ALERT",
-    title: payload.title || "[CTU CRISIS ALERT] MISSION AT ZERO",
-    body: payload.body || "Operational deadline reached. Immediate action required.",
-    targetEpochMs: Date.now(),
-  };
-
-  event.waitUntil(showTacticalNotification(deadline));
-});
-
-// Notification interaction handler
-self.addEventListener("notificationclick", (event) => {
-  event.notification.close();
-  const action = event.action;
-  const data = event.notification.data || {};
-
   event.waitUntil(
-    (async () => {
-      const windowClients = await self.clients.matchAll({
-        type: "window",
-        includeUncontrolled: true,
-      });
-
-      const existingClient = windowClients.find(
-        (client) => new URL(client.url).pathname === "/"
-      );
-
-      if (action === "snooze") {
-        if (existingClient) {
-          existingClient.postMessage({
-            type: "SNOOZE_APPLIED",
-            id: data.id,
-            minutes: 5,
-          });
-          await existingClient.focus();
-        } else {
-          await armDeadline({
-            id: data.id || `snooze-${Date.now()}`,
-            label: data.label ? `${data.label} (SNOOZED)` : "SNOOZED MISSION",
-            title: "[CTU SNOOZE EXPIRED]",
-            body: "5-minute tactical snooze has elapsed.",
-            targetEpochMs: Date.now() + 5 * 60 * 1000,
-          });
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if ("focus" in client) {
+          return client.focus();
         }
-        return;
       }
-
-      if (action === "disarm") {
-        await clearLockscreenHUD();
-        if (data.id) {
-          await dbDelete(data.id);
-        }
-        if (existingClient) {
-          existingClient.postMessage({
-            type: "DISARM_MISSION",
-            id: data.id,
-          });
-        }
-        return;
+      if (self.clients.openWindow) {
+        return self.clients.openWindow(data.url || "/");
       }
-
-      // Default click or "open" action
-      if (existingClient) {
-        await existingClient.focus();
-        existingClient.postMessage({ type: "CHECK_MISSED" });
-      } else {
-        await self.clients.openWindow("/");
-      }
-    })()
+    })
   );
 });
