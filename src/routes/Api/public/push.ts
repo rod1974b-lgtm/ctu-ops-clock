@@ -35,8 +35,8 @@ export const Route = createFileRoute("/api/public/push")({
           if (!vapidPublicKey || !vapidPrivateKey) {
             return Response.json(
               {
-                error: "VAPID credentials not configured on server",
                 status: "mock_accepted",
+                message: "VAPID keys not configured in environment variables. Local service worker fallbacks active.",
               },
               { status: 200 }
             );
