@@ -1,13 +1,15 @@
 // public/sw.js — CTU Background Operations & Web Push Service Worker
 // Scope: / (served from root)
 // Provides:
-//  1) Native Web Push listener ('push') to wake the phone when the app/browser is fully closed.
-//  2) Local deadline persistence in IndexedDB with auto-triggering if the worker is alive.
-//  3) Re-check and immediate firing of missed deadlines whenever the worker wakes (fetch, activate, push, message).
-//  4) Interactive notification actions (OPEN TERMINAL, SNOOZE 5M, DISARM) that focus or launch the terminal.
+//  1) Live Ongoing Status-Bar Notification (Samsung-style live countdown HUD).
+//  2) Local deadline persistence in IndexedDB with TimestampTrigger hardware alarm integration.
+//  3) Background Web Push listener ('push') to wake dark/locked phone screens.
+//  4) Catch-up and firing of overdue alarms whenever the worker activates.
+//  5) Interactive notification actions (OPEN TERMINAL, SNOOZE 5M, DISARM).
 
 const DB_NAME = "ctu-alarms-db";
 const STORE_NAME = "deadlines";
+const HUD_TAG = "ctu-lockscreen-hud";
 
 function openDB() {
   return new Promise((resolve, reject) => {
@@ -65,11 +67,51 @@ async function dbGetAll() {
   }
 }
 
-// In-memory timer references for the current active worker lifecycle
 const liveTimers = new Map();
 
+// Clear the persistent live countdown notification
+async function clearLockscreenHUD() {
+  try {
+    const notifications = await self.registration.getNotifications({ tag: HUD_TAG });
+    for (const n of notifications) {
+      n.close();
+    }
+  } catch (err) {
+    console.warn("[SW] clearLockscreenHUD error:", err);
+  }
+}
+
+// Display ongoing countdown in the Android / Samsung notification drawer
+async function showLockscreenHUD(payload) {
+  const title = payload.title || "[CTU TACTICAL TIMER]";
+  const body = payload.body || "Mission in progress...";
+
+  const options = {
+    body,
+    icon: "/favicon.ico",
+    badge: "/favicon.ico",
+    tag: HUD_TAG,
+    renotify: false,
+    silent: true,
+    requireInteraction: true,
+    data: {
+      id: payload.id || "live-hud",
+      url: "/",
+    },
+    actions: [
+      { action: "open", title: "OPEN HUD" },
+      { action: "disarm", title: "DISARM" },
+    ],
+  };
+
+  return self.registration.showNotification(title, options);
+}
+
+// Full Crisis Alarm Notification when zero is reached
 async function showTacticalNotification(deadline) {
   await dbDelete(deadline.id);
+  await clearLockscreenHUD();
+
   if (liveTimers.has(deadline.id)) {
     clearTimeout(liveTimers.get(deadline.id));
     liveTimers.delete(deadline.id);
@@ -115,7 +157,29 @@ async function armDeadline(deadline) {
     clearTimeout(liveTimers.get(deadline.id));
   }
 
-  // Cap timeout to 32-bit int (~24.8 days)
+  // Attempt Chromium Notification Triggers API (delegates to Android AlarmManager)
+  if ("showTrigger" in Notification.prototype && typeof self.TimestampTrigger !== "undefined") {
+    try {
+      const trigger = new self.TimestampTrigger(deadline.targetEpochMs);
+      await self.registration.showNotification(
+        deadline.title || "[CTU CRISIS ALERT] MISSION AT ZERO",
+        {
+          body: deadline.body || `Operation "${deadline.label}" reached zero.`,
+          icon: "/favicon.ico",
+          badge: "/favicon.ico",
+          tag: deadline.id,
+          showTrigger: trigger,
+          requireInteraction: true,
+          vibrate: [300, 100, 300, 100, 600, 200, 600],
+          data: { id: deadline.id, url: "/" },
+        }
+      );
+      return;
+    } catch {
+      // Fallback to in-memory timer
+    }
+  }
+
   const safeDelay = Math.min(remainingMs, 2147483647);
   const timeoutId = setTimeout(() => {
     showTacticalNotification(deadline).catch((err) =>
@@ -161,6 +225,16 @@ self.addEventListener("message", (event) => {
     return;
   }
 
+  if (msg.type === "UPDATE_LOCKSCREEN_HUD") {
+    event.waitUntil(showLockscreenHUD(msg));
+    return;
+  }
+
+  if (msg.type === "CLEAR_LOCKSCREEN_HUD") {
+    event.waitUntil(clearLockscreenHUD());
+    return;
+  }
+
   if (msg.type === "SCHEDULE_ALERT") {
     const targetEpochMs = msg.targetEpochMs ?? msg.epochMs;
     if (!targetEpochMs || !msg.id) return;
@@ -174,6 +248,7 @@ self.addEventListener("message", (event) => {
         targetEpochMs,
       })
     );
+    return;
   }
 
   if (msg.type === "CANCEL_ALERT") {
@@ -182,14 +257,16 @@ self.addEventListener("message", (event) => {
       liveTimers.delete(msg.id);
     }
     event.waitUntil(dbDelete(msg.id));
+    return;
   }
 
   if (msg.type === "CHECK_MISSED") {
     event.waitUntil(checkMissedDeadlines());
+    return;
   }
 });
 
-// Web Push event listener — wakes mobile device from sleep via OS push service
+// Web Push event listener — wakes mobile device from deep sleep
 self.addEventListener("push", (event) => {
   let payload = {};
   try {
@@ -197,7 +274,7 @@ self.addEventListener("push", (event) => {
   } catch {
     payload = {
       title: "[CTU CRISIS ALERT]",
-      body: event.data ? event.data.text() : "Tactical alarm fired from remote dispatch.",
+      body: event.data ? event.data.text() : "Tactical alarm dispatched from server.",
     };
   }
 
@@ -212,7 +289,7 @@ self.addEventListener("push", (event) => {
   event.waitUntil(showTacticalNotification(deadline));
 });
 
-// Notification click and interaction handler
+// Notification interaction handler
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const action = event.action;
@@ -238,7 +315,6 @@ self.addEventListener("notificationclick", (event) => {
           });
           await existingClient.focus();
         } else {
-          // Re-arm for 5 minutes in background
           await armDeadline({
             id: data.id || `snooze-${Date.now()}`,
             label: data.label ? `${data.label} (SNOOZED)` : "SNOOZED MISSION",
@@ -251,6 +327,7 @@ self.addEventListener("notificationclick", (event) => {
       }
 
       if (action === "disarm") {
+        await clearLockscreenHUD();
         if (data.id) {
           await dbDelete(data.id);
         }
