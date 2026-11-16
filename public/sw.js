@@ -1,4 +1,4 @@
-// public/sw.js — CTU Background Operations & Samsung Notification HUD
+// public/sw.js — CTU Background Operations & Web Push Service Worker
 // Scope: /
 
 const DB_NAME = "ctu-alarms-db";
@@ -63,7 +63,7 @@ async function dbGetAll() {
 
 const liveTimers = new Map();
 
-// Clear the persistent live countdown notification in the shade
+// Clear persistent live countdown HUD in notification shade
 async function clearLockscreenHUD() {
   try {
     const notifications = await self.registration.getNotifications({ tag: HUD_TAG });
@@ -171,7 +171,7 @@ async function armDeadline(deadline) {
       );
       return;
     } catch {
-      // Fallback
+      // Fall through to in-memory timer
     }
   }
 
@@ -214,6 +214,7 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+// Message listener for foreground UI communication
 self.addEventListener("message", (event) => {
   const data = event.data;
   if (!data || typeof data !== "object") return;
@@ -246,6 +247,26 @@ self.addEventListener("message", (event) => {
     default:
       break;
   }
+});
+
+// Web Push event: triggers when backend sends push to wake device
+self.addEventListener("push", (event) => {
+  let payload = {
+    id: `push-${Date.now()}`,
+    title: "[CTU CRISIS ALERT] MISSION AT ZERO",
+    body: "Operational timer reached zero. Immediate attention required.",
+    targetEpochMs: Date.now(),
+  };
+
+  if (event.data) {
+    try {
+      payload = { ...payload, ...event.data.json() };
+    } catch {
+      payload.body = event.data.text() || payload.body;
+    }
+  }
+
+  event.waitUntil(showTacticalNotification(payload));
 });
 
 self.addEventListener("notificationclick", (event) => {
