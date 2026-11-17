@@ -5,7 +5,9 @@ export type SamsungTimePickerValues = {
   hours: number;
   minutes: number;
   seconds: number;
-  totalSeconds?: number;
+  totalSec: number;
+  totalSeconds: number;
+  timeStr: string;
   days?: number[] | undefined; // 0 = Sun, 1 = Mon, ..., 6 = Sat
 };
 
@@ -15,8 +17,10 @@ export interface SamsungTimePickerProps {
   initialHours?: number | undefined;
   initialMinutes?: number | undefined;
   initialSeconds?: number | undefined;
+  initialDurationSec?: number | undefined;
+  initialTimeStr?: string | undefined;
   initialDays?: number[] | undefined;
-  initialValues?: SamsungTimePickerValues | undefined;
+  initialValues?: Partial<SamsungTimePickerValues> | undefined;
   initialFocus?: "hours" | "minutes" | "seconds" | undefined;
   onSave?: (values: SamsungTimePickerValues) => void;
   onConfirm?: (values: SamsungTimePickerValues) => void;
@@ -45,19 +49,20 @@ function DrumColumn({
   onSelect,
   onChange,
 }: DrumColumnProps) {
+  const safeVal = typeof value === "number" && !isNaN(value) ? Math.max(0, Math.min(max, Math.floor(value))) : 0;
   const range = max + 1;
-  const dragRef = useRef({ y: 0, val: value, dragging: false });
+  const dragRef = useRef({ y: 0, val: safeVal, dragging: false });
   const [isInlineEditing, setIsInlineEditing] = useState(false);
   const [typedValue, setTypedValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   const wrap = useCallback((n: number) => ((n % range) + range) % range, [range]);
-  const pad = (n: number) => String(n).padStart(2, "0");
+  const pad = (n: number) => String(isNaN(n) ? 0 : n).padStart(2, "0");
 
-  const vMinus2 = wrap(value - 2);
-  const vMinus1 = wrap(value - 1);
-  const vPlus1 = wrap(value + 1);
-  const vPlus2 = wrap(value + 2);
+  const vMinus2 = wrap(safeVal - 2);
+  const vMinus1 = wrap(safeVal - 1);
+  const vPlus1 = wrap(safeVal + 1);
+  const vPlus2 = wrap(safeVal + 2);
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (disabled || isInlineEditing) return;
@@ -66,7 +71,7 @@ function DrumColumn({
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
     } catch {}
-    dragRef.current = { y: e.clientY, val: value, dragging: true };
+    dragRef.current = { y: e.clientY, val: safeVal, dragging: true };
     onSelect();
   };
 
@@ -75,7 +80,7 @@ function DrumColumn({
     const deltaY = dragRef.current.y - e.clientY;
     const steps = Math.round(deltaY / 28);
     const next = wrap(dragRef.current.val + steps);
-    if (next !== value) onChange(next);
+    if (next !== safeVal) onChange(next);
   };
 
   const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -90,7 +95,7 @@ function DrumColumn({
     if (disabled) return;
     e.preventDefault();
     const dir = e.deltaY < 0 ? 1 : -1;
-    onChange(wrap(value + dir));
+    onChange(wrap(safeVal + dir));
   };
 
   const startInlineEdit = (e: React.MouseEvent | React.PointerEvent) => {
@@ -98,7 +103,7 @@ function DrumColumn({
     if (disabled) return;
     onSelect();
     setIsInlineEditing(true);
-    setTypedValue(pad(value));
+    setTypedValue(pad(safeVal));
   };
 
   useEffect(() => {
@@ -131,15 +136,15 @@ function DrumColumn({
       if (isInlineEditing) return;
       if (e.key === "ArrowUp") {
         e.preventDefault();
-        onChange(wrap(value + 1));
+        onChange(wrap(safeVal + 1));
       } else if (e.key === "ArrowDown") {
         e.preventDefault();
-        onChange(wrap(value - 1));
+        onChange(wrap(safeVal - 1));
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isSelected, disabled, isInlineEditing, onChange, wrap, value]);
+  }, [isSelected, disabled, isInlineEditing, onChange, wrap, safeVal]);
 
   return (
     <div className="flex flex-col items-center">
@@ -149,7 +154,7 @@ function DrumColumn({
         onClick={(e) => {
           e.stopPropagation();
           onSelect();
-          onChange(wrap(value + 1));
+          onChange(wrap(safeVal + 1));
         }}
         className="w-full py-1 text-[#ffcc00]/60 hover:text-[#ffcc00] hover:bg-[#ffcc00]/10 flex items-center justify-center transition border-b border-[#ffcc00]/20 active:scale-95 disabled:opacity-20"
         title={`Increment ${label} (+1)`}
@@ -218,7 +223,7 @@ function DrumColumn({
               title="Tap to type directly"
               className="text-[34px] font-black font-mono text-[#ffcc00] drop-shadow-[0_0_10px_rgba(255,204,0,0.8)] tracking-tight hover:scale-105 active:scale-95 transition-transform cursor-pointer px-3 py-1"
             >
-              {pad(value)}
+              {pad(safeVal)}
             </button>
           )}
         </div>
@@ -249,7 +254,7 @@ function DrumColumn({
         onClick={(e) => {
           e.stopPropagation();
           onSelect();
-          onChange(wrap(value - 1));
+          onChange(wrap(safeVal - 1));
         }}
         className="w-full py-1 text-[#ffcc00]/60 hover:text-[#ffcc00] hover:bg-[#ffcc00]/10 flex items-center justify-center transition border-t border-[#ffcc00]/20 active:scale-95 disabled:opacity-20"
         title={`Decrement ${label} (-1)`}
@@ -288,6 +293,8 @@ export function SamsungTimePicker({
   initialHours = 0,
   initialMinutes = 0,
   initialSeconds = 0,
+  initialDurationSec,
+  initialTimeStr,
   initialDays = DEFAULT_DAYS,
   initialValues,
   initialFocus = "minutes",
@@ -295,9 +302,25 @@ export function SamsungTimePicker({
   onConfirm,
   onCancel,
 }: SamsungTimePickerProps) {
-  const effectiveHours = initialValues?.hours ?? initialHours;
-  const effectiveMinutes = initialValues?.minutes ?? initialMinutes;
-  const effectiveSeconds = initialValues?.seconds ?? initialSeconds;
+  // Normalize incoming values from either seconds, HH:MM string, or direct properties
+  let derivedHours = initialHours;
+  let derivedMinutes = initialMinutes;
+  let derivedSeconds = initialSeconds;
+
+  if (typeof initialDurationSec === "number" && !isNaN(initialDurationSec) && initialDurationSec > 0) {
+    derivedHours = Math.floor(initialDurationSec / 3600);
+    derivedMinutes = Math.floor((initialDurationSec % 3600) / 60);
+    derivedSeconds = initialDurationSec % 60;
+  } else if (typeof initialTimeStr === "string" && initialTimeStr.includes(":")) {
+    const [h, m] = initialTimeStr.split(":").map((v) => parseInt(v, 10));
+    derivedHours = !isNaN(h) ? h : 0;
+    derivedMinutes = !isNaN(m) ? m : 0;
+    derivedSeconds = 0;
+  }
+
+  const effectiveHours = initialValues?.hours ?? derivedHours ?? 0;
+  const effectiveMinutes = initialValues?.minutes ?? derivedMinutes ?? 0;
+  const effectiveSeconds = initialValues?.seconds ?? derivedSeconds ?? 0;
   const effectiveDays = initialValues?.days ?? initialDays ?? DEFAULT_DAYS;
 
   const [hours, setHours] = useState(effectiveHours);
@@ -341,16 +364,23 @@ export function SamsungTimePicker({
   };
 
   const handleSave = () => {
-    const h = hoursRef.current;
-    const m = minutesRef.current;
-    const s = mode === "alarm" ? 0 : secondsRef.current;
+    const rawH = hoursRef.current;
+    const rawM = minutesRef.current;
+    const rawS = mode === "alarm" ? 0 : secondsRef.current;
+
+    const h = isNaN(rawH) ? 0 : Math.max(0, Math.min(99, rawH));
+    const m = isNaN(rawM) ? 0 : Math.max(0, Math.min(59, rawM));
+    const s = isNaN(rawS) ? 0 : Math.max(0, Math.min(59, rawS));
     const totalSec = h * 3600 + m * 60 + s;
+    const timeStr = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 
     const result: SamsungTimePickerValues = {
       hours: h,
       minutes: m,
       seconds: s,
+      totalSec,
       totalSeconds: totalSec,
+      timeStr,
       days: mode === "alarm" ? selectedDaysRef.current : undefined,
     };
 
@@ -378,14 +408,17 @@ export function SamsungTimePicker({
         onClick={(e) => e.stopPropagation()}
         className="border-2 border-[#ffcc00] rounded-[24px] bg-[#0a0a14] p-4 md:p-5 w-full max-w-[390px] shadow-[0_0_45px_rgba(255,204,0,0.35)] select-none my-auto"
       >
-        <div className="text-center text-[15px] tracking-[0.25em] font-black text-[#ffcc00] flex items-center justify-center gap-2">
-          <span>{mode === "alarm" ? "ALARM TIME & WEEKLY DAYS" : "OPERATION TIMER SETTER"}</span>
-        </div>
-        <div className="text-center text-[9px] tracking-[0.22em] text-[#ffcc00]/70 mt-1">
-          TAP ANY DIGIT TO EDIT • USE ARROWS TO STEP
+        <div className="text-center mb-4">
+          <span className="text-[11px] font-mono tracking-widest text-[#ffcc00]/70 uppercase">
+            {mode === "timer" ? "OPERATION TIMER SETTER" : "ALARM TIME & WEEKLY DAYS"}
+          </span>
+          <div className="text-[20px] font-mono font-black text-[#ffcc00] tracking-wider mt-0.5">
+            {String(hours).padStart(2, "0")}:{String(minutes).padStart(2, "0")}
+            {mode === "timer" && `:${String(seconds).padStart(2, "0")}`}
+          </div>
         </div>
 
-        <div className="mt-4 flex justify-center gap-2.5">
+        <div className="flex items-center justify-center gap-1 sm:gap-2 mb-4 bg-black/40 p-2.5 rounded-xl border border-[#ffcc00]/20">
           <DrumColumn
             unit="hours"
             value={hours}
@@ -395,6 +428,7 @@ export function SamsungTimePicker({
             onSelect={() => setActiveUnit("hours")}
             onChange={setHours}
           />
+          <span className="text-3xl font-black text-[#ffcc00]/60 pb-8">:</span>
           <DrumColumn
             unit="minutes"
             value={minutes}
@@ -405,83 +439,91 @@ export function SamsungTimePicker({
             onChange={setMinutes}
           />
           {mode === "timer" && (
-            <DrumColumn
-              unit="seconds"
-              value={seconds}
-              max={59}
-              label="SECS"
-              isSelected={activeUnit === "seconds"}
-              onSelect={() => setActiveUnit("seconds")}
-              onChange={setSeconds}
-            />
+            <>
+              <span className="text-3xl font-black text-[#ffcc00]/60 pb-8">:</span>
+              <DrumColumn
+                unit="seconds"
+                value={seconds}
+                max={59}
+                label="SECS"
+                isSelected={activeUnit === "seconds"}
+                onSelect={() => setActiveUnit("seconds")}
+                onChange={setSeconds}
+              />
+            </>
           )}
         </div>
 
         {mode === "alarm" && (
-          <div className="mt-5 border-t border-[#ffcc00]/25 pt-4">
-            <div className="flex items-center justify-between text-[11px] font-bold tracking-wider text-[#ffcc00]/80 mb-2">
-              <span>REPEATING DAYS:</span>
-              <span className="text-[10px] text-[#ffcc00] font-mono">{getDaysSummary()}</span>
+          <div className="mb-4 bg-black/40 p-3 rounded-xl border border-[#ffcc00]/20">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[10px] font-mono text-[#ffcc00]/60 uppercase tracking-widest">
+                REPEAT SCHEDULE
+              </span>
+              <span className="text-[10px] font-mono font-bold text-[#ffcc00] uppercase tracking-wider">
+                {getDaysSummary()}
+              </span>
             </div>
 
-            <div className="grid grid-cols-7 gap-1.5">
-              {WEEK_DAYS.map((wd) => {
-                const isChecked = selectedDays.includes(wd.day);
+            <div className="flex items-center justify-between gap-1 mb-2">
+              {WEEK_DAYS.map((w) => {
+                const isSelected = selectedDays.includes(w.day);
                 return (
                   <button
-                    key={wd.day}
+                    key={w.day}
                     type="button"
-                    onClick={() => toggleDay(wd.day)}
-                    className={`h-9 rounded-full flex flex-col items-center justify-center text-xs font-black transition-all ${
-                      isChecked
-                        ? "bg-[#ffcc00] text-black shadow-[0_0_12px_rgba(255,204,0,0.4)] scale-105"
-                        : "bg-neutral-900 border border-neutral-700 text-neutral-400 hover:border-[#ffcc00]/50"
+                    onClick={() => toggleDay(w.day)}
+                    className={`w-9 h-9 rounded-full font-mono text-xs font-bold transition-all flex items-center justify-center ${
+                      isSelected
+                        ? "bg-[#ffcc00] text-black shadow-[0_0_10px_rgba(255,204,0,0.5)] scale-105"
+                        : "bg-black/60 text-[#ffcc00]/40 border border-[#ffcc00]/20 hover:border-[#ffcc00]/50"
                     }`}
+                    title={w.full}
                   >
-                    <span>{wd.label}</span>
+                    {w.label}
                   </button>
                 );
               })}
             </div>
 
-            <div className="mt-2.5 flex justify-center gap-2">
+            <div className="flex items-center justify-center gap-2 pt-1 border-t border-[#ffcc00]/10">
               <button
                 type="button"
                 onClick={() => setSelectedDays([0, 1, 2, 3, 4, 5, 6])}
-                className="text-[10px] font-bold tracking-wider px-2 py-0.5 rounded border border-[#ffcc00]/30 text-[#ffcc00]/80 hover:bg-[#ffcc00]/10 hover:text-[#ffcc00]"
+                className="text-[10px] font-mono text-[#ffcc00]/60 hover:text-[#ffcc00] px-2 py-0.5 border border-[#ffcc00]/20 rounded hover:border-[#ffcc00]/50"
               >
-                ALL
+                EVERY DAY
               </button>
               <button
                 type="button"
                 onClick={() => setSelectedDays([1, 2, 3, 4, 5])}
-                className="text-[10px] font-bold tracking-wider px-2 py-0.5 rounded border border-[#ffcc00]/30 text-[#ffcc00]/80 hover:bg-[#ffcc00]/10 hover:text-[#ffcc00]"
+                className="text-[10px] font-mono text-[#ffcc00]/60 hover:text-[#ffcc00] px-2 py-0.5 border border-[#ffcc00]/20 rounded hover:border-[#ffcc00]/50"
               >
                 MON–FRI
               </button>
               <button
                 type="button"
                 onClick={() => setSelectedDays([0, 6])}
-                className="text-[10px] font-bold tracking-wider px-2 py-0.5 rounded border border-[#ffcc00]/30 text-[#ffcc00]/80 hover:bg-[#ffcc00]/10 hover:text-[#ffcc00]"
+                className="text-[10px] font-mono text-[#ffcc00]/60 hover:text-[#ffcc00] px-2 py-0.5 border border-[#ffcc00]/20 rounded hover:border-[#ffcc00]/50"
               >
-                SAT–SUN
+                WEEKENDS
               </button>
             </div>
           </div>
         )}
 
-        <div className="mt-5 flex gap-2">
+        <div className="flex items-center justify-end gap-3 pt-2 border-t border-[#ffcc00]/20">
           <button
             type="button"
             onClick={onCancel}
-            className="flex-1 py-2.5 border border-[#ffcc00]/40 text-[#ffcc00]/80 hover:bg-[#ffcc00]/10 font-bold tracking-widest text-xs rounded transition"
+            className="px-4 py-2 font-mono text-xs font-bold uppercase tracking-widest text-[#ffcc00]/60 hover:text-[#ffcc00] border border-transparent hover:border-[#ffcc00]/30 rounded transition"
           >
             CANCEL
           </button>
           <button
             type="button"
             onClick={handleSave}
-            className="flex-1 py-2.5 bg-[#ffcc00] text-black hover:bg-[#ffe066] font-black tracking-widest text-xs rounded shadow-[0_0_20px_rgba(255,204,0,0.4)] transition"
+            className="px-6 py-2 bg-[#ffcc00] text-black font-mono text-xs font-black uppercase tracking-widest rounded shadow-[0_0_15px_rgba(255,204,0,0.4)] hover:bg-[#ffd633] active:scale-95 transition"
           >
             CONFIRM
           </button>
