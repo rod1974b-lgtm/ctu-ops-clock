@@ -171,7 +171,7 @@ export function CTUTacticalOpsTerminal() {
     return () => clearInterval(clockInterval);
   }, []);
 
-  // Tactical Offscreen Canvas PiP HUD Renderer
+  // Tactical Offscreen Canvas PiP HUD Renderer with Chronological Sorting
   const renderPipFrame = useCallback(
     (mode: "TIMERS" | "ALARMS") => {
       const canvas = pipCanvasRef.current;
@@ -212,7 +212,23 @@ export function CTUTacticalOpsTerminal() {
       ctx.stroke();
 
       if (mode === "TIMERS") {
-        const currentTimers = timersRef.current.slice(0, 6);
+        // Chronological sort: RUNNING by smallest remainingSec first, then PAUSED, then IDLE / EXPIRED
+        const currentTimers = [...timersRef.current]
+          .sort((a, b) => {
+            const statusPriority: Record<string, number> = {
+              RUNNING: 1,
+              PAUSED: 2,
+              IDLE: 3,
+              EXPIRED: 4,
+            };
+            const priorityA = statusPriority[a.status] ?? 99;
+            const priorityB = statusPriority[b.status] ?? 99;
+            if (priorityA !== priorityB) {
+              return priorityA - priorityB;
+            }
+            return a.remainingSec - b.remainingSec;
+          })
+          .slice(0, 6);
         let startY = 50;
 
         currentTimers.forEach((timer, idx) => {
@@ -235,13 +251,27 @@ export function CTUTacticalOpsTerminal() {
           startY += 28;
         });
       } else {
-        const currentAlarms = alarmsRef.current.slice(0, 6);
+        // Chronological sort for alarms: nearest next ring time first, then disabled alarms
+        const currentAlarms = [...alarmsRef.current]
+          .map((alarm) => {
+            const nextMs = getNextAlarmEpochMs(alarm.timeStr, alarm.days);
+            const deltaSec = nextMs ? Math.max(0, Math.floor((nextMs - Date.now()) / 1000)) : Infinity;
+            return { ...alarm, nextMs, deltaSec };
+          })
+          .sort((a, b) => {
+            if (a.enabled && !b.enabled) return -1;
+            if (!a.enabled && b.enabled) return 1;
+            if (a.enabled && b.enabled) {
+              return (a.nextMs ?? Infinity) - (b.nextMs ?? Infinity);
+            }
+            return a.timeStr.localeCompare(b.timeStr);
+          })
+          .slice(0, 6);
         let startY = 50;
 
         currentAlarms.forEach((alarm, idx) => {
           const isEnabled = alarm.enabled;
-          const nextMs = getNextAlarmEpochMs(alarm.timeStr, alarm.days);
-          const deltaSec = nextMs ? Math.max(0, Math.floor((nextMs - Date.now()) / 1000)) : 0;
+          const deltaSec = alarm.deltaSec === Infinity ? 0 : alarm.deltaSec;
           const isUrgent = isEnabled && deltaSec <= 10 && deltaSec > 0;
 
           ctx.fillStyle = isUrgent ? "#ff3333" : isEnabled ? "#38bdf8" : "#4b5563";
