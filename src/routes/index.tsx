@@ -171,7 +171,7 @@ export function CTUTacticalOpsTerminal() {
     return () => clearInterval(clockInterval);
   }, []);
 
-  // Tactical Offscreen Canvas PiP HUD Renderer with Chronological Sorting
+  // Tactical Offscreen Canvas PiP HUD Renderer (Enlarged Fonts + Chronological Ordering)
   const renderPipFrame = useCallback(
     (mode: "TIMERS" | "ALARMS") => {
       const canvas = pipCanvasRef.current;
@@ -191,28 +191,28 @@ export function CTUTacticalOpsTerminal() {
       ctx.strokeStyle = takeoverOpen || ringingAlert ? "#ff1a1a" : "#ffcc00";
       ctx.strokeRect(2, 2, width - 4, height - 4);
 
-      // Header Bar
+      // Header Bar (Enlarged)
       ctx.fillStyle = takeoverOpen || ringingAlert ? "#ff1a1a" : "#ffcc00";
-      ctx.font = "bold 13px 'Courier New', monospace";
+      ctx.font = "bold 16px 'Courier New', monospace";
       ctx.fillText(
         `CTU // ${mode === "TIMERS" ? "ACTIVE TIMERS HUD" : "ARMED ALARMS HUD"}`,
-        14,
-        22
+        16,
+        26
       );
 
       ctx.fillStyle = "#9ca3af";
-      ctx.font = "11px 'Courier New', monospace";
-      ctx.fillText(`BKK ${bangkokTime}`, width - 110, 22);
+      ctx.font = "bold 13px 'Courier New', monospace";
+      ctx.fillText(`BKK ${bangkokTime}`, width - 125, 26);
 
-      ctx.strokeStyle = "rgba(255, 204, 0, 0.25)";
+      ctx.strokeStyle = "rgba(255, 204, 0, 0.35)";
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(10, 28);
-      ctx.lineTo(width - 10, 28);
+      ctx.moveTo(12, 34);
+      ctx.lineTo(width - 12, 34);
       ctx.stroke();
 
       if (mode === "TIMERS") {
-        // Chronological sort: RUNNING by smallest remainingSec first, then PAUSED, then IDLE / EXPIRED
+        // Chronological sort: RUNNING with smallest remainingSec first, then PAUSED, then IDLE / EXPIRED
         const currentTimers = [...timersRef.current]
           .sort((a, b) => {
             const statusPriority: Record<string, number> = {
@@ -229,29 +229,30 @@ export function CTUTacticalOpsTerminal() {
             return a.remainingSec - b.remainingSec;
           })
           .slice(0, 6);
-        let startY = 50;
+
+        let startY = 68;
 
         currentTimers.forEach((timer, idx) => {
           const isUrgent = timer.status === "RUNNING" && timer.remainingSec <= 10;
           const isRunning = timer.status === "RUNNING";
 
           ctx.fillStyle = isUrgent ? "#ff3333" : isRunning ? "#ffcc00" : "#6b7280";
-          ctx.font = "bold 12px 'Courier New', monospace";
-          const label = `${idx + 1}. ${timer.label.slice(0, 14).padEnd(14, " ")}`;
+          ctx.font = "bold 15px 'Courier New', monospace";
+          const label = `${idx + 1}. ${timer.label.slice(0, 13).padEnd(13, " ")}`;
           ctx.fillText(label, 16, startY);
 
-          ctx.font = "bold 13px 'Courier New', monospace";
+          ctx.font = "bold 18px 'Courier New', monospace";
           const timeText = formatHMS(timer.remainingSec);
-          ctx.fillText(timeText, 210, startY);
+          ctx.fillText(timeText, 220, startY);
 
-          ctx.font = "bold 10px 'Courier New', monospace";
+          ctx.font = "bold 13px 'Courier New', monospace";
           const statusText = `[${timer.status}]`;
-          ctx.fillText(statusText, 320, startY);
+          ctx.fillText(statusText, 380, startY);
 
-          startY += 28;
+          startY += 38;
         });
       } else {
-        // Chronological sort for alarms: nearest next ring time first, then disabled alarms
+        // Chronological sort for alarms: nearest trigger time first, then disabled alarms
         const currentAlarms = [...alarmsRef.current]
           .map((alarm) => {
             const nextMs = getNextAlarmEpochMs(alarm.timeStr, alarm.days);
@@ -267,7 +268,8 @@ export function CTUTacticalOpsTerminal() {
             return a.timeStr.localeCompare(b.timeStr);
           })
           .slice(0, 6);
-        let startY = 50;
+
+        let startY = 68;
 
         currentAlarms.forEach((alarm, idx) => {
           const isEnabled = alarm.enabled;
@@ -275,18 +277,18 @@ export function CTUTacticalOpsTerminal() {
           const isUrgent = isEnabled && deltaSec <= 10 && deltaSec > 0;
 
           ctx.fillStyle = isUrgent ? "#ff3333" : isEnabled ? "#38bdf8" : "#4b5563";
-          ctx.font = "bold 12px 'Courier New', monospace";
-          const label = `${idx + 1}. ${alarm.label.slice(0, 14).padEnd(14, " ")}`;
+          ctx.font = "bold 15px 'Courier New', monospace";
+          const label = `${idx + 1}. ${alarm.label.slice(0, 13).padEnd(13, " ")}`;
           ctx.fillText(label, 16, startY);
 
+          ctx.font = "bold 18px 'Courier New', monospace";
+          ctx.fillText(alarm.timeStr, 220, startY);
+
           ctx.font = "bold 13px 'Courier New', monospace";
-          ctx.fillText(alarm.timeStr, 210, startY);
-
-          ctx.font = "bold 10px 'Courier New', monospace";
           const statusText = isEnabled ? `IN ${formatHMS(deltaSec)}` : "[OFF]";
-          ctx.fillText(statusText, 290, startY);
+          ctx.fillText(statusText, 350, startY);
 
-          startY += 28;
+          startY += 38;
         });
       }
     },
@@ -324,8 +326,8 @@ export function CTUTacticalOpsTerminal() {
     try {
       if (!pipCanvasRef.current) {
         const canvas = document.createElement("canvas");
-        canvas.width = 440;
-        canvas.height = 240;
+        canvas.width = 540;
+        canvas.height = 300;
         pipCanvasRef.current = canvas;
       }
 
