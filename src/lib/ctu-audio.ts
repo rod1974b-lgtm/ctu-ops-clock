@@ -26,6 +26,7 @@ export type ZeroSoundType = "theme" | "voice" | "boom" | "alarm" | "ctu_beep" | 
 /**
  * CTU Tactical Terminal Audio Engine.
  * Supports:
+ * - Direct static helpers (unlockAudio, playChirp, playTick, startCountdownTakeoverAudio, triggerZeroSound, stopAllAudio)
  * - Countdown audio (/24 Alarm Countdown.mp3 / /countdown.mp3)
  * - At Zero theme playback (/24 At Zero theme.mp3)
  * - Haunting alarm loop & synthetic pulse fallbacks
@@ -183,7 +184,6 @@ export class CTUAudio {
       this.zeroThemeAudioElement.volume = this.volume;
       this.zeroThemeAudioElement.currentTime = 0;
       this.zeroThemeAudioElement.play().catch(() => {
-        // Fallback to haunting dual-tone alarm
         this.startHauntingAlarmLoop();
       });
     } catch {
@@ -283,7 +283,6 @@ export class CTUAudio {
       } else if (type === "alarm") {
         this.startHauntingAlarmLoop();
       } else {
-        // ctu_beep signature triple pulse
         [0, 0.15, 0.3].forEach((offset) => {
           if (!this.ctx || !this.masterGain) return;
           const osc = this.ctx.createOscillator();
@@ -303,9 +302,6 @@ export class CTUAudio {
     }
   }
 
-  /**
-   * Dual-Tone Alarm Loop
-   */
   public startHauntingAlarmLoop(): void {
     this.stopHauntingAlarmLoop();
     if (!this.ctx || !this.masterGain) return;
@@ -349,31 +345,17 @@ export class CTUAudio {
     }
   }
 
-  public startVoiceLoop(): void {
-    this.playZeroTheme();
-  }
-
-  public stopVoiceLoop(): void {
-    this.stopZeroTheme();
-  }
-
-  public startCreditsAudio(): void {
-    this.playZeroTheme();
-  }
-
-  public stopCreditsAudio(): void {
-    this.stopZeroTheme();
-  }
-
   public stopAll(): void {
     this.stopCountdownAudio();
     this.stopZeroTheme();
     this.stopHauntingAlarmLoop();
-    this.stopVoiceLoop();
-    this.stopCreditsAudio();
   }
 
-  // --- Static Facade Methods ---
+  // --- Static Facade Methods (Guarantees zero uncaught exceptions) ---
+
+  public static async unlockAudio(): Promise<boolean> {
+    return CTUAudio.shared.unlock();
+  }
 
   public static async unlock(): Promise<boolean> {
     return CTUAudio.shared.unlock();
@@ -387,6 +369,14 @@ export class CTUAudio {
     CTUAudio.shared.playChirp();
   }
 
+  public static chirp(): void {
+    CTUAudio.shared.playChirp();
+  }
+
+  public static startCountdownTakeoverAudio(_sec?: number): void {
+    CTUAudio.shared.startCountdownAudio();
+  }
+
   public static startCountdownAudio(): void {
     CTUAudio.shared.startCountdownAudio();
   }
@@ -395,8 +385,12 @@ export class CTUAudio {
     CTUAudio.shared.stopCountdownAudio();
   }
 
-  public static playCountdownAudio(): void {
-    CTUAudio.shared.startCountdownAudio();
+  public static triggerZeroSound(type: ZeroSoundType = "theme"): void {
+    CTUAudio.shared.playZeroPayload(type);
+  }
+
+  public static playZeroPayload(type: ZeroSoundType = "theme"): void {
+    CTUAudio.shared.playZeroPayload(type);
   }
 
   public static playZeroTheme(): void {
@@ -411,39 +405,11 @@ export class CTUAudio {
     CTUAudio.shared.playTick(isCrimson, isUrgent);
   }
 
-  public static playZeroPayload(type: ZeroSoundType = "theme"): void {
-    CTUAudio.shared.playZeroPayload(type);
-  }
-
-  public static startHauntingAlarm(): void {
-    CTUAudio.shared.startHauntingAlarmLoop();
-  }
-
-  public static stopHauntingAlarm(): void {
-    CTUAudio.shared.stopHauntingAlarmLoop();
-  }
-
-  public static startVoiceLoop(): void {
-    CTUAudio.shared.playZeroTheme();
-  }
-
-  public static stopVoiceLoop(): void {
-    CTUAudio.shared.stopZeroTheme();
-  }
-
-  public static startCreditsAudio(): void {
-    CTUAudio.shared.playZeroTheme();
-  }
-
-  public static stopCreditsAudio(): void {
-    CTUAudio.shared.stopZeroTheme();
-  }
-
-  public static stopAll(): void {
+  public static stopAllAudio(): void {
     CTUAudio.shared.stopAll();
   }
 
-  public static stopCrisisAudio(): void {
+  public static stopAll(): void {
     CTUAudio.shared.stopAll();
   }
 }
