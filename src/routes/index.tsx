@@ -1,3 +1,4 @@
+// src/routes/index.tsx — FULL REPLACEMENT FILE
 import { createFileRoute } from "@tanstack/react-router";
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { SamsungTimePicker } from "@/components/samsung-time-picker";
@@ -62,12 +63,16 @@ const QUICK_PRESETS = [
   { label: "5M STAND-DOWN", sec: 5 * 60 },
 ];
 
-const SOUND_LABELS: Record<ZeroSoundType, string> = {
-  voice: "24 VOICE (6AM-7AM)",
-  boom: "SEISMIC BOOM",
-  alarm: "HAUNTING ALARM",
-  ctu_beep: "CTU BEEP",
-  stinger: "STINGER CRESCENDO",
+// Bulletproof HH:MM:SS format: immune to NaN and null
+export const formatHMS = (totalSec: number) => {
+  if (totalSec == null || typeof totalSec !== "number" || isNaN(totalSec) || !isFinite(totalSec)) {
+    return "00:00:00";
+  }
+  const s = Math.max(0, Math.floor(totalSec));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
 };
 
 export default function CTUTerminalRoute() {
@@ -113,16 +118,54 @@ export default function CTUTerminalRoute() {
   // Accurate Deadlines map for running timers
   const timerDeadlinesRef = useRef<Map<string, number>>(new Map());
 
-  // 1. Mount & Initialization
+  // 1. Mount & Initialization (Cleanse any corrupted localStorage)
   useEffect(() => {
     setMounted(true);
     registerCTUWorker();
 
     try {
       const savedT = localStorage.getItem("ctu_timers_v74");
-      if (savedT) setTimers(JSON.parse(savedT));
+      if (savedT) {
+        const parsed = JSON.parse(savedT);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const sanitized = parsed.map((t: any, idx: number): MissionTimer => {
+            const rawDur = Number(t?.durationSec);
+            const rawRem = Number(t?.remainingSec);
+            const durationSec = !isNaN(rawDur) && rawDur > 0 ? rawDur : 25 * 60;
+            const remainingSec = !isNaN(rawRem) && rawRem >= 0 ? rawRem : durationSec;
+            return {
+              id: t?.id || `timer-${idx + 1}`,
+              label: t?.label || `TARGET ${idx + 1}`,
+              durationSec,
+              remainingSec,
+              status: ["READY", "RUNNING", "HOLD", "EXPIRED"].includes(t?.status) ? t.status : "READY",
+              zeroSound: ["voice", "boom", "alarm", "ctu_beep", "stinger"].includes(t?.zeroSound) ? t.zeroSound : "ctu_beep",
+            };
+          });
+          setTimers(sanitized);
+        }
+      }
+
       const savedA = localStorage.getItem("ctu_alarms_v74");
-      if (savedA) setAlarms(JSON.parse(savedA));
+      if (savedA) {
+        const parsedA = JSON.parse(savedA);
+        if (Array.isArray(parsedA) && parsedA.length > 0) {
+          const sanitizedA = parsedA.map((a: any, idx: number): TacticalAlarm => {
+            const timeStr = typeof a?.timeStr === "string" && a.timeStr.includes(":") ? a.timeStr : "08:00";
+            const days = Array.isArray(a?.days) && a.days.length > 0 ? a.days.filter((d: any) => typeof d === "number") : [1, 2, 3, 4, 5];
+            return {
+              id: a?.id || `alarm-${idx + 1}`,
+              label: a?.label || `TASK ${idx + 1}`,
+              timeStr,
+              days: days.length > 0 ? days : [1, 2, 3, 4, 5],
+              armed: typeof a?.armed === "boolean" ? a.armed : true,
+              zeroSound: ["voice", "boom", "alarm", "ctu_beep", "stinger"].includes(a?.zeroSound) ? a.zeroSound : "alarm",
+            };
+          });
+          setAlarms(sanitizedA);
+        }
+      }
+
       const savedWire = localStorage.getItem("ctu_wire_phone_clock");
       if (savedWire) setWirePhoneClock(JSON.parse(savedWire));
     } catch {
@@ -199,7 +242,7 @@ export default function CTUTerminalRoute() {
   }, []);
 
   /**
-   * v74 gg() Takeover Countdown Sequence:
+   * v74 Takeover Countdown Sequence (Guarded against NaN):
    * Opens full-screen takeover modal with amber-to-crimson transition and ticks
    */
   const launchTakeoverCountdown = useCallback((seconds: number, label: string, onComplete: () => void) => {
@@ -209,18 +252,20 @@ export default function CTUTerminalRoute() {
       takeoverIntervalRef.current = null;
     }
 
+    const safeSec = typeof seconds === "number" && !isNaN(seconds) ? Math.max(0, Math.floor(seconds)) : 10;
+
     takeoverActiveRef.current = true;
     setTakeoverOpen(true);
-    setTakeoverDigit(seconds);
+    setTakeoverDigit(safeSec);
     setTakeoverLabel(label);
-    const isCrim = seconds <= 3;
+    const isCrim = safeSec <= 3;
     setTakeoverIsCrimson(isCrim);
     takeoverCallbackRef.current = onComplete;
 
     // First tick
     CTUAudio.playTick(isCrim, true);
 
-    let currentSec = seconds;
+    let currentSec = safeSec;
     takeoverIntervalRef.current = window.setInterval(() => {
       currentSec -= 1;
 
@@ -253,15 +298,6 @@ export default function CTUTerminalRoute() {
     setTakeoverOpen(false);
     CTUAudio.stopAll();
   }, []);
-
-  // Format HH:MM:SS
-  const formatHMS = (totalSec: number) => {
-    const s = Math.max(0, Math.floor(totalSec));
-    const h = Math.floor(s / 3600);
-    const m = Math.floor((s % 3600) / 60);
-    const sec = s % 60;
-    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
-  };
 
   // Master 1-Second Precision Operational Loop
   useEffect(() => {
@@ -311,7 +347,8 @@ export default function CTUTerminalRoute() {
           if (timer.status !== "RUNNING") return timer;
 
           const deadline = timerDeadlinesRef.current.get(timer.id);
-          const remaining = deadline ? Math.max(0, Math.ceil((deadline - Date.now()) / 1000)) : timer.remainingSec - 1;
+          const rawRemaining = deadline ? Math.ceil((deadline - Date.now()) / 1000) : timer.remainingSec - 1;
+          const remaining = isNaN(rawRemaining) ? 0 : Math.max(0, rawRemaining);
 
           hasActive = true;
           hudRemaining = remaining;
@@ -370,11 +407,13 @@ export default function CTUTerminalRoute() {
       alarms.forEach((alarm) => {
         if (!alarm.armed) return;
         if (!alarm.days.includes(bkkDay)) return;
+        if (!alarm.timeStr || !alarm.timeStr.includes(":")) return;
 
-        const [aHour, aMin] = alarm.timeStr.split(":").map(Number);
+        const [aH, aM] = alarm.timeStr.split(":").map(Number);
+        if (isNaN(aH) || isNaN(aM)) return;
 
         // Calculate seconds until alarm
-        const diffSec = (aHour - bkkHour) * 3600 + (aMin - bkkMin) * 60 - bkkSec;
+        const diffSec = (aH - bkkHour) * 3600 + (aM - bkkMin) * 60 - bkkSec;
 
         // v74 Exact 10 Seconds Before Alarm -> Launch Takeover Countdown
         if (diffSec === 10 && !takeoverActiveRef.current) {
@@ -404,7 +443,8 @@ export default function CTUTerminalRoute() {
       prev.map((timer) => {
         if (timer.id !== id) return timer;
 
-        const startingSec = timer.remainingSec > 0 ? timer.remainingSec : timer.durationSec;
+        const rawStart = timer.remainingSec > 0 ? timer.remainingSec : timer.durationSec;
+        const startingSec = !isNaN(rawStart) && rawStart > 0 ? rawStart : 25 * 60;
 
         // v74: If started with <= 10 seconds, immediately launch takeover
         if (startingSec <= 10) {
@@ -448,8 +488,9 @@ export default function CTUTerminalRoute() {
 
   // Preset Selection Handler
   const handleSelectPreset = (sec: number) => {
+    const safeSec = !isNaN(sec) && sec > 0 ? sec : 25 * 60;
     setTimers((prev) =>
-      prev.map((t) => (t.id === selectedTimerId ? { ...t, durationSec: sec, remainingSec: sec, status: "READY" } : t))
+      prev.map((t) => (t.id === selectedTimerId ? { ...t, durationSec: safeSec, remainingSec: safeSec, status: "READY" } : t))
     );
   };
 
@@ -458,7 +499,7 @@ export default function CTUTerminalRoute() {
     if (type === "timer") {
       setTimers((prev) => prev.map((t) => (t.id === id ? { ...t, zeroSound: sound } : t)));
     } else {
-      setAlarms((prev) => prev.map((a) => (a.id === id ? { ...a, zeroSound: sound } : t)));
+      setAlarms((prev) => prev.map((a) => (a.id === id ? { ...a, zeroSound: sound } : a)));
     }
     CTUAudio.playZeroPayload(sound);
   };
@@ -476,8 +517,8 @@ export default function CTUTerminalRoute() {
       const video = pipVideoRef.current;
       if (!canvas || !video) return;
 
-      const activeTimer = timers.find((t) => t.id === selectedTimerId) || timers[0];
-      drawPipCanvas(formatHMS(activeTimer.remainingSec), activeTimer.label);
+      const active = timers.find((t) => t.id === selectedTimerId) || timers[0];
+      drawPipCanvas(formatHMS(active.remainingSec), active.label);
 
       if (!video.srcObject) {
         const stream = canvas.captureStream(10);
@@ -587,7 +628,7 @@ export default function CTUTerminalRoute() {
                 </React.Fragment>
               ))
             ) : (
-              "10:49:00"
+              "11:30:00"
             )}
           </div>
           <div className="text-xs text-[#ffcc00]/60 mt-1">{currentDateStr || "TUE, NOV 17, 2026"}</div>
@@ -596,7 +637,7 @@ export default function CTUTerminalRoute() {
         <div className="text-center md:text-right border-t md:border-t-0 md:border-l border-[#ffcc00]/20 pt-2 md:pt-0 md:pl-6">
           <div className="text-xs text-neutral-400 uppercase tracking-widest">ZULU TIME (UTC)</div>
           <div className="text-2xl sm:text-3xl font-bold tracking-widest text-neutral-300">
-            {currentTimeZulu || "03:49:00"}
+            {currentTimeZulu || "04:30:00"}
           </div>
           <div className="text-[10px] text-neutral-500 mt-1">REAL-TIME SYNCHRONIZED</div>
         </div>
@@ -850,7 +891,7 @@ export default function CTUTerminalRoute() {
               </div>
 
               <div className="flex items-center gap-3">
-                <span className="text-2xl font-black tracking-widest">{alarm.timeStr}</span>
+                <span className="text-2xl font-black tracking-widest">{alarm.timeStr || "08:00"}</span>
 
                 {ringingAlarmId === alarm.id ? (
                   <button
@@ -968,18 +1009,28 @@ export default function CTUTerminalRoute() {
           }
           onConfirm={(result) => {
             if (pickerMode === "timer" && editingItemId) {
-              setTimers(
-                timers.map((t) =>
+              const rawSec = typeof result.totalSec === "number" && !isNaN(result.totalSec)
+                ? result.totalSec
+                : typeof result.totalSeconds === "number" && !isNaN(result.totalSeconds)
+                ? result.totalSeconds
+                : ((result.hours || 0) * 3600 + (result.minutes || 0) * 60 + (result.seconds || 0));
+              const safeSec = Math.max(1, !isNaN(rawSec) && rawSec > 0 ? rawSec : 25 * 60);
+
+              setTimers((prev) =>
+                prev.map((t) =>
                   t.id === editingItemId
-                    ? { ...t, durationSec: result.totalSec, remainingSec: result.totalSec, status: "READY" }
+                    ? { ...t, durationSec: safeSec, remainingSec: safeSec, status: "READY" }
                     : t
                 )
               );
             } else if (pickerMode === "alarm" && editingItemId) {
-              setAlarms(
-                alarms.map((a) =>
+              const timeStr = result.timeStr || `${String(result.hours || 0).padStart(2, "0")}:${String(result.minutes || 0).padStart(2, "0")}`;
+              const days = result.days && result.days.length > 0 ? result.days : [1, 2, 3, 4, 5];
+
+              setAlarms((prev) =>
+                prev.map((a) =>
                   a.id === editingItemId
-                    ? { ...a, timeStr: result.timeStr, days: result.days }
+                    ? { ...a, timeStr, days }
                     : a
                 )
               );
