@@ -1,249 +1,322 @@
-// src/routes/index.tsx — FULL REPLACEMENT FILE
-import { createFileRoute } from "@tanstack/react-router";
+// src/routes/index.tsx — FULL DROP-IN REPLACEMENT FILE
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import { createFileRoute } from "@tanstack/react-router";
 import { SamsungTimePicker } from "@/components/samsung-time-picker";
 import { CTUAudio, ZeroSoundType } from "@/lib/ctu-audio";
 import {
-  registerCTUWorker,
-  scheduleBackgroundAlert,
-  cancelBackgroundAlert,
+  initBackgroundAlerts,
+  scheduleLocalAlert,
+  cancelLocalAlert,
   updateLockscreenHUD,
   clearLockscreenHUD,
-  syncWithNativePhoneClock,
 } from "@/lib/background-alerts";
 
 export const Route = createFileRoute("/")({
-  component: CTUTerminalRoute,
   head: () => ({
     meta: [
-      { title: "CTU // 24 OPERATIONAL TERMINAL" },
-      { name: "description", content: "24 CTU Tactical Mission Timer & Precision Multi-Alarm System" },
-      { property: "og:title", content: "CTU // 24 OPERATIONAL TERMINAL" },
-      { property: "og:description", content: "24 CTU Tactical Mission Timer & Precision Multi-Alarm System" },
+      { title: "CTU Tactical Ops Terminal // 24 Mission Clocks & Timers" },
+      { name: "description", content: "24 CTU Multi-Timer, Alarm and Surveillance Operations Terminal." },
+      { property: "og:title", content: "CTU Tactical Ops Terminal // 24" },
+      { property: "og:description", content: "Tactical mission timers, alarms, and surveillance HUD." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
   }),
+  component: CTUTacticalOpsTerminal,
 });
 
-interface MissionTimer {
+export type TimerItem = {
   id: string;
   label: string;
   durationSec: number;
   remainingSec: number;
-  status: "READY" | "RUNNING" | "HOLD" | "EXPIRED";
+  status: "READY" | "RUNNING" | "PAUSED" | "HOLD" | "EXPIRED";
   zeroSound: ZeroSoundType;
-}
-
-interface TacticalAlarm {
-  id: string;
-  label: string;
-  timeStr: string; // HH:MM
-  days: number[]; // 0=Sun..6=Sat
-  armed: boolean;
-  zeroSound: ZeroSoundType;
-}
-
-const INITIAL_TIMERS: MissionTimer[] = [
-  { id: "timer-1", label: "TACTICAL SPRINT", durationSec: 25 * 60, remainingSec: 25 * 60, status: "READY", zeroSound: "ctu_beep" },
-  { id: "timer-2", label: "FIELD INTERROGATION", durationSec: 15 * 60, remainingSec: 15 * 60, status: "READY", zeroSound: "voice" },
-  { id: "timer-3", label: "SATELLITE PASS", durationSec: 45 * 60, remainingSec: 45 * 60, status: "READY", zeroSound: "alarm" },
-];
-
-const INITIAL_ALARMS: TacticalAlarm[] = [
-  { id: "alarm-1", label: "MANDATORY BRIEFING", timeStr: "06:00", days: [1, 2, 3, 4, 5], armed: true, zeroSound: "voice" },
-  { id: "alarm-2", label: "PERIMETER CHECK", timeStr: "12:00", days: [0, 1, 2, 3, 4, 5, 6], armed: false, zeroSound: "boom" },
-  { id: "alarm-3", label: "INTEL HANDOFF", timeStr: "18:00", days: [1, 2, 3, 4, 5], armed: true, zeroSound: "ctu_beep" },
-];
-
-const QUICK_PRESETS = [
-  { label: "25M SPRINT", sec: 25 * 60 },
-  { label: "15M INTERROGATION", sec: 15 * 60 },
-  { label: "45M SAT PASS", sec: 45 * 60 },
-  { label: "5M STAND-DOWN", sec: 5 * 60 },
-];
-
-// Bulletproof HH:MM:SS format: immune to NaN and null
-export const formatHMS = (totalSec: number) => {
-  if (totalSec == null || typeof totalSec !== "number" || isNaN(totalSec) || !isFinite(totalSec)) {
-    return "00:00:00";
-  }
-  const s = Math.max(0, Math.floor(totalSec));
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const sec = s % 60;
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
 };
 
-export default function CTUTerminalRoute() {
-  const [mounted, setMounted] = useState(false);
-  const [currentTimeBangkok, setCurrentTimeBangkok] = useState("");
-  const [currentTimeZulu, setCurrentTimeZulu] = useState("");
-  const [currentDateStr, setCurrentDateStr] = useState("");
+export type AlarmItem = {
+  id: string;
+  label: string;
+  timeStr: string; // HH:mm
+  days: number[]; // 0=Sun, 1=Mon, ..., 6=Sat
+  armed: boolean;
+  zeroSound: ZeroSoundType;
+};
+
+const INITIAL_TIMERS: TimerItem[] = [
+  { id: "timer-1", label: "TACTICAL SPRINT", durationSec: 25 * 60, remainingSec: 25 * 60, status: "READY", zeroSound: "theme" },
+  { id: "timer-2", label: "FIELD INTERROGATION", durationSec: 15 * 60, remainingSec: 15 * 60, status: "READY", zeroSound: "theme" },
+  { id: "timer-3", label: "SATELLITE PASS", durationSec: 45 * 60, remainingSec: 45 * 60, status: "READY", zeroSound: "theme" },
+];
+
+const INITIAL_ALARMS: AlarmItem[] = [
+  { id: "alarm-1", label: "MANDATORY BRIEFING", timeStr: "06:00", days: [1, 2, 3, 4, 5], armed: true, zeroSound: "theme" },
+  { id: "alarm-2", label: "PERIMETER CHECK", timeStr: "12:00", days: [0, 1, 2, 3, 4, 5, 6], armed: false, zeroSound: "boom" },
+  { id: "alarm-3", label: "INTEL HANDOFF", timeStr: "18:00", days: [1, 2, 3, 4, 5], armed: true, zeroSound: "theme" },
+];
+
+const PRESETS = [
+  { label: "TACTICAL SPRINT", sec: 25 * 60 },
+  { label: "INTERROGATION", sec: 15 * 60 },
+  { label: "SATELLITE PASS", sec: 45 * 60 },
+  { label: "FIELD STAND-DOWN", sec: 5 * 60 },
+  { label: "QUICK 60 SEC", sec: 60 },
+  { label: "CRISIS 10 SEC", sec: 10 },
+];
+
+function formatHMS(sec: number): string {
+  const safe = typeof sec === "number" && !isNaN(sec) ? Math.max(0, Math.floor(sec)) : 0;
+  const h = Math.floor(safe / 3600);
+  const m = Math.floor((safe % 3600) / 60);
+  const s = safe % 60;
+  return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+}
+
+export function CTUTacticalOpsTerminal() {
+  // Clocks State
+  const [currentTimeBangkok, setCurrentTimeBangkok] = useState<string>("00:00:00");
+  const [currentTimeZulu, setCurrentTimeZulu] = useState<string>("00:00:00");
+  const [currentDateStr, setCurrentDateStr] = useState<string>("CTU // ACTIVE");
   const [blinkColon, setBlinkColon] = useState(true);
 
-  // Timers & Alarms
-  const [timers, setTimers] = useState<MissionTimer[]>(INITIAL_TIMERS);
+  // Queues State
+  const [timers, setTimers] = useState<TimerItem[]>(INITIAL_TIMERS);
+  const [alarms, setAlarms] = useState<AlarmItem[]>(INITIAL_ALARMS);
   const [selectedTimerId, setSelectedTimerId] = useState<string>("timer-1");
-  const [alarms, setAlarms] = useState<TacticalAlarm[]>(INITIAL_ALARMS);
 
-  // Picker modal state
+  // Samsung Picker State
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [pickerMode, setPickerMode] = useState<"timer" | "alarm">("timer");
-  const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [pickerTarget, setPickerTarget] = useState<{ type: "timer" | "alarm"; id: string } | null>(null);
 
-  // v74 Exact 10->0 Countdown Takeover Modal State
+  // v74 Takeover State
   const [takeoverOpen, setTakeoverOpen] = useState(false);
-  const [takeoverDigit, setTakeoverDigit] = useState<number>(10);
-  const [takeoverLabel, setTakeoverLabel] = useState<string>("TIMER / ALARM");
-  const [takeoverIsCrimson, setTakeoverIsCrimson] = useState<boolean>(false);
-  const takeoverActiveRef = useRef(false);
+  const [takeoverDigit, setTakeoverDigit] = useState(10);
+  const [takeoverLabel, setTakeoverLabel] = useState("TACTICAL DEADLINE");
+  const [takeoverIsCrimson, setTakeoverIsCrimson] = useState(false);
   const takeoverIntervalRef = useRef<number | null>(null);
+  const takeoverActiveRef = useRef(false);
   const takeoverCallbackRef = useRef<(() => void) | null>(null);
 
-  // Global Ringing Alarm State
+  // Ringing / Expired Audio Banner State
   const [ringingAlarmId, setRingingAlarmId] = useState<string | null>(null);
+  const [activeAlarmLabel, setActiveAlarmLabel] = useState<string>("");
 
-  // Mobile Features
+  // System & Wake Lock State
   const [osAlertsEnabled, setOsAlertsEnabled] = useState(false);
   const [wakeLockActive, setWakeLockActive] = useState(false);
   const [wirePhoneClock, setWirePhoneClock] = useState(false);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
 
-  // PiP Canvas & Video elements
+  // Picture-in-Picture Multi-Slot HUD Canvas & Video elements
   const pipCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const pipVideoRef = useRef<HTMLVideoElement | null>(null);
   const [isPipActive, setIsPipActive] = useState(false);
 
-  // Accurate Deadlines map for running timers
+  // Deadlines map for running timers
   const timerDeadlinesRef = useRef<Map<string, number>>(new Map());
 
-  // 1. Mount & Initialization (Cleanse any corrupted localStorage)
+  // 1. Mount & Initialization (Sanitize any stale localStorage)
   useEffect(() => {
-    setMounted(true);
-    registerCTUWorker();
+    initBackgroundAlerts();
 
     try {
-      const savedT = localStorage.getItem("ctu_timers_v74");
-      if (savedT) {
-        const parsed = JSON.parse(savedT);
+      const savedTimers = localStorage.getItem("ctu_timers_v2");
+      if (savedTimers) {
+        const parsed = JSON.parse(savedTimers);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          const sanitized = parsed.map((t: any, idx: number): MissionTimer => {
-            const rawDur = Number(t?.durationSec);
-            const rawRem = Number(t?.remainingSec);
-            const durationSec = !isNaN(rawDur) && rawDur > 0 ? rawDur : 25 * 60;
-            const remainingSec = !isNaN(rawRem) && rawRem >= 0 ? rawRem : durationSec;
+          const validated = parsed.map((t) => {
+            const safeDur = typeof t.durationSec === "number" && !isNaN(t.durationSec) && t.durationSec > 0 ? t.durationSec : 25 * 60;
             return {
-              id: t?.id || `timer-${idx + 1}`,
-              label: t?.label || `TARGET ${idx + 1}`,
-              durationSec,
-              remainingSec,
-              status: ["READY", "RUNNING", "HOLD", "EXPIRED"].includes(t?.status) ? t.status : "READY",
-              zeroSound: ["voice", "boom", "alarm", "ctu_beep", "stinger"].includes(t?.zeroSound) ? t.zeroSound : "ctu_beep",
+              id: t.id || `timer-${Date.now()}`,
+              label: t.label || "TACTICAL SPRINT",
+              durationSec: safeDur,
+              remainingSec: safeDur,
+              status: "READY" as const,
+              zeroSound: ["theme", "voice", "boom", "alarm", "ctu_beep", "stinger"].includes(t?.zeroSound) ? t.zeroSound : "theme",
             };
           });
-          setTimers(sanitized);
+          setTimers(validated);
         }
       }
+    } catch {}
 
-      const savedA = localStorage.getItem("ctu_alarms_v74");
-      if (savedA) {
-        const parsedA = JSON.parse(savedA);
-        if (Array.isArray(parsedA) && parsedA.length > 0) {
-          const sanitizedA = parsedA.map((a: any, idx: number): TacticalAlarm => {
-            const timeStr = typeof a?.timeStr === "string" && a.timeStr.includes(":") ? a.timeStr : "08:00";
-            const days = Array.isArray(a?.days) && a.days.length > 0 ? a.days.filter((d: any) => typeof d === "number") : [1, 2, 3, 4, 5];
+    try {
+      const savedAlarms = localStorage.getItem("ctu_alarms_v2");
+      if (savedAlarms) {
+        const parsed = JSON.parse(savedAlarms);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const validated = parsed.map((a) => {
+            const validTime = typeof a.timeStr === "string" && a.timeStr.includes(":") ? a.timeStr : "06:00";
             return {
-              id: a?.id || `alarm-${idx + 1}`,
-              label: a?.label || `TASK ${idx + 1}`,
-              timeStr,
-              days: days.length > 0 ? days : [1, 2, 3, 4, 5],
-              armed: typeof a?.armed === "boolean" ? a.armed : true,
-              zeroSound: ["voice", "boom", "alarm", "ctu_beep", "stinger"].includes(a?.zeroSound) ? a.zeroSound : "alarm",
+              id: a.id || `alarm-${Date.now()}`,
+              label: a.label || "TACTICAL ALARM",
+              timeStr: validTime,
+              days: Array.isArray(a.days) && a.days.length > 0 ? a.days : [1, 2, 3, 4, 5],
+              armed: typeof a.armed === "boolean" ? a.armed : true,
+              zeroSound: ["theme", "voice", "boom", "alarm", "ctu_beep", "stinger"].includes(a?.zeroSound) ? a.zeroSound : "theme",
             };
           });
-          setAlarms(sanitizedA);
+          setAlarms(validated);
         }
       }
+    } catch {}
 
-      const savedWire = localStorage.getItem("ctu_wire_phone_clock");
-      if (savedWire) setWirePhoneClock(JSON.parse(savedWire));
-    } catch {
-      // Ignored
-    }
-
-    if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+    if ("Notification" in window && Notification.permission === "granted") {
       setOsAlertsEnabled(true);
     }
   }, []);
 
-  // Save changes
+  // Save changes to localStorage
   useEffect(() => {
-    if (!mounted) return;
     try {
-      localStorage.setItem("ctu_timers_v74", JSON.stringify(timers));
+      localStorage.setItem("ctu_timers_v2", JSON.stringify(timers));
     } catch {}
-  }, [timers, mounted]);
+  }, [timers]);
 
   useEffect(() => {
-    if (!mounted) return;
     try {
-      localStorage.setItem("ctu_alarms_v74", JSON.stringify(alarms));
+      localStorage.setItem("ctu_alarms_v2", JSON.stringify(alarms));
     } catch {}
-  }, [alarms, mounted]);
+  }, [alarms]);
 
-  useEffect(() => {
-    if (!mounted) return;
-    try {
-      localStorage.setItem("ctu_wire_phone_clock", JSON.stringify(wirePhoneClock));
-    } catch {}
-  }, [wirePhoneClock, mounted]);
-
-  // Wake lock management
-  useEffect(() => {
-    const hasRunningTimer = timers.some((t) => t.status === "RUNNING");
-    if (hasRunningTimer && !wakeLockRef.current && typeof navigator !== "undefined" && "wakeLock" in navigator) {
-      navigator.wakeLock.request("screen").then((lock) => {
+  // Request & Maintain Wake Lock during operations
+  const requestWakeLock = useCallback(async () => {
+    if ("wakeLock" in navigator && !wakeLockRef.current) {
+      try {
+        const lock = await navigator.wakeLock.request("screen");
         wakeLockRef.current = lock;
         setWakeLockActive(true);
         lock.addEventListener("release", () => {
           wakeLockRef.current = null;
           setWakeLockActive(false);
         });
-      }).catch(() => {});
-    } else if (!hasRunningTimer && wakeLockRef.current) {
+      } catch {
+        // WakeLock rejected
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    const hasRunning = timers.some((t) => t.status === "RUNNING");
+    if (hasRunning) {
+      requestWakeLock();
+    } else if (wakeLockRef.current) {
       wakeLockRef.current.release().catch(() => {});
       wakeLockRef.current = null;
       setWakeLockActive(false);
     }
-  }, [timers]);
-
-  // Draw PiP Canvas
-  const drawPipCanvas = useCallback((timeStr: string, label: string, isCrimson = false) => {
-    const canvas = pipCanvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    ctx.fillStyle = "#000000";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    ctx.strokeStyle = isCrimson ? "#ff0000" : "#ffcc00";
-    ctx.lineWidth = 4;
-    ctx.strokeRect(4, 4, canvas.width - 8, canvas.height - 8);
-
-    ctx.fillStyle = isCrimson ? "#ff0000" : "#ffcc00";
-    ctx.font = "bold 16px Consolas, monospace";
-    ctx.textAlign = "center";
-    ctx.fillText(`CTU // ${label.toUpperCase()}`, canvas.width / 2, 28);
-
-    ctx.font = "bold 44px Consolas, monospace";
-    ctx.fillText(timeStr, canvas.width / 2, 85);
-  }, []);
+  }, [timers, requestWakeLock]);
 
   /**
-   * v74 Takeover Countdown Sequence (Guarded against NaN):
-   * Opens full-screen takeover modal with amber-to-crimson transition and ticks
+   * Draw Multi-Slot Picture-in-Picture Tactical HUD (Canvas 440 x 260)
+   * Displays all active running timers and armed alarms simultaneously
+   */
+  const drawPipHud = useCallback(
+    (activeTimersList: TimerItem[], armedAlarmsList: AlarmItem[], isEmergency = false) => {
+      const canvas = pipCanvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+
+      const w = canvas.width;
+      const h = canvas.height;
+
+      // Dark tactical canvas background
+      ctx.fillStyle = "#000000";
+      ctx.fillRect(0, 0, w, h);
+
+      // Outer tactical threat border
+      ctx.strokeStyle = isEmergency ? "#ff0000" : "#ffcc00";
+      ctx.lineWidth = 4;
+      ctx.strokeRect(3, 3, w - 6, h - 6);
+
+      // Top Tactical Status Bar
+      ctx.fillStyle = isEmergency ? "rgba(255, 0, 0, 0.2)" : "rgba(255, 204, 0, 0.15)";
+      ctx.fillRect(5, 5, w - 10, 32);
+
+      ctx.fillStyle = isEmergency ? "#ff0000" : "#ffcc00";
+      ctx.font = "bold 13px Consolas, monospace";
+      ctx.textAlign = "left";
+      ctx.fillText(`CTU // ${isEmergency ? "CRITICAL THREAT" : "OPERATIONAL HUD"}`, 12, 26);
+
+      ctx.textAlign = "right";
+      ctx.fillText(`ZULU: ${currentTimeZulu}`, w - 12, 26);
+
+      let currentY = 56;
+
+      // --- SECTION 1: ARMED / RUNNING TIMERS ---
+      ctx.fillStyle = "#888888";
+      ctx.font = "bold 11px Consolas, monospace";
+      ctx.textAlign = "left";
+      ctx.fillText("--- ARMED TIMERS ---", 12, currentY);
+      currentY += 18;
+
+      if (activeTimersList.length === 0) {
+        ctx.fillStyle = "#555555";
+        ctx.font = "12px Consolas, monospace";
+        ctx.fillText("NO TIMERS ACTIVE [STANDBY]", 12, currentY);
+        currentY += 24;
+      } else {
+        // Display up to 3 timers
+        activeTimersList.slice(0, 3).forEach((t) => {
+          const isCrim = t.remainingSec <= 10;
+          ctx.fillStyle = isCrim ? "#ff0000" : "#ffcc00";
+          ctx.font = "bold 13px Consolas, monospace";
+          ctx.textAlign = "left";
+          const shortLabel = t.label.length > 18 ? t.label.substring(0, 18) + ".." : t.label;
+          ctx.fillText(`▶ ${shortLabel}`, 12, currentY);
+
+          ctx.textAlign = "right";
+          ctx.font = "bold 15px Consolas, monospace";
+          ctx.fillText(formatHMS(t.remainingSec), w - 12, currentY);
+
+          currentY += 24;
+        });
+      }
+
+      currentY += 6;
+      ctx.strokeStyle = "rgba(255, 204, 0, 0.25)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(10, currentY);
+      ctx.lineTo(w - 10, currentY);
+      ctx.stroke();
+      currentY += 16;
+
+      // --- SECTION 2: ARMED ALARMS ---
+      ctx.fillStyle = "#888888";
+      ctx.font = "bold 11px Consolas, monospace";
+      ctx.textAlign = "left";
+      ctx.fillText("--- ARMED ALARMS (BANGKOK) ---", 12, currentY);
+      currentY += 18;
+
+      if (armedAlarmsList.length === 0) {
+        ctx.fillStyle = "#555555";
+        ctx.font = "12px Consolas, monospace";
+        ctx.fillText("NO ALARMS ARMED", 12, currentY);
+      } else {
+        // Display up to 2 armed alarms
+        armedAlarmsList.slice(0, 2).forEach((a) => {
+          ctx.fillStyle = "#ffcc00";
+          ctx.font = "bold 12px Consolas, monospace";
+          ctx.textAlign = "left";
+          const shortLabel = a.label.length > 20 ? a.label.substring(0, 20) + ".." : a.label;
+          ctx.fillText(`⏱ ${shortLabel}`, 12, currentY);
+
+          ctx.textAlign = "right";
+          ctx.font = "bold 13px Consolas, monospace";
+          ctx.fillText(a.timeStr, w - 12, currentY);
+
+          currentY += 22;
+        });
+      }
+    },
+    [currentTimeZulu]
+  );
+
+  /**
+   * v74 Takeover Countdown Sequence:
+   * Opens full-screen modal, plays countdown audio, ticks, and transitions to Zero Theme
    */
   const launchTakeoverCountdown = useCallback((seconds: number, label: string, onComplete: () => void) => {
     CTUAudio.unlock();
@@ -262,7 +335,8 @@ export default function CTUTerminalRoute() {
     setTakeoverIsCrimson(isCrim);
     takeoverCallbackRef.current = onComplete;
 
-    // First tick
+    // Start 24 Alarm Countdown audio track
+    CTUAudio.startCountdownAudio();
     CTUAudio.playTick(isCrim, true);
 
     let currentSec = safeSec;
@@ -276,6 +350,11 @@ export default function CTUTerminalRoute() {
         }
         takeoverActiveRef.current = false;
         setTakeoverOpen(false);
+
+        // Stop countdown track and start signature 24 At Zero Theme
+        CTUAudio.stopCountdownAudio();
+        CTUAudio.playZeroTheme();
+
         if (takeoverCallbackRef.current) {
           takeoverCallbackRef.current();
         }
@@ -333,15 +412,14 @@ export default function CTUTerminalRoute() {
           year: "numeric",
         }).format(now).toUpperCase();
         setCurrentDateStr(dateFmt);
-      } catch {
-        // Fallback
-      }
+      } catch {}
 
-      // Check Active Timers
+      // Update Running Timers
       setTimers((prevTimers) => {
         let hasActive = false;
         let hudRemaining = 0;
         let hudLabel = "";
+        let isEmergency = false;
 
         const updated = prevTimers.map((timer) => {
           if (timer.status !== "RUNNING") return timer;
@@ -353,13 +431,16 @@ export default function CTUTerminalRoute() {
           hasActive = true;
           hudRemaining = remaining;
           hudLabel = timer.label;
+          if (remaining <= 10) isEmergency = true;
 
           // v74 Exact 10-Second Transition to Takeover
           if (remaining === 10 && !takeoverActiveRef.current) {
             timerDeadlinesRef.current.delete(timer.id);
             window.setTimeout(() => {
               launchTakeoverCountdown(10, timer.label, () => {
-                CTUAudio.playZeroPayload(timer.zeroSound);
+                setActiveAlarmLabel(`TIMER EXPIRED: ${timer.label}`);
+                setRingingAlarmId(timer.id);
+                CTUAudio.playZeroTheme();
                 setTimers((current) =>
                   current.map((t) => (t.id === timer.id ? { ...t, remainingSec: 0, status: "EXPIRED" } : t))
                 );
@@ -368,20 +449,25 @@ export default function CTUTerminalRoute() {
             return { ...timer, remainingSec: 10, status: "HOLD" as const };
           }
 
-          // Zero hit
+          // Zero hit directly
           if (remaining <= 0) {
             timerDeadlinesRef.current.delete(timer.id);
-            CTUAudio.playZeroPayload(timer.zeroSound);
+            setActiveAlarmLabel(`TIMER EXPIRED: ${timer.label}`);
+            setRingingAlarmId(timer.id);
+            CTUAudio.playZeroTheme();
             return { ...timer, remainingSec: 0, status: "EXPIRED" as const };
           }
 
           return { ...timer, remainingSec: remaining };
         });
 
-        // Update PiP and Lockscreen HUD
+        // Update Multi-Slot Picture-in-Picture HUD
+        const activeList = updated.filter((t) => t.status === "RUNNING" || t.status === "HOLD");
+        const armedAlarms = alarms.filter((a) => a.armed);
+        drawPipHud(activeList, armedAlarms, isEmergency);
+
         if (hasActive) {
           const formatted = formatHMS(hudRemaining);
-          drawPipCanvas(formatted, hudLabel, hudRemaining <= 10);
           updateLockscreenHUD(hudLabel, formatted, hudRemaining);
         } else {
           clearLockscreenHUD();
@@ -412,27 +498,28 @@ export default function CTUTerminalRoute() {
         const [aH, aM] = alarm.timeStr.split(":").map(Number);
         if (isNaN(aH) || isNaN(aM)) return;
 
-        // Calculate seconds until alarm
         const diffSec = (aH - bkkHour) * 3600 + (aM - bkkMin) * 60 - bkkSec;
 
-        // v74 Exact 10 Seconds Before Alarm -> Launch Takeover Countdown
+        // 10 Seconds Before Alarm -> Launch Takeover Countdown
         if (diffSec === 10 && !takeoverActiveRef.current) {
           launchTakeoverCountdown(10, `ALARM: ${alarm.label}`, () => {
             setRingingAlarmId(alarm.id);
-            CTUAudio.playZeroPayload(alarm.zeroSound);
+            setActiveAlarmLabel(`ALARM TRIGGERED: ${alarm.label}`);
+            CTUAudio.playZeroTheme();
           });
         }
 
-        // Direct hit if app opened at the exact minute
+        // Direct hit if opened at exact minute
         if (diffSec === 0 && !takeoverActiveRef.current && ringingAlarmId !== alarm.id) {
           setRingingAlarmId(alarm.id);
-          CTUAudio.playZeroPayload(alarm.zeroSound);
+          setActiveAlarmLabel(`ALARM TRIGGERED: ${alarm.label}`);
+          CTUAudio.playZeroTheme();
         }
       });
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [alarms, drawPipCanvas, launchTakeoverCountdown, ringingAlarmId]);
+  }, [alarms, drawPipHud, launchTakeoverCountdown, ringingAlarmId]);
 
   // Execute Timer Handler
   const handleExecuteTimer = (id: string) => {
@@ -446,11 +533,12 @@ export default function CTUTerminalRoute() {
         const rawStart = timer.remainingSec > 0 ? timer.remainingSec : timer.durationSec;
         const startingSec = !isNaN(rawStart) && rawStart > 0 ? rawStart : 25 * 60;
 
-        // v74: If started with <= 10 seconds, immediately launch takeover
         if (startingSec <= 10) {
           window.setTimeout(() => {
             launchTakeoverCountdown(startingSec, timer.label, () => {
-              CTUAudio.playZeroPayload(timer.zeroSound);
+              setActiveAlarmLabel(`TIMER EXPIRED: ${timer.label}`);
+              setRingingAlarmId(id);
+              CTUAudio.playZeroTheme();
               setTimers((current) =>
                 current.map((t) => (t.id === id ? { ...t, remainingSec: 0, status: "EXPIRED" } : t))
               );
@@ -460,11 +548,10 @@ export default function CTUTerminalRoute() {
         }
 
         const deadline = Date.now() + startingSec * 1000;
-        timerDeadlinesRef.current.set(timer.id, deadline);
-        scheduleBackgroundAlert(timer.id, timer.label, startingSec);
+        timerDeadlinesRef.current.set(id, deadline);
 
-        if (wirePhoneClock) {
-          syncWithNativePhoneClock("timer", startingSec);
+        if (osAlertsEnabled) {
+          scheduleLocalAlert(id, timer.label, deadline);
         }
 
         return { ...timer, remainingSec: startingSec, status: "RUNNING" };
@@ -472,39 +559,104 @@ export default function CTUTerminalRoute() {
     );
   };
 
-  // Hold Timer Handler
-  const handleHoldTimer = (id: string) => {
+  const handlePauseTimer = (id: string) => {
     timerDeadlinesRef.current.delete(id);
-    cancelBackgroundAlert(id);
-    setTimers((prev) => prev.map((t) => (t.id === id ? { ...t, status: "HOLD" } : t)));
+    cancelLocalAlert(id);
+    setTimers((prev) => prev.map((t) => (t.id === id ? { ...t, status: "PAUSED" } : t)));
   };
 
-  // Reset Timer Handler
-  const handleResetTimer = (id: string) => {
+  const handleStopAndResetTimer = (id: string) => {
     timerDeadlinesRef.current.delete(id);
-    cancelBackgroundAlert(id);
-    setTimers((prev) => prev.map((t) => (t.id === id ? { ...t, remainingSec: t.durationSec, status: "READY" } : t)));
-  };
-
-  // Preset Selection Handler
-  const handleSelectPreset = (sec: number) => {
-    const safeSec = !isNaN(sec) && sec > 0 ? sec : 25 * 60;
+    cancelLocalAlert(id);
+    if (ringingAlarmId === id) {
+      setRingingAlarmId(null);
+      setActiveAlarmLabel("");
+      CTUAudio.stopAll();
+    }
     setTimers((prev) =>
-      prev.map((t) => (t.id === selectedTimerId ? { ...t, durationSec: safeSec, remainingSec: safeSec, status: "READY" } : t))
+      prev.map((t) => (t.id === id ? { ...t, remainingSec: t.durationSec, status: "READY" } : t))
     );
   };
 
-  // Sound selection handler
-  const handleSelectSound = (id: string, sound: ZeroSoundType, type: "timer" | "alarm") => {
-    if (type === "timer") {
-      setTimers((prev) => prev.map((t) => (t.id === id ? { ...t, zeroSound: sound } : t)));
-    } else {
-      setAlarms((prev) => prev.map((a) => (a.id === id ? { ...a, zeroSound: sound } : a)));
-    }
-    CTUAudio.playZeroPayload(sound);
+  const handleSilenceActiveAlarm = () => {
+    setRingingAlarmId(null);
+    setActiveAlarmLabel("");
+    CTUAudio.stopAll();
   };
 
-  // Toggle Picture-in-Picture
+  const handleSelectPreset = (sec: number, label: string) => {
+    CTUAudio.unlock();
+    CTUAudio.playChirp();
+    const safeSec = !isNaN(sec) && sec > 0 ? sec : 25 * 60;
+    setTimers((prev) =>
+      prev.map((t) =>
+        t.id === selectedTimerId
+          ? { ...t, label, durationSec: safeSec, remainingSec: safeSec, status: "READY" }
+          : t
+      )
+    );
+  };
+
+  const handleOpenPickerForTimer = (id: string) => {
+    setSelectedTimerId(id);
+    setPickerTarget({ type: "timer", id });
+    setPickerOpen(true);
+  };
+
+  const handleOpenPickerForAlarm = (id: string) => {
+    setPickerTarget({ type: "alarm", id });
+    setPickerOpen(true);
+  };
+
+  const handlePickerConfirm = (result: {
+    totalSeconds?: number;
+    totalSec?: number;
+    hours?: number;
+    minutes?: number;
+    seconds?: number;
+    timeStr?: string;
+    days?: number[];
+  }) => {
+    if (!pickerTarget) return;
+
+    if (pickerTarget.type === "timer") {
+      let resolvedSec = 0;
+      if (typeof result.totalSeconds === "number" && !isNaN(result.totalSeconds) && result.totalSeconds > 0) {
+        resolvedSec = result.totalSeconds;
+      } else if (typeof result.totalSec === "number" && !isNaN(result.totalSec) && result.totalSec > 0) {
+        resolvedSec = result.totalSec;
+      } else if (typeof result.hours === "number" || typeof result.minutes === "number" || typeof result.seconds === "number") {
+        resolvedSec = (result.hours || 0) * 3600 + (result.minutes || 0) * 60 + (result.seconds || 0);
+      } else if (result.timeStr && result.timeStr.includes(":")) {
+        const parts = result.timeStr.split(":").map(Number);
+        if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+          resolvedSec = parts[0] * 3600 + parts[1] * 60;
+        }
+      }
+
+      if (resolvedSec <= 0) resolvedSec = 25 * 60;
+
+      setTimers((prev) =>
+        prev.map((t) =>
+          t.id === pickerTarget.id
+            ? { ...t, durationSec: resolvedSec, remainingSec: resolvedSec, status: "READY" }
+            : t
+        )
+      );
+    } else {
+      const validTime = typeof result.timeStr === "string" && result.timeStr.includes(":") ? result.timeStr : "06:00";
+      const validDays = Array.isArray(result.days) && result.days.length > 0 ? result.days : [1, 2, 3, 4, 5];
+
+      setAlarms((prev) =>
+        prev.map((a) => (a.id === pickerTarget.id ? { ...a, timeStr: validTime, days: validDays } : a))
+      );
+    }
+
+    setPickerOpen(false);
+    setPickerTarget(null);
+  };
+
+  // Toggle Picture-in-Picture Multi-Slot HUD
   const handleTogglePip = async () => {
     try {
       if (document.pictureInPictureElement) {
@@ -517,8 +669,9 @@ export default function CTUTerminalRoute() {
       const video = pipVideoRef.current;
       if (!canvas || !video) return;
 
-      const active = timers.find((t) => t.id === selectedTimerId) || timers[0];
-      drawPipCanvas(formatHMS(active.remainingSec), active.label);
+      const activeList = timers.filter((t) => t.status === "RUNNING" || t.status === "HOLD");
+      const armedAlarms = alarms.filter((a) => a.armed);
+      drawPipHud(activeList, armedAlarms, false);
 
       if (!video.srcObject) {
         const stream = canvas.captureStream(10);
@@ -539,38 +692,52 @@ export default function CTUTerminalRoute() {
 
   // OS Alerts Permission Request
   const handleLinkOSAlerts = async () => {
-    if (typeof Notification === "undefined") return;
+    if (!("Notification" in window)) return;
     try {
-      const perm = await Notification.requestPermission();
-      if (perm === "granted") {
+      const permission = await Notification.requestPermission();
+      if (permission === "granted") {
         setOsAlertsEnabled(true);
       }
-    } catch {
-      // Ignored
-    }
+    } catch {}
   };
 
-  // Samsung Clock Intent Sync
   const handleSyncSamsungClock = () => {
-    const active = timers.find((t) => t.id === selectedTimerId) || timers[0];
-    syncWithNativePhoneClock("timer", active.durationSec);
+    setWirePhoneClock((w) => !w);
   };
 
-  // Selected Timer
   const activeTimer = timers.find((t) => t.id === selectedTimerId) || timers[0] || INITIAL_TIMERS[0];
 
   return (
     <div className="min-h-screen bg-black text-[#ffcc00] font-mono selection:bg-[#ffcc00] selection:text-black p-2 sm:p-4 md:p-6 flex flex-col items-center select-none">
-      {/* Hidden elements for PiP Streaming */}
-      <canvas ref={pipCanvasRef} width={300} height={120} className="hidden" />
+      {/* Hidden elements for Picture-in-Picture Multi-Slot HUD Streaming */}
+      <canvas ref={pipCanvasRef} width={440} height={260} className="hidden" />
       <video ref={pipVideoRef} muted playsInline className="hidden" />
+
+      {/* Emergency Active Audio Banner */}
+      {ringingAlarmId && (
+        <div className="w-full max-w-4xl bg-red-950 border-2 border-red-500 text-white p-3 mb-4 rounded flex items-center justify-between animate-pulse">
+          <div className="flex items-center gap-3">
+            <span className="text-xl">⚠️</span>
+            <div>
+              <div className="font-black text-sm tracking-wider text-red-400">CRITICAL TARGET REACHED</div>
+              <div className="text-base font-bold">{activeAlarmLabel || "AT-ZERO THEME PLAYING"}</div>
+            </div>
+          </div>
+          <button
+            onClick={handleSilenceActiveAlarm}
+            className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white font-black text-xs uppercase tracking-widest rounded border border-white/40 shadow-lg"
+          >
+            SILENCE / STOP ALARM
+          </button>
+        </div>
+      )}
 
       {/* Top Header & Mobile Failsafe Controls */}
       <header className="w-full max-w-4xl border border-[#ffcc00]/40 bg-black/90 p-3 mb-4 rounded shadow-[0_0_15px_rgba(255,204,0,0.15)] flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-3">
           <div className="w-3 h-3 rounded-full bg-[#ffcc00] animate-pulse" />
-          <h1 className="text-lg sm:text-xl font-black tracking-widest text-[#ffcc00] uppercase">
-            CTU // 24 TERMINAL
+          <h1 className="text-base md:text-lg font-black tracking-widest text-[#ffcc00]">
+            CTU // LOS ANGELES SUB-STATION
           </h1>
         </div>
 
@@ -583,466 +750,314 @@ export default function CTUTerminalRoute() {
                 : "border-[#ffcc00]/60 hover:bg-[#ffcc00]/20 text-[#ffcc00]"
             }`}
           >
-            {isPipActive ? "[PIP ACTIVE]" : "POP MINI-HUD (PIP)"}
+            {isPipActive ? "[PIP HUD ACTIVE]" : "POP MINI-HUD (PIP)"}
           </button>
 
           <button
             onClick={handleSyncSamsungClock}
             className="text-xs px-2.5 py-1 font-bold border border-[#ffcc00]/60 hover:bg-[#ffcc00]/20 text-[#ffcc00]"
-            title="Wires target directly into Android native Clock app"
           >
-            SYNC SAMSUNG CLOCK
+            {wirePhoneClock ? "[PHONE SYNC: ON]" : "WIRE PHONE CLOCK"}
           </button>
 
           <button
             onClick={handleLinkOSAlerts}
-            className={`text-xs px-2.5 py-1 font-bold border transition-colors ${
-              osAlertsEnabled
-                ? "border-green-500 text-green-400"
-                : "border-red-500 text-red-400 hover:bg-red-950/30 animate-pulse"
-            }`}
+            className="text-xs px-2.5 py-1 font-bold border border-[#ffcc00]/60 hover:bg-[#ffcc00]/20 text-[#ffcc00]"
           >
-            {osAlertsEnabled ? "OS ALERTS: LINKED" : "LINK OS ALERTS"}
+            {osAlertsEnabled ? "[OS NOTIFICATIONS: ARMED]" : "ARM OS ALERTS"}
           </button>
-
-          <span
-            className={`text-[10px] px-2 py-0.5 border font-semibold ${
-              wakeLockActive ? "border-[#ffcc00] text-[#ffcc00]" : "border-neutral-800 text-neutral-600"
-            }`}
-          >
-            {wakeLockActive ? "WAKE LOCK: ENGAGED" : "WAKE LOCK: IDLE"}
-          </span>
         </div>
       </header>
 
-      {/* Main Grid: Mission Clock + Zulu */}
-      <section className="w-full max-w-4xl border border-[#ffcc00]/40 bg-black/80 p-4 mb-4 rounded flex flex-col md:flex-row items-center justify-between gap-4">
-        <div className="text-center md:text-left">
-          <div className="text-xs text-[#ffcc00]/70 uppercase tracking-widest">BANGKOK HQ (UTC+7)</div>
-          <div className="text-3xl sm:text-4xl md:text-5xl font-black tracking-widest text-[#ffcc00] drop-shadow-[0_0_12px_rgba(255,204,0,0.6)]">
-            {currentTimeBangkok ? (
-              currentTimeBangkok.split(":").map((chunk, idx) => (
-                <React.Fragment key={idx}>
-                  {idx > 0 && <span className={blinkColon ? "opacity-100" : "opacity-20"}>:</span>}
-                  <span>{chunk}</span>
-                </React.Fragment>
-              ))
-            ) : (
-              "11:30:00"
-            )}
+      {/* Synchronized Tactical Operational Clocks */}
+      <div className="w-full max-w-4xl grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        {/* Bangkok Operational Clock */}
+        <div className="border border-[#ffcc00]/50 bg-black/80 p-4 rounded text-center relative overflow-hidden">
+          <div className="text-xs tracking-widest text-[#ffcc00]/70 mb-1">LOCAL THEATER // BANGKOK (ICT / UTC+7)</div>
+          <div className="text-4xl md:text-5xl font-black tracking-widest text-[#ffcc00] tabular-nums">
+            {currentTimeBangkok.split(":").map((part, idx) => (
+              <React.Fragment key={idx}>
+                {idx > 0 && <span className={blinkColon ? "opacity-100" : "opacity-20"}>:</span>}
+                <span>{part}</span>
+              </React.Fragment>
+            ))}
           </div>
-          <div className="text-xs text-[#ffcc00]/60 mt-1">{currentDateStr || "TUE, NOV 17, 2026"}</div>
+          <div className="text-[11px] text-[#ffcc00]/60 mt-1">{currentDateStr}</div>
         </div>
 
-        <div className="text-center md:text-right border-t md:border-t-0 md:border-l border-[#ffcc00]/20 pt-2 md:pt-0 md:pl-6">
-          <div className="text-xs text-neutral-400 uppercase tracking-widest">ZULU TIME (UTC)</div>
-          <div className="text-2xl sm:text-3xl font-bold tracking-widest text-neutral-300">
-            {currentTimeZulu || "04:30:00"}
+        {/* Zulu / UTC Synchronization Clock */}
+        <div className="border border-[#ffcc00]/50 bg-black/80 p-4 rounded text-center relative overflow-hidden">
+          <div className="text-xs tracking-widest text-[#ffcc00]/70 mb-1">GLOBAL SYNCHRONIZATION // ZULU (UTC)</div>
+          <div className="text-4xl md:text-5xl font-black tracking-widest text-[#ffcc00] tabular-nums">
+            {currentTimeZulu.split(":").map((part, idx) => (
+              <React.Fragment key={idx}>
+                {idx > 0 && <span className={blinkColon ? "opacity-100" : "opacity-20"}>:</span>}
+                <span>{part}</span>
+              </React.Fragment>
+            ))}
           </div>
-          <div className="text-[10px] text-neutral-500 mt-1">REAL-TIME SYNCHRONIZED</div>
+          <div className="text-[11px] text-[#ffcc00]/60 mt-1">STATUS: OPERATIONAL PROTOCOL ENGAGED</div>
         </div>
-      </section>
+      </div>
 
-      {/* Primary Active Timer Countdown Display */}
-      <section className="w-full max-w-4xl border-2 border-[#ffcc00] bg-black p-4 sm:p-6 mb-4 rounded-lg shadow-[0_0_25px_rgba(255,204,0,0.25)] flex flex-col items-center">
-        <div className="w-full flex items-center justify-between text-xs text-[#ffcc00]/70 border-b border-[#ffcc00]/20 pb-2 mb-4">
-          <span className="font-bold uppercase tracking-widest">ACTIVE TARGET: {activeTimer.label}</span>
-          <span
-            className={`px-2 py-0.5 rounded font-bold ${
-              activeTimer.status === "RUNNING"
-                ? "bg-[#ffcc00] text-black animate-pulse"
-                : activeTimer.status === "EXPIRED"
-                ? "bg-red-600 text-white animate-bounce"
-                : "bg-neutral-800 text-[#ffcc00]"
-            }`}
-          >
-            {activeTimer.status}
-          </span>
+      {/* Main Focus Tactical Countdown Display */}
+      <div className="w-full max-w-4xl border-2 border-[#ffcc00] bg-black p-6 rounded-lg mb-6 text-center shadow-[0_0_30px_rgba(255,204,0,0.2)]">
+        <div className="text-xs md:text-sm font-bold tracking-widest text-[#ffcc00]/80 mb-2">
+          FOCUS TARGET: {activeTimer.label.toUpperCase()} [{activeTimer.status}]
         </div>
 
-        {/* Big 7-Segment Digital Readout (Tap to adjust) */}
-        <div
-          onClick={() => {
-            setPickerMode("timer");
-            setEditingItemId(activeTimer.id);
-            setPickerOpen(true);
-          }}
-          className="cursor-pointer group flex flex-col items-center my-2 p-3 hover:bg-[#ffcc00]/5 rounded border border-transparent hover:border-[#ffcc00]/30 transition-all"
-          title="Tap to adjust operational duration"
-        >
-          <div className="text-5xl sm:text-7xl md:text-8xl font-black tracking-widest text-[#ffcc00] drop-shadow-[0_0_18px_rgba(255,204,0,0.7)] group-hover:scale-[1.02] transition-transform">
-            {formatHMS(activeTimer.remainingSec)}
-          </div>
-          <span className="text-[11px] text-[#ffcc00]/50 tracking-widest mt-1 uppercase group-hover:text-[#ffcc00]">
-            [ TAP DIGITS TO MODIFY TIME ]
-          </span>
+        <div className="text-6xl sm:text-7xl md:text-8xl font-black tracking-widest text-[#ffcc00] my-2 tabular-nums">
+          {formatHMS(activeTimer.remainingSec)}
         </div>
 
-        {/* Quick Presets Bar */}
-        <div className="flex flex-wrap items-center justify-center gap-2 my-3">
-          {QUICK_PRESETS.map((preset) => (
+        {/* Quick Tactical Preset Arming Chips */}
+        <div className="flex flex-wrap justify-center gap-1.5 my-4">
+          {PRESETS.map((p) => (
             <button
-              key={preset.label}
-              onClick={() => handleSelectPreset(preset.sec)}
-              className="text-xs px-2.5 py-1 border border-[#ffcc00]/40 hover:bg-[#ffcc00] hover:text-black text-[#ffcc00] transition-colors"
+              key={p.label}
+              onClick={() => handleSelectPreset(p.sec, p.label)}
+              className="text-[11px] px-2.5 py-1 bg-black border border-[#ffcc00]/50 hover:bg-[#ffcc00] hover:text-black text-[#ffcc00] transition-colors rounded"
             >
-              {preset.label}
+              {p.label} ({Math.round(p.sec / 60)}M)
             </button>
           ))}
         </div>
 
-        {/* Zero Payload Audio Selector */}
-        <div className="flex flex-wrap items-center justify-center gap-2 my-2 text-xs">
-          <span className="text-neutral-400">AT-ZERO PAYLOAD:</span>
-          {(["ctu_beep", "voice", "boom", "alarm", "stinger"] as ZeroSoundType[]).map((snd) => (
-            <button
-              key={snd}
-              onClick={() => handleSelectSound(activeTimer.id, snd, "timer")}
-              className={`px-2 py-0.5 border ${
-                activeTimer.zeroSound === snd
-                  ? "bg-[#ffcc00] text-black border-[#ffcc00] font-bold"
-                  : "border-neutral-700 text-neutral-400 hover:border-[#ffcc00]/60"
-              }`}
-            >
-              {snd.toUpperCase()}
-            </button>
-          ))}
-        </div>
-
-        {/* Master Execution Controls */}
-        <div className="flex flex-wrap items-center justify-center gap-4 mt-4 w-full">
-          {activeTimer.status !== "RUNNING" ? (
+        {/* Execution Controls */}
+        <div className="flex flex-wrap items-center justify-center gap-3 mt-4">
+          {activeTimer.status !== "RUNNING" && (
             <button
               onClick={() => handleExecuteTimer(activeTimer.id)}
-              className="flex-1 max-w-xs py-3 bg-[#ffcc00] text-black font-black text-lg sm:text-xl tracking-widest uppercase hover:bg-[#ffd633] active:scale-95 shadow-[0_0_15px_rgba(255,204,0,0.4)] transition-all"
+              className="px-6 py-2 bg-[#ffcc00] text-black font-black text-sm uppercase tracking-widest hover:bg-[#ffdd33] rounded shadow-[0_0_15px_rgba(255,204,0,0.4)]"
             >
-              EXECUTE
+              EXECUTE TIMER
             </button>
-          ) : (
+          )}
+
+          {activeTimer.status === "RUNNING" && (
             <button
-              onClick={() => handleHoldTimer(activeTimer.id)}
-              className="flex-1 max-w-xs py-3 bg-red-600 text-white font-black text-lg sm:text-xl tracking-widest uppercase hover:bg-red-500 active:scale-95 shadow-[0_0_15px_rgba(255,0,0,0.4)] transition-all"
+              onClick={() => handlePauseTimer(activeTimer.id)}
+              className="px-6 py-2 bg-yellow-600 text-black font-black text-sm uppercase tracking-widest hover:bg-yellow-500 rounded"
             >
-              HOLD
+              HOLD (PAUSE)
             </button>
           )}
 
           <button
-            onClick={() => handleResetTimer(activeTimer.id)}
-            className="px-6 py-3 border border-[#ffcc00]/60 text-[#ffcc00] font-bold tracking-widest uppercase hover:bg-[#ffcc00]/20 active:scale-95 transition-all"
+            onClick={() => handleStopAndResetTimer(activeTimer.id)}
+            className="px-4 py-2 border border-red-500/70 hover:bg-red-500/20 text-red-400 font-bold text-xs uppercase tracking-widest rounded"
           >
-            RESET
+            STOP & RESET
           </button>
-        </div>
-      </section>
 
-      {/* Multiple Mission Timers Queue */}
-      <section className="w-full max-w-4xl border border-[#ffcc00]/40 bg-black/90 p-4 mb-4 rounded">
-        <div className="flex items-center justify-between border-b border-[#ffcc00]/30 pb-2 mb-3">
-          <h2 className="text-sm font-bold tracking-widest uppercase text-[#ffcc00]">ARMED MISSION TIMERS</h2>
           <button
-            onClick={() => {
-              const newT: MissionTimer = {
-                id: `timer-${Date.now()}`,
-                label: `TARGET ${timers.length + 1}`,
-                durationSec: 10 * 60,
-                remainingSec: 10 * 60,
-                status: "READY",
-                zeroSound: "ctu_beep",
-              };
-              setTimers([...timers, newT]);
-              setSelectedTimerId(newT.id);
-            }}
-            className="text-xs px-2 py-1 bg-[#ffcc00]/20 hover:bg-[#ffcc00] hover:text-black border border-[#ffcc00] font-bold transition-colors"
+            onClick={() => handleOpenPickerForTimer(activeTimer.id)}
+            className="px-4 py-2 border border-[#ffcc00]/60 hover:bg-[#ffcc00]/20 text-[#ffcc00] font-bold text-xs uppercase tracking-widest rounded"
           >
-            + NEW TIMER
+            SET TIME
           </button>
         </div>
+      </div>
 
-        <div className="flex flex-col gap-2">
-          {timers.map((t) => (
-            <div
-              key={t.id}
-              onClick={() => setSelectedTimerId(t.id)}
-              className={`p-2.5 border flex flex-wrap items-center justify-between gap-2 cursor-pointer transition-colors ${
-                t.id === selectedTimerId
-                  ? "border-[#ffcc00] bg-[#ffcc00]/10 shadow-[0_0_10px_rgba(255,204,0,0.15)]"
-                  : "border-neutral-800 hover:border-[#ffcc00]/40 bg-black"
-              }`}
+      {/* Two Columns: Multiple Timers Queue & Multiple Alarms Queue */}
+      <div className="w-full max-w-4xl grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Multiple Tactical Timers Queue */}
+        <div className="border border-[#ffcc00]/40 bg-black/90 p-4 rounded">
+          <div className="flex items-center justify-between mb-3 border-b border-[#ffcc00]/30 pb-2">
+            <h2 className="text-xs font-black tracking-widest text-[#ffcc00]">TACTICAL TIMERS QUEUE</h2>
+            <button
+              onClick={() => {
+                const newId = `timer-${Date.now()}`;
+                const newTimer: TimerItem = {
+                  id: newId,
+                  label: `OPS TARGET ${timers.length + 1}`,
+                  durationSec: 10 * 60,
+                  remainingSec: 10 * 60,
+                  status: "READY",
+                  zeroSound: "theme",
+                };
+                setTimers((prev) => [...prev, newTimer]);
+                setSelectedTimerId(newId);
+              }}
+              className="text-[10px] px-2 py-0.5 border border-[#ffcc00]/50 hover:bg-[#ffcc00]/20 text-[#ffcc00]"
             >
-              <div className="flex items-center gap-3">
-                <div
-                  className={`w-2.5 h-2.5 rounded-full ${
-                    t.status === "RUNNING"
-                      ? "bg-[#ffcc00] animate-ping"
-                      : t.status === "EXPIRED"
-                      ? "bg-red-600 animate-bounce"
-                      : "bg-neutral-600"
-                  }`}
-                />
+              + ADD TIMER
+            </button>
+          </div>
+
+          <div className="space-y-2">
+            {timers.map((t) => (
+              <div
+                key={t.id}
+                onClick={() => setSelectedTimerId(t.id)}
+                className={`p-2.5 rounded border transition-colors cursor-pointer flex items-center justify-between ${
+                  t.id === selectedTimerId
+                    ? "border-[#ffcc00] bg-[#ffcc00]/10 shadow-[0_0_10px_rgba(255,204,0,0.15)]"
+                    : "border-[#ffcc00]/20 hover:border-[#ffcc00]/40 bg-black/60"
+                }`}
+              >
                 <div>
-                  <div className="font-bold text-sm tracking-wide">{t.label}</div>
-                  <div className="text-[10px] text-neutral-400">SOUND: {t.zeroSound.toUpperCase()}</div>
+                  <div className="text-xs font-bold text-[#ffcc00]">{t.label}</div>
+                  <div className="text-[10px] text-neutral-400">STATUS: {t.status} • AT ZERO: 24 THEME</div>
                 </div>
-              </div>
 
-              <div className="flex items-center gap-3">
-                <span className="text-xl font-bold tracking-widest">{formatHMS(t.remainingSec)}</span>
-                {t.status !== "RUNNING" ? (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleExecuteTimer(t.id);
-                    }}
-                    className="text-xs px-2.5 py-1 bg-[#ffcc00] text-black font-bold uppercase hover:bg-[#ffd633]"
-                  >
-                    RUN
-                  </button>
-                ) : (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleHoldTimer(t.id);
-                    }}
-                    className="text-xs px-2.5 py-1 bg-red-600 text-white font-bold uppercase hover:bg-red-500"
-                  >
-                    HOLD
-                  </button>
-                )}
-
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setPickerMode("timer");
-                    setEditingItemId(t.id);
-                    setPickerOpen(true);
-                  }}
-                  className="text-xs px-2 py-1 border border-[#ffcc00]/60 hover:bg-[#ffcc00]/20"
-                >
-                  EDIT
-                </button>
-
-                {timers.length > 1 && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setTimers(timers.filter((x) => x.id !== t.id));
-                      if (selectedTimerId === t.id) setSelectedTimerId(timers[0]?.id || "");
-                    }}
-                    className="text-xs px-1.5 py-1 text-red-500 hover:bg-red-950/40"
-                  >
-                    DEL
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* Tactical Alarms Queue (Bangkok Time) */}
-      <section className="w-full max-w-4xl border border-[#ffcc00]/40 bg-black/90 p-4 mb-4 rounded">
-        <div className="flex items-center justify-between border-b border-[#ffcc00]/30 pb-2 mb-3">
-          <h2 className="text-sm font-bold tracking-widest uppercase text-[#ffcc00]">
-            TACTICAL ALARMS (BANGKOK TIME)
-          </h2>
-          <button
-            onClick={() => {
-              const newA: TacticalAlarm = {
-                id: `alarm-${Date.now()}`,
-                label: `TASK ${alarms.length + 1}`,
-                timeStr: "08:00",
-                days: [1, 2, 3, 4, 5],
-                armed: true,
-                zeroSound: "alarm",
-              };
-              setAlarms([...alarms, newA]);
-            }}
-            className="text-xs px-2 py-1 bg-[#ffcc00]/20 hover:bg-[#ffcc00] hover:text-black border border-[#ffcc00] font-bold transition-colors"
-          >
-            + NEW ALARM
-          </button>
-        </div>
-
-        <div className="flex flex-col gap-2">
-          {alarms.map((alarm) => (
-            <div
-              key={alarm.id}
-              className={`p-2.5 border flex flex-wrap items-center justify-between gap-2 bg-black ${
-                ringingAlarmId === alarm.id
-                  ? "border-red-600 bg-red-950/30 animate-pulse"
-                  : alarm.armed
-                  ? "border-[#ffcc00]/60"
-                  : "border-neutral-800 opacity-60"
-              }`}
-            >
-              <div>
-                <div className="font-bold text-sm tracking-wide flex items-center gap-2">
-                  <span>{alarm.label}</span>
-                  {ringingAlarmId === alarm.id && (
-                    <span className="text-[10px] px-1.5 py-0.5 bg-red-600 text-white font-bold animate-ping">
-                      RINGING
-                    </span>
+                <div className="flex items-center gap-2">
+                  <div className="text-base font-black tabular-nums text-[#ffcc00]">{formatHMS(t.remainingSec)}</div>
+                  {t.status === "RUNNING" ? (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handlePauseTimer(t.id);
+                      }}
+                      className="text-[10px] px-2 py-1 bg-yellow-600/80 text-black font-bold rounded"
+                    >
+                      HOLD
+                    </button>
+                  ) : (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleExecuteTimer(t.id);
+                      }}
+                      className="text-[10px] px-2 py-1 bg-[#ffcc00] text-black font-bold rounded"
+                    >
+                      RUN
+                    </button>
                   )}
-                </div>
-                <div className="text-[10px] text-neutral-400">
-                  DAYS: {alarm.days.length === 7 ? "DAILY" : alarm.days.length === 5 && !alarm.days.includes(0) ? "MON-FRI" : `${alarm.days.length} DAYS/WK`} • SOUND: {alarm.zeroSound.toUpperCase()}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleStopAndResetTimer(t.id);
+                    }}
+                    className="text-[10px] px-1.5 py-1 border border-red-500/50 text-red-400 hover:bg-red-500/20 rounded"
+                    title="Stop & Reset"
+                  >
+                    STOP
+                  </button>
                 </div>
               </div>
-
-              <div className="flex items-center gap-3">
-                <span className="text-2xl font-black tracking-widest">{alarm.timeStr || "08:00"}</span>
-
-                {ringingAlarmId === alarm.id ? (
-                  <button
-                    onClick={() => {
-                      setRingingAlarmId(null);
-                      CTUAudio.stopAll();
-                    }}
-                    className="text-xs px-3 py-1 bg-red-600 text-white font-bold uppercase hover:bg-red-500 animate-bounce"
-                  >
-                    STOP ALARM
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => {
-                      setAlarms(
-                        alarms.map((a) => (a.id === alarm.id ? { ...a, armed: !a.armed } : a))
-                      );
-                    }}
-                    className={`text-xs px-2.5 py-1 font-bold uppercase ${
-                      alarm.armed
-                        ? "bg-[#ffcc00] text-black hover:bg-[#ffd633]"
-                        : "border border-neutral-700 text-neutral-500 hover:border-neutral-500"
-                    }`}
-                  >
-                    {alarm.armed ? "ARMED" : "STANDBY"}
-                  </button>
-                )}
-
-                <button
-                  onClick={() => {
-                    setPickerMode("alarm");
-                    setEditingItemId(alarm.id);
-                    setPickerOpen(true);
-                  }}
-                  className="text-xs px-2 py-1 border border-[#ffcc00]/60 hover:bg-[#ffcc00]/20"
-                >
-                  EDIT
-                </button>
-
-                {alarms.length > 1 && (
-                  <button
-                    onClick={() => setAlarms(alarms.filter((x) => x.id !== alarm.id))}
-                    className="text-xs px-1.5 py-1 text-red-500 hover:bg-red-950/40"
-                  >
-                    DEL
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* v74 Exact 10->0 Countdown Takeover Modal Overlay */}
-      {takeoverOpen && (
-        <div
-          onClick={cancelTakeoverCountdown}
-          className="fixed inset-0 z-50 bg-black flex flex-col items-center justify-center p-6 cursor-pointer select-none"
-        >
-          <div
-            className={`w-full max-w-lg p-8 rounded-lg border-4 flex flex-col items-center justify-center transition-all ${
-              takeoverIsCrimson
-                ? "border-red-600 bg-red-950/20 shadow-[0_0_50px_rgba(255,0,0,0.8)]"
-                : "border-[#ffcc00] bg-black shadow-[0_0_50px_rgba(255,204,0,0.5)]"
-            }`}
-          >
-            <div
-              className={`text-xs font-bold uppercase tracking-widest mb-4 ${
-                takeoverIsCrimson ? "text-red-500 animate-pulse" : "text-[#ffcc00]/70"
-              }`}
-            >
-              CRITICAL COUNTDOWN // {takeoverLabel}
-            </div>
-
-            <div
-              className={`text-8xl sm:text-9xl font-black tracking-widest transition-colors ${
-                takeoverIsCrimson
-                  ? "text-red-600 drop-shadow-[0_0_30px_rgba(255,0,0,0.9)] scale-110"
-                  : "text-[#ffcc00] drop-shadow-[0_0_25px_rgba(255,204,0,0.8)]"
-              }`}
-            >
-              {takeoverDigit}
-            </div>
-
-            <div
-              className={`text-xs tracking-widest mt-6 uppercase ${
-                takeoverIsCrimson ? "text-red-400 animate-bounce" : "text-[#ffcc00]/60"
-              }`}
-            >
-              [ TAP SCREEN TO CANCEL TAKEOVER ]
-            </div>
+            ))}
           </div>
         </div>
-      )}
 
-      {/* Samsung-Style Drum Time Picker Modal */}
-      {pickerOpen && (
+        {/* Multiple Tactical Alarms Queue */}
+        <div className="border border-[#ffcc00]/40 bg-black/90 p-4 rounded">
+          <div className="flex items-center justify-between mb-3 border-b border-[#ffcc00]/30 pb-2">
+            <h2 className="text-xs font-black tracking-widest text-[#ffcc00]">TACTICAL ALARMS QUEUE (BANGKOK)</h2>
+            <button
+              onClick={() => {
+                const newId = `alarm-${Date.now()}`;
+                const newAlarm: AlarmItem = {
+                  id: newId,
+                  label: `FIELD ALARM ${alarms.length + 1}`,
+                  timeStr: "08:00",
+                  days: [1, 2, 3, 4, 5],
+                  armed: true,
+                  zeroSound: "theme",
+                };
+                setAlarms((prev) => [...prev, newAlarm]);
+              }}
+              className="text-[10px] px-2 py-0.5 border border-[#ffcc00]/50 hover:bg-[#ffcc00]/20 text-[#ffcc00]"
+            >
+              + ADD ALARM
+            </button>
+          </div>
+
+          <div className="space-y-2">
+            {alarms.map((alarm) => (
+              <div
+                key={alarm.id}
+                className={`p-2.5 rounded border transition-colors flex items-center justify-between ${
+                  alarm.armed ? "border-[#ffcc00]/60 bg-[#ffcc00]/5" : "border-neutral-800 bg-black/60 opacity-60"
+                }`}
+              >
+                <div>
+                  <div className="text-xs font-bold text-[#ffcc00]">{alarm.label}</div>
+                  <div className="text-[10px] text-neutral-400">
+                    DAYS: {alarm.days.length === 7 ? "DAILY" : alarm.days.length === 5 && !alarm.days.includes(0) ? "MON-FRI" : `${alarm.days.length} DAYS/WK`} • AT ZERO: 24 THEME
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleOpenPickerForAlarm(alarm.id)}
+                    className="text-base font-black tabular-nums text-[#ffcc00] border border-[#ffcc00]/40 px-2 py-0.5 rounded hover:bg-[#ffcc00]/10"
+                  >
+                    {alarm.timeStr}
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setAlarms((prev) =>
+                        prev.map((a) => (a.id === alarm.id ? { ...a, armed: !a.armed } : a))
+                      );
+                    }}
+                    className={`text-[10px] px-2 py-1 font-bold rounded border ${
+                      alarm.armed
+                        ? "bg-[#ffcc00] text-black border-[#ffcc00]"
+                        : "border-neutral-700 text-neutral-400 hover:text-white"
+                    }`}
+                  >
+                    {alarm.armed ? "ARMED" : "OFF"}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Samsung Time Picker Modal */}
+      {pickerOpen && pickerTarget && (
         <SamsungTimePicker
+          initialHours={
+            pickerTarget.type === "timer"
+              ? Math.floor(activeTimer.durationSec / 3600)
+              : parseInt((alarms.find((a) => a.id === pickerTarget.id)?.timeStr || "06:00").split(":")[0], 10) || 6
+          }
+          initialMinutes={
+            pickerTarget.type === "timer"
+              ? Math.floor((activeTimer.durationSec % 3600) / 60)
+              : parseInt((alarms.find((a) => a.id === pickerTarget.id)?.timeStr || "06:00").split(":")[1], 10) || 0
+          }
+          initialSeconds={pickerTarget.type === "timer" ? activeTimer.durationSec % 60 : 0}
+          initialDays={pickerTarget.type === "alarm" ? alarms.find((a) => a.id === pickerTarget.id)?.days || [1, 2, 3, 4, 5] : undefined}
           isOpen={pickerOpen}
-          mode={pickerMode}
-          initialDurationSec={
-            pickerMode === "timer"
-              ? timers.find((t) => t.id === editingItemId)?.durationSec || 25 * 60
-              : 0
-          }
-          initialTimeStr={
-            pickerMode === "alarm"
-              ? alarms.find((a) => a.id === editingItemId)?.timeStr || "08:00"
-              : "08:00"
-          }
-          initialDays={
-            pickerMode === "alarm"
-              ? alarms.find((a) => a.id === editingItemId)?.days || [1, 2, 3, 4, 5]
-              : [0, 1, 2, 3, 4, 5, 6]
-          }
-          onConfirm={(result) => {
-            if (pickerMode === "timer" && editingItemId) {
-              const rawSec = typeof result.totalSec === "number" && !isNaN(result.totalSec)
-                ? result.totalSec
-                : typeof result.totalSeconds === "number" && !isNaN(result.totalSeconds)
-                ? result.totalSeconds
-                : ((result.hours || 0) * 3600 + (result.minutes || 0) * 60 + (result.seconds || 0));
-              const safeSec = Math.max(1, !isNaN(rawSec) && rawSec > 0 ? rawSec : 25 * 60);
-
-              setTimers((prev) =>
-                prev.map((t) =>
-                  t.id === editingItemId
-                    ? { ...t, durationSec: safeSec, remainingSec: safeSec, status: "READY" }
-                    : t
-                )
-              );
-            } else if (pickerMode === "alarm" && editingItemId) {
-              const timeStr = result.timeStr || `${String(result.hours || 0).padStart(2, "0")}:${String(result.minutes || 0).padStart(2, "0")}`;
-              const days = result.days && result.days.length > 0 ? result.days : [1, 2, 3, 4, 5];
-
-              setAlarms((prev) =>
-                prev.map((a) =>
-                  a.id === editingItemId
-                    ? { ...a, timeStr, days }
-                    : a
-                )
-              );
-            }
-            setPickerOpen(false);
-            setEditingItemId(null);
-          }}
+          mode={pickerTarget.type}
+          onConfirm={handlePickerConfirm}
           onCancel={() => {
             setPickerOpen(false);
-            setEditingItemId(null);
+            setPickerTarget(null);
           }}
         />
+      )}
+
+      {/* Full-Screen 24 Countdown Takeover Modal (T-10 to 0) */}
+      {takeoverOpen && (
+        <div className="fixed inset-0 z-50 bg-black flex flex-col items-center justify-center p-4">
+          <div className="text-xs md:text-sm font-black tracking-widest uppercase mb-4 text-[#ffcc00]">
+            CTU // TACTICAL COUNTDOWN TAKEOVER
+          </div>
+
+          <div
+            className={`text-8xl md:text-[14rem] font-black tabular-nums transition-colors duration-200 ${
+              takeoverIsCrimson ? "text-red-500 animate-pulse" : "text-[#ffcc00]"
+            }`}
+          >
+            {takeoverDigit}
+          </div>
+
+          <div className="text-base md:text-xl font-bold tracking-widest uppercase mt-4 text-[#ffcc00]/80">
+            {takeoverLabel}
+          </div>
+
+          <button
+            onClick={cancelTakeoverCountdown}
+            className="mt-8 px-6 py-2 border border-red-500 text-red-400 hover:bg-red-500/20 text-xs font-bold uppercase tracking-widest rounded"
+          >
+            ABORT COUNTDOWN
+          </button>
+        </div>
       )}
     </div>
   );
