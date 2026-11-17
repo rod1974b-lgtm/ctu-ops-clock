@@ -1,4 +1,4 @@
-// src/lib/ctu-audio.ts — FULL REPLACEMENT FILE
+// src/lib/ctu-audio.ts — FULL DROP-IN REPLACEMENT FILE
 export type AudioSettings = {
   enabled: boolean;
   volume: number;
@@ -21,16 +21,15 @@ export const defaultAudio: AudioSettings = {
   snooze: 5,
 };
 
-export type ZeroSoundType = "voice" | "boom" | "alarm" | "ctu_beep" | "stinger";
+export type ZeroSoundType = "theme" | "voice" | "boom" | "alarm" | "ctu_beep" | "stinger";
 
 /**
  * CTU Tactical Terminal Audio Engine.
  * Supports:
- * - Countdown MP3 playback (/countdown.mp3 and /24 Alarm Countdown.mp3)
- * - Synthetic v74 digital amber and crimson urgency ticks (playTick)
- * - Zero sound payloads: ctu_beep, voice loop, boom, stinger, alarm klaxon loop
- * - Credits sequence audio loop
- * - Clean stopAll() stopping all active audio elements and synthesis intervals
+ * - Countdown audio (/24 Alarm Countdown.mp3 / /countdown.mp3)
+ * - At Zero theme playback (/24 At Zero theme.mp3)
+ * - Haunting alarm loop & synthetic pulse fallbacks
+ * - Clean stopAll() stopping all audio elements and synthetic intervals
  */
 export class CTUAudio {
   private static sharedInstance: CTUAudio | null = null;
@@ -46,6 +45,7 @@ export class CTUAudio {
   private masterGain: GainNode | null = null;
   private alarmInterval: number | null = null;
   private countdownAudioElement: HTMLAudioElement | null = null;
+  private zeroThemeAudioElement: HTMLAudioElement | null = null;
   private voiceAudioElement: HTMLAudioElement | null = null;
   private creditsAudioElement: HTMLAudioElement | null = null;
   private volume = defaultAudio.volume;
@@ -93,6 +93,9 @@ export class CTUAudio {
     if (this.countdownAudioElement) {
       this.countdownAudioElement.volume = this.volume;
     }
+    if (this.zeroThemeAudioElement) {
+      this.zeroThemeAudioElement.volume = this.volume;
+    }
     if (this.voiceAudioElement) {
       this.voiceAudioElement.volume = this.volume;
     }
@@ -122,8 +125,8 @@ export class CTUAudio {
   }
 
   /**
-   * Countdown MP3 Audio Track Playback:
-   * Plays the 24 countdown audio track (/countdown.mp3 with fallback to /24 Alarm Countdown.mp3)
+   * Countdown Audio Track:
+   * Plays the 24 countdown audio track (/24 Alarm Countdown.mp3 with fallback to /countdown.mp3)
    */
   public startCountdownAudio(): void {
     this.stopCountdownAudio();
@@ -131,11 +134,10 @@ export class CTUAudio {
 
     try {
       if (!this.countdownAudioElement) {
-        // Attempts primary path, falling back automatically to the 24 Alarm Countdown asset
-        const audio = new Audio("/countdown.mp3");
+        const audio = new Audio("/24 Alarm Countdown.mp3");
         audio.onerror = () => {
           if (this.countdownAudioElement) {
-            this.countdownAudioElement.src = "/24 Alarm Countdown.mp3";
+            this.countdownAudioElement.src = "/countdown.mp3";
             this.countdownAudioElement.load();
             this.countdownAudioElement.play().catch(() => {});
           }
@@ -146,7 +148,7 @@ export class CTUAudio {
       this.countdownAudioElement.currentTime = 0;
       this.countdownAudioElement.play().catch(() => {
         try {
-          const fallback = new Audio("/24 Alarm Countdown.mp3");
+          const fallback = new Audio("/countdown.mp3");
           fallback.volume = this.volume;
           fallback.play().catch(() => {});
           this.countdownAudioElement = fallback;
@@ -165,9 +167,43 @@ export class CTUAudio {
   }
 
   /**
-   * Exact v74 Digital Tick (ig)
-   * isCrimson = false -> Deep amber CTU digital tick (800Hz with sub-harmonic)
-   * isCrimson = true  -> High-pitch urgency tick (2000Hz + 2400Hz sharp chirp)
+   * At Zero 24 Theme:
+   * Plays the signature /24 At Zero theme.mp3 when a timer or alarm strikes zero
+   */
+  public playZeroTheme(): void {
+    this.stopCountdownAudio();
+    this.stopZeroTheme();
+    if (typeof window === "undefined") return;
+
+    try {
+      if (!this.zeroThemeAudioElement) {
+        this.zeroThemeAudioElement = new Audio("/24 At Zero theme.mp3");
+        this.zeroThemeAudioElement.loop = true;
+      }
+      this.zeroThemeAudioElement.volume = this.volume;
+      this.zeroThemeAudioElement.currentTime = 0;
+      this.zeroThemeAudioElement.play().catch(() => {
+        // Fallback to haunting dual-tone alarm
+        this.startHauntingAlarmLoop();
+      });
+    } catch {
+      this.startHauntingAlarmLoop();
+    }
+  }
+
+  public stopZeroTheme(): void {
+    if (this.zeroThemeAudioElement) {
+      try {
+        this.zeroThemeAudioElement.pause();
+        this.zeroThemeAudioElement.currentTime = 0;
+      } catch {}
+    }
+  }
+
+  /**
+   * Exact v74 Digital Tick
+   * isCrimson = false -> Amber CTU digital tick (800Hz / 1100Hz)
+   * isCrimson = true  -> Crimson high urgency tick (2000Hz + 2400Hz)
    */
   public playTick(isCrimson = false, isUrgent = true): void {
     if (!this.ctx || !this.masterGain) return;
@@ -205,13 +241,16 @@ export class CTUAudio {
   }
 
   /**
-   * Exact v74 At-Zero Sound Payloads (Bg)
+   * Play Zero Payload based on user selection
    */
-  public playZeroPayload(type: ZeroSoundType = "ctu_beep"): void {
-    if (!this.ctx || !this.masterGain) return;
+  public playZeroPayload(type: ZeroSoundType = "theme"): void {
+    if (type === "theme" || type === "voice") {
+      this.playZeroTheme();
+      return;
+    }
 
-    if (type === "voice") {
-      this.startVoiceLoop();
+    if (!this.ctx || !this.masterGain) {
+      this.playZeroTheme();
       return;
     }
 
@@ -229,18 +268,6 @@ export class CTUAudio {
         gain.connect(this.masterGain);
         osc.start(t);
         osc.stop(t + 1.9);
-
-        const punch = this.ctx.createOscillator();
-        const punchGain = this.ctx.createGain();
-        punch.type = "triangle";
-        punch.frequency.setValueAtTime(85, t);
-        punch.frequency.exponentialRampToValueAtTime(20, t + 0.9);
-        punchGain.gain.setValueAtTime(0.7, t);
-        punchGain.gain.exponentialRampToValueAtTime(0.001, t + 0.9);
-        punch.connect(punchGain);
-        punchGain.connect(this.masterGain);
-        punch.start(t);
-        punch.stop(t + 1.0);
       } else if (type === "stinger") {
         const osc = this.ctx.createOscillator();
         const gain = this.ctx.createGain();
@@ -271,12 +298,13 @@ export class CTUAudio {
           osc.stop(t + offset + 0.1);
         });
       }
-    } catch {}
+    } catch {
+      this.playZeroTheme();
+    }
   }
 
   /**
-   * Exact v74 Haunting Dual-Tone Alarm Loop (br)
-   * Alternates 1000Hz and 1500Hz pulses every 950ms until stopped
+   * Dual-Tone Alarm Loop
    */
   public startHauntingAlarmLoop(): void {
     this.stopHauntingAlarmLoop();
@@ -321,62 +349,25 @@ export class CTUAudio {
     }
   }
 
-  /**
-   * 24 Theme Loop / Voice Loop (XB)
-   */
   public startVoiceLoop(): void {
-    this.stopVoiceLoop();
-    try {
-      if (!this.voiceAudioElement) {
-        this.voiceAudioElement = new Audio("/24 At Zero theme.mp3");
-        this.voiceAudioElement.loop = true;
-      }
-      this.voiceAudioElement.volume = this.volume;
-      this.voiceAudioElement.currentTime = 0;
-      this.voiceAudioElement.play().catch(() => {
-        this.startHauntingAlarmLoop();
-      });
-    } catch {
-      this.startHauntingAlarmLoop();
-    }
+    this.playZeroTheme();
   }
 
   public stopVoiceLoop(): void {
-    if (this.voiceAudioElement) {
-      try {
-        this.voiceAudioElement.pause();
-        this.voiceAudioElement.currentTime = 0;
-      } catch {}
-    }
+    this.stopZeroTheme();
   }
 
-  /**
-   * Credits sequence audio playback
-   */
   public startCreditsAudio(): void {
-    this.stopCreditsAudio();
-    try {
-      if (!this.creditsAudioElement) {
-        this.creditsAudioElement = new Audio("/24 At Zero theme.mp3");
-        this.creditsAudioElement.loop = true;
-      }
-      this.creditsAudioElement.volume = this.volume;
-      this.creditsAudioElement.currentTime = 0;
-      this.creditsAudioElement.play().catch(() => {});
-    } catch {}
+    this.playZeroTheme();
   }
 
   public stopCreditsAudio(): void {
-    if (this.creditsAudioElement) {
-      try {
-        this.creditsAudioElement.pause();
-        this.creditsAudioElement.currentTime = 0;
-      } catch {}
-    }
+    this.stopZeroTheme();
   }
 
   public stopAll(): void {
     this.stopCountdownAudio();
+    this.stopZeroTheme();
     this.stopHauntingAlarmLoop();
     this.stopVoiceLoop();
     this.stopCreditsAudio();
@@ -408,11 +399,19 @@ export class CTUAudio {
     CTUAudio.shared.startCountdownAudio();
   }
 
+  public static playZeroTheme(): void {
+    CTUAudio.shared.playZeroTheme();
+  }
+
+  public static stopZeroTheme(): void {
+    CTUAudio.shared.stopZeroTheme();
+  }
+
   public static playTick(isCrimson = false, isUrgent = true): void {
     CTUAudio.shared.playTick(isCrimson, isUrgent);
   }
 
-  public static playZeroPayload(type: ZeroSoundType = "ctu_beep"): void {
+  public static playZeroPayload(type: ZeroSoundType = "theme"): void {
     CTUAudio.shared.playZeroPayload(type);
   }
 
@@ -425,19 +424,19 @@ export class CTUAudio {
   }
 
   public static startVoiceLoop(): void {
-    CTUAudio.shared.startVoiceLoop();
+    CTUAudio.shared.playZeroTheme();
   }
 
   public static stopVoiceLoop(): void {
-    CTUAudio.shared.stopVoiceLoop();
+    CTUAudio.shared.stopZeroTheme();
   }
 
   public static startCreditsAudio(): void {
-    CTUAudio.shared.startCreditsAudio();
+    CTUAudio.shared.playZeroTheme();
   }
 
   public static stopCreditsAudio(): void {
-    CTUAudio.shared.stopCreditsAudio();
+    CTUAudio.shared.stopZeroTheme();
   }
 
   public static stopAll(): void {
