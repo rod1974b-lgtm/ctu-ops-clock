@@ -171,7 +171,7 @@ export function CTUTacticalOpsTerminal() {
     return () => clearInterval(clockInterval);
   }, []);
 
-  // Tactical Offscreen Canvas PiP HUD Renderer (Enlarged Fonts + Chronological Ordering)
+  // Tactical Offscreen Canvas PiP HUD Renderer (EXTRA LARGE FONTS & CHRONOLOGICAL SORTING)
   const renderPipFrame = useCallback(
     (mode: "TIMERS" | "ALARMS") => {
       const canvas = pipCanvasRef.current;
@@ -186,33 +186,34 @@ export function CTUTacticalOpsTerminal() {
       ctx.fillStyle = "#070a0e";
       ctx.fillRect(0, 0, width, height);
 
-      // Border outline
-      ctx.lineWidth = 4;
+      // Outer crisis/watch border outline
+      ctx.lineWidth = 6;
       ctx.strokeStyle = takeoverOpen || ringingAlert ? "#ff1a1a" : "#ffcc00";
-      ctx.strokeRect(2, 2, width - 4, height - 4);
+      ctx.strokeRect(3, 3, width - 6, height - 6);
 
-      // Header Bar (Enlarged)
+      // Header Bar (Extra Large 18px / 15px)
       ctx.fillStyle = takeoverOpen || ringingAlert ? "#ff1a1a" : "#ffcc00";
-      ctx.font = "bold 16px 'Courier New', monospace";
+      ctx.font = "bold 18px 'Courier New', monospace";
       ctx.fillText(
         `CTU // ${mode === "TIMERS" ? "ACTIVE TIMERS HUD" : "ARMED ALARMS HUD"}`,
-        16,
-        26
+        18,
+        32
       );
 
       ctx.fillStyle = "#9ca3af";
-      ctx.font = "bold 13px 'Courier New', monospace";
-      ctx.fillText(`BKK ${bangkokTime}`, width - 125, 26);
+      ctx.font = "bold 15px 'Courier New', monospace";
+      ctx.fillText(`BKK ${bangkokTime}`, width - 145, 32);
 
-      ctx.strokeStyle = "rgba(255, 204, 0, 0.35)";
-      ctx.lineWidth = 1;
+      // Dividing separator
+      ctx.strokeStyle = "rgba(255, 204, 0, 0.4)";
+      ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.moveTo(12, 34);
-      ctx.lineTo(width - 12, 34);
+      ctx.moveTo(14, 42);
+      ctx.lineTo(width - 14, 42);
       ctx.stroke();
 
       if (mode === "TIMERS") {
-        // Chronological sort: RUNNING with smallest remainingSec first, then PAUSED, then IDLE / EXPIRED
+        // Chronological sort: RUNNING by smallest remainingSec first, then PAUSED, then IDLE / EXPIRED
         const currentTimers = [...timersRef.current]
           .sort((a, b) => {
             const statusPriority: Record<string, number> = {
@@ -230,26 +231,29 @@ export function CTUTacticalOpsTerminal() {
           })
           .slice(0, 6);
 
-        let startY = 68;
+        let startY = 82;
 
         currentTimers.forEach((timer, idx) => {
           const isUrgent = timer.status === "RUNNING" && timer.remainingSec <= 10;
           const isRunning = timer.status === "RUNNING";
 
+          // Label (XXL: 18px bold)
           ctx.fillStyle = isUrgent ? "#ff3333" : isRunning ? "#ffcc00" : "#6b7280";
-          ctx.font = "bold 15px 'Courier New', monospace";
-          const label = `${idx + 1}. ${timer.label.slice(0, 13).padEnd(13, " ")}`;
-          ctx.fillText(label, 16, startY);
-
           ctx.font = "bold 18px 'Courier New', monospace";
+          const label = `${idx + 1}. ${timer.label.slice(0, 12).padEnd(12, " ")}`;
+          ctx.fillText(label, 18, startY);
+
+          // Digital Timer Readout (XXL: 24px bold)
+          ctx.font = "bold 24px 'Courier New', monospace";
           const timeText = formatHMS(timer.remainingSec);
-          ctx.fillText(timeText, 220, startY);
+          ctx.fillText(timeText, 250, startY);
 
-          ctx.font = "bold 13px 'Courier New', monospace";
+          // Status Badge (XXL: 15px bold)
+          ctx.font = "bold 15px 'Courier New', monospace";
           const statusText = `[${timer.status}]`;
-          ctx.fillText(statusText, 380, startY);
+          ctx.fillText(statusText, 450, startY);
 
-          startY += 38;
+          startY += 48;
         });
       } else {
         // Chronological sort for alarms: nearest trigger time first, then disabled alarms
@@ -269,26 +273,29 @@ export function CTUTacticalOpsTerminal() {
           })
           .slice(0, 6);
 
-        let startY = 68;
+        let startY = 82;
 
         currentAlarms.forEach((alarm, idx) => {
           const isEnabled = alarm.enabled;
           const deltaSec = alarm.deltaSec === Infinity ? 0 : alarm.deltaSec;
           const isUrgent = isEnabled && deltaSec <= 10 && deltaSec > 0;
 
+          // Label (XXL: 18px bold)
           ctx.fillStyle = isUrgent ? "#ff3333" : isEnabled ? "#38bdf8" : "#4b5563";
-          ctx.font = "bold 15px 'Courier New', monospace";
-          const label = `${idx + 1}. ${alarm.label.slice(0, 13).padEnd(13, " ")}`;
-          ctx.fillText(label, 16, startY);
-
           ctx.font = "bold 18px 'Courier New', monospace";
-          ctx.fillText(alarm.timeStr, 220, startY);
+          const label = `${idx + 1}. ${alarm.label.slice(0, 12).padEnd(12, " ")}`;
+          ctx.fillText(label, 18, startY);
 
-          ctx.font = "bold 13px 'Courier New', monospace";
+          // Digital Alarm Time Readout (XXL: 24px bold)
+          ctx.font = "bold 24px 'Courier New', monospace";
+          ctx.fillText(alarm.timeStr, 250, startY);
+
+          // Status Badge (XXL: 15px bold)
+          ctx.font = "bold 15px 'Courier New', monospace";
           const statusText = isEnabled ? `IN ${formatHMS(deltaSec)}` : "[OFF]";
-          ctx.fillText(statusText, 350, startY);
+          ctx.fillText(statusText, 420, startY);
 
-          startY += 38;
+          startY += 48;
         });
       }
     },
@@ -304,7 +311,7 @@ export function CTUTacticalOpsTerminal() {
     return () => clearInterval(interval);
   }, [pipActive, pipMode, renderPipFrame]);
 
-  // Open PiP with specific mode
+  // Open PiP with specific mode (640x360 HD Canvas buffer)
   const openPipHud = async (targetMode: "TIMERS" | "ALARMS") => {
     setPipMode(targetMode);
 
@@ -326,8 +333,8 @@ export function CTUTacticalOpsTerminal() {
     try {
       if (!pipCanvasRef.current) {
         const canvas = document.createElement("canvas");
-        canvas.width = 540;
-        canvas.height = 300;
+        canvas.width = 640;
+        canvas.height = 360;
         pipCanvasRef.current = canvas;
       }
 
