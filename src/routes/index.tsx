@@ -43,6 +43,8 @@ export type AlarmItem = {
   zeroSound: ZeroSoundType;
 };
 
+type PipMode = "ALL" | "TIMERS" | "ALARMS";
+
 const INITIAL_TIMERS: TimerItem[] = [
   { id: "timer-1", label: "TACTICAL SPRINT", durationSec: 25 * 60, remainingSec: 25 * 60, status: "READY", zeroSound: "theme" },
   { id: "timer-2", label: "FIELD INTERROGATION", durationSec: 15 * 60, remainingSec: 15 * 60, status: "READY", zeroSound: "theme" },
@@ -111,6 +113,12 @@ export function CTUTacticalOpsTerminal() {
   const pipCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const pipVideoRef = useRef<HTMLVideoElement | null>(null);
   const [isPipActive, setIsPipActive] = useState(false);
+  const [pipMode, setPipMode] = useState<PipMode>("ALL");
+  const pipModeRef = useRef<PipMode>("ALL");
+
+  useEffect(() => {
+    pipModeRef.current = pipMode;
+  }, [pipMode]);
 
   // Deadlines map for running timers
   const timerDeadlinesRef = useRef<Map<string, number>>(new Map());
@@ -208,16 +216,17 @@ export function CTUTacticalOpsTerminal() {
   }, [timers, requestWakeLock]);
 
   /**
-   * Draw Multi-Slot Picture-in-Picture Tactical HUD (Canvas 440 x 260)
-   * Displays all active running timers and armed alarms simultaneously
+   * Draw High-Density Multi-Slot Picture-in-Picture Tactical HUD (Canvas 560 x 340)
+   * Supports 6+ active timers and 6+ armed alarms simultaneously or in dedicated modes
    */
   const drawPipHud = useCallback(
-    (activeTimersList: TimerItem[], armedAlarmsList: AlarmItem[], isEmergency = false) => {
+    (activeTimersList: TimerItem[], armedAlarmsList: AlarmItem[], isEmergency = false, modeOverride?: PipMode) => {
       const canvas = pipCanvasRef.current;
       if (!canvas) return;
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
 
+      const currentMode = modeOverride || pipModeRef.current;
       const w = canvas.width;
       const h = canvas.height;
 
@@ -231,50 +240,116 @@ export function CTUTacticalOpsTerminal() {
       ctx.strokeRect(3, 3, w - 6, h - 6);
 
       // Top Tactical Status Bar
-      ctx.fillStyle = isEmergency ? "rgba(255, 0, 0, 0.2)" : "rgba(255, 204, 0, 0.15)";
+      ctx.fillStyle = isEmergency ? "rgba(255, 0, 0, 0.25)" : "rgba(255, 204, 0, 0.15)";
       ctx.fillRect(5, 5, w - 10, 32);
 
       ctx.fillStyle = isEmergency ? "#ff0000" : "#ffcc00";
       ctx.font = "bold 13px Consolas, monospace";
       ctx.textAlign = "left";
-      ctx.fillText(`CTU // ${isEmergency ? "CRITICAL THREAT" : "OPERATIONAL HUD"}`, 12, 26);
+      const headerTitle =
+        currentMode === "TIMERS"
+          ? "CTU // TIMERS MONITOR [6+ SLOTS]"
+          : currentMode === "ALARMS"
+          ? "CTU // ALARMS MONITOR [6+ SLOTS]"
+          : `CTU // ${isEmergency ? "CRITICAL THREAT" : "OPERATIONAL HUD"}`;
+      ctx.fillText(headerTitle, 12, 26);
 
       ctx.textAlign = "right";
       ctx.fillText(`ZULU: ${currentTimeZulu}`, w - 12, 26);
 
       let currentY = 56;
 
-      // --- SECTION 1: ARMED / RUNNING TIMERS ---
+      // MODE 1: TIMERS ONLY (Displays up to 8 active timers in dense rows)
+      if (currentMode === "TIMERS") {
+        ctx.fillStyle = "#888888";
+        ctx.font = "bold 11px Consolas, monospace";
+        ctx.textAlign = "left";
+        ctx.fillText(`--- ACTIVE TIMERS QUEUE (${activeTimersList.length}) ---`, 12, currentY);
+        currentY += 20;
+
+        if (activeTimersList.length === 0) {
+          ctx.fillStyle = "#555555";
+          ctx.font = "12px Consolas, monospace";
+          ctx.fillText("NO TIMERS RUNNING [STANDBY]", 12, currentY);
+        } else {
+          activeTimersList.slice(0, 8).forEach((t, idx) => {
+            const isCrim = t.remainingSec <= 10;
+            ctx.fillStyle = isCrim ? "#ff0000" : "#ffcc00";
+            ctx.font = "bold 12px Consolas, monospace";
+            ctx.textAlign = "left";
+            const shortLabel = t.label.length > 22 ? t.label.substring(0, 22) + ".." : t.label;
+            ctx.fillText(`${idx + 1}. ▶ ${shortLabel}`, 12, currentY);
+
+            ctx.textAlign = "right";
+            ctx.font = "bold 14px Consolas, monospace";
+            ctx.fillText(formatHMS(t.remainingSec), w - 12, currentY);
+
+            currentY += 28;
+          });
+        }
+        return;
+      }
+
+      // MODE 2: ALARMS ONLY (Displays up to 8 armed alarms in dense rows)
+      if (currentMode === "ALARMS") {
+        ctx.fillStyle = "#888888";
+        ctx.font = "bold 11px Consolas, monospace";
+        ctx.textAlign = "left";
+        ctx.fillText(`--- ARMED ALARMS (BANGKOK) (${armedAlarmsList.length}) ---`, 12, currentY);
+        currentY += 20;
+
+        if (armedAlarmsList.length === 0) {
+          ctx.fillStyle = "#555555";
+          ctx.font = "12px Consolas, monospace";
+          ctx.fillText("NO ARMED ALARMS", 12, currentY);
+        } else {
+          armedAlarmsList.slice(0, 8).forEach((a, idx) => {
+            ctx.fillStyle = "#ffcc00";
+            ctx.font = "bold 12px Consolas, monospace";
+            ctx.textAlign = "left";
+            const shortLabel = a.label.length > 24 ? a.label.substring(0, 24) + ".." : a.label;
+            ctx.fillText(`${idx + 1}. ⏱ ${shortLabel}`, 12, currentY);
+
+            ctx.textAlign = "right";
+            ctx.font = "bold 14px Consolas, monospace";
+            ctx.fillText(a.timeStr, w - 12, currentY);
+
+            currentY += 28;
+          });
+        }
+        return;
+      }
+
+      // MODE 3: ALL / DUAL QUEUE (Up to 4 active timers + 4 armed alarms)
       ctx.fillStyle = "#888888";
       ctx.font = "bold 11px Consolas, monospace";
       ctx.textAlign = "left";
-      ctx.fillText("--- ARMED TIMERS ---", 12, currentY);
+      ctx.fillText(`--- ACTIVE TIMERS (${activeTimersList.length}) ---`, 12, currentY);
       currentY += 18;
 
       if (activeTimersList.length === 0) {
         ctx.fillStyle = "#555555";
         ctx.font = "12px Consolas, monospace";
         ctx.fillText("NO TIMERS ACTIVE [STANDBY]", 12, currentY);
-        currentY += 24;
+        currentY += 22;
       } else {
-        // Display up to 3 timers
-        activeTimersList.slice(0, 3).forEach((t) => {
+        activeTimersList.slice(0, 4).forEach((t) => {
           const isCrim = t.remainingSec <= 10;
           ctx.fillStyle = isCrim ? "#ff0000" : "#ffcc00";
-          ctx.font = "bold 13px Consolas, monospace";
+          ctx.font = "bold 12px Consolas, monospace";
           ctx.textAlign = "left";
-          const shortLabel = t.label.length > 18 ? t.label.substring(0, 18) + ".." : t.label;
+          const shortLabel = t.label.length > 20 ? t.label.substring(0, 20) + ".." : t.label;
           ctx.fillText(`▶ ${shortLabel}`, 12, currentY);
 
           ctx.textAlign = "right";
-          ctx.font = "bold 15px Consolas, monospace";
+          ctx.font = "bold 14px Consolas, monospace";
           ctx.fillText(formatHMS(t.remainingSec), w - 12, currentY);
 
-          currentY += 24;
+          currentY += 22;
         });
       }
 
-      currentY += 6;
+      currentY += 4;
       ctx.strokeStyle = "rgba(255, 204, 0, 0.25)";
       ctx.lineWidth = 1;
       ctx.beginPath();
@@ -283,11 +358,10 @@ export function CTUTacticalOpsTerminal() {
       ctx.stroke();
       currentY += 16;
 
-      // --- SECTION 2: ARMED ALARMS ---
       ctx.fillStyle = "#888888";
       ctx.font = "bold 11px Consolas, monospace";
       ctx.textAlign = "left";
-      ctx.fillText("--- ARMED ALARMS (BANGKOK) ---", 12, currentY);
+      ctx.fillText(`--- ARMED ALARMS (${armedAlarmsList.length}) ---`, 12, currentY);
       currentY += 18;
 
       if (armedAlarmsList.length === 0) {
@@ -295,19 +369,18 @@ export function CTUTacticalOpsTerminal() {
         ctx.font = "12px Consolas, monospace";
         ctx.fillText("NO ALARMS ARMED", 12, currentY);
       } else {
-        // Display up to 2 armed alarms
-        armedAlarmsList.slice(0, 2).forEach((a) => {
+        armedAlarmsList.slice(0, 4).forEach((a) => {
           ctx.fillStyle = "#ffcc00";
           ctx.font = "bold 12px Consolas, monospace";
           ctx.textAlign = "left";
-          const shortLabel = a.label.length > 20 ? a.label.substring(0, 20) + ".." : a.label;
+          const shortLabel = a.label.length > 22 ? a.label.substring(0, 22) + ".." : a.label;
           ctx.fillText(`⏱ ${shortLabel}`, 12, currentY);
 
           ctx.textAlign = "right";
           ctx.font = "bold 13px Consolas, monospace";
           ctx.fillText(a.timeStr, w - 12, currentY);
 
-          currentY += 22;
+          currentY += 20;
         });
       }
     },
@@ -461,7 +534,7 @@ export function CTUTacticalOpsTerminal() {
           return { ...timer, remainingSec: remaining };
         });
 
-        // Update Multi-Slot Picture-in-Picture HUD
+        // Update High-Density Multi-Slot Picture-in-Picture HUD
         const activeList = updated.filter((t) => t.status === "RUNNING" || t.status === "HOLD");
         const armedAlarms = alarms.filter((a) => a.armed);
         drawPipHud(activeList, armedAlarms, isEmergency);
@@ -656,22 +729,27 @@ export function CTUTacticalOpsTerminal() {
     setPickerTarget(null);
   };
 
-  // Toggle Picture-in-Picture Multi-Slot HUD
-  const handleTogglePip = async () => {
+  // Toggle Picture-in-Picture Multi-Slot HUD with specified mode (TIMERS or ALARMS)
+  const handleTogglePipWithMode = async (targetMode: PipMode) => {
     try {
-      if (document.pictureInPictureElement) {
+      const canvas = pipCanvasRef.current;
+      const video = pipVideoRef.current;
+      if (!canvas || !video) return;
+
+      // If PiP is already active with the same mode, close it
+      if (document.pictureInPictureElement && pipMode === targetMode) {
         await document.exitPictureInPicture();
         setIsPipActive(false);
         return;
       }
 
-      const canvas = pipCanvasRef.current;
-      const video = pipVideoRef.current;
-      if (!canvas || !video) return;
+      // Update mode
+      setPipMode(targetMode);
+      pipModeRef.current = targetMode;
 
       const activeList = timers.filter((t) => t.status === "RUNNING" || t.status === "HOLD");
       const armedAlarms = alarms.filter((a) => a.armed);
-      drawPipHud(activeList, armedAlarms, false);
+      drawPipHud(activeList, armedAlarms, false, targetMode);
 
       if (!video.srcObject) {
         const stream = canvas.captureStream(10);
@@ -679,12 +757,14 @@ export function CTUTacticalOpsTerminal() {
         await video.play();
       }
 
-      await video.requestPictureInPicture();
-      setIsPipActive(true);
+      if (!document.pictureInPictureElement) {
+        await video.requestPictureInPicture();
+        setIsPipActive(true);
 
-      video.addEventListener("leavepictureinpicture", () => {
-        setIsPipActive(false);
-      });
+        video.addEventListener("leavepictureinpicture", () => {
+          setIsPipActive(false);
+        });
+      }
     } catch {
       // PiP unavailable or cancelled
     }
@@ -709,8 +789,8 @@ export function CTUTacticalOpsTerminal() {
 
   return (
     <div className="min-h-screen bg-black text-[#ffcc00] font-mono selection:bg-[#ffcc00] selection:text-black p-2 sm:p-4 md:p-6 flex flex-col items-center select-none">
-      {/* Hidden elements for Picture-in-Picture Multi-Slot HUD Streaming */}
-      <canvas ref={pipCanvasRef} width={440} height={260} className="hidden" />
+      {/* Hidden elements for Picture-in-Picture Multi-Slot HUD Streaming (560x340 for 6+ items) */}
+      <canvas ref={pipCanvasRef} width={560} height={340} className="hidden" />
       <video ref={pipVideoRef} muted playsInline className="hidden" />
 
       {/* Emergency Active Audio Banner */}
@@ -742,15 +822,28 @@ export function CTUTacticalOpsTerminal() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {/* Dedicated PiP Timers Button */}
           <button
-            onClick={handleTogglePip}
+            onClick={() => handleTogglePipWithMode("TIMERS")}
             className={`text-xs px-2.5 py-1 font-bold border transition-colors ${
-              isPipActive
+              isPipActive && pipMode === "TIMERS"
                 ? "bg-[#ffcc00] text-black border-[#ffcc00]"
                 : "border-[#ffcc00]/60 hover:bg-[#ffcc00]/20 text-[#ffcc00]"
             }`}
           >
-            {isPipActive ? "[PIP HUD ACTIVE]" : "POP MINI-HUD (PIP)"}
+            {isPipActive && pipMode === "TIMERS" ? "[PIP TIMERS: ON]" : "PIP TIMERS (6+)"}
+          </button>
+
+          {/* Dedicated PiP Alarms Button */}
+          <button
+            onClick={() => handleTogglePipWithMode("ALARMS")}
+            className={`text-xs px-2.5 py-1 font-bold border transition-colors ${
+              isPipActive && pipMode === "ALARMS"
+                ? "bg-[#ffcc00] text-black border-[#ffcc00]"
+                : "border-[#ffcc00]/60 hover:bg-[#ffcc00]/20 text-[#ffcc00]"
+            }`}
+          >
+            {isPipActive && pipMode === "ALARMS" ? "[PIP ALARMS: ON]" : "PIP ALARMS (6+)"}
           </button>
 
           <button
