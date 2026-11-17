@@ -25,12 +25,12 @@ export type ZeroSoundType = "voice" | "boom" | "alarm" | "ctu_beep" | "stinger";
 
 /**
  * CTU Tactical Terminal Audio Engine.
- * Implements the exact synthesizer architecture from v74:
- * - ig(): Deep amber ticks and high-pitch crimson urgency ticks
- * - Bg(): Zero payloads (boom, alarm, ctu_beep, stinger)
- * - XB(): 24 Voice loop ("Events occur in real time...")
- * - br(): Haunting dual-oscillator alarm loop (1000Hz / 1500Hz)
- * - startCreditsAudio / stopCreditsAudio for credits sequence
+ * Supports:
+ * - Countdown MP3 playback (/countdown.mp3 and /24 Alarm Countdown.mp3)
+ * - Synthetic v74 digital amber and crimson urgency ticks (playTick)
+ * - Zero sound payloads: ctu_beep, voice loop, boom, stinger, alarm klaxon loop
+ * - Credits sequence audio loop
+ * - Clean stopAll() stopping all active audio elements and synthesis intervals
  */
 export class CTUAudio {
   private static sharedInstance: CTUAudio | null = null;
@@ -45,6 +45,7 @@ export class CTUAudio {
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
   private alarmInterval: number | null = null;
+  private countdownAudioElement: HTMLAudioElement | null = null;
   private voiceAudioElement: HTMLAudioElement | null = null;
   private creditsAudioElement: HTMLAudioElement | null = null;
   private volume = defaultAudio.volume;
@@ -56,7 +57,9 @@ export class CTUAudio {
   private initContext(): void {
     if (typeof window === "undefined") return;
     try {
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       if (AudioCtx) {
         this.ctx = new AudioCtx();
         this.masterGain = this.ctx.createGain();
@@ -64,7 +67,7 @@ export class CTUAudio {
         this.masterGain.connect(this.ctx.destination);
       }
     } catch {
-      // AudioContext unavailable or restricted
+      // AudioContext unavailable
     }
   }
 
@@ -86,6 +89,9 @@ export class CTUAudio {
     this.volume = Math.max(0, Math.min(1, vol));
     if (this.ctx && this.masterGain) {
       this.masterGain.gain.setValueAtTime(this.volume, this.ctx.currentTime);
+    }
+    if (this.countdownAudioElement) {
+      this.countdownAudioElement.volume = this.volume;
     }
     if (this.voiceAudioElement) {
       this.voiceAudioElement.volume = this.volume;
@@ -113,6 +119,49 @@ export class CTUAudio {
       osc.start(t);
       osc.stop(t + 0.09);
     } catch {}
+  }
+
+  /**
+   * Countdown MP3 Audio Track Playback:
+   * Plays the 24 countdown audio track (/countdown.mp3 with fallback to /24 Alarm Countdown.mp3)
+   */
+  public startCountdownAudio(): void {
+    this.stopCountdownAudio();
+    if (typeof window === "undefined") return;
+
+    try {
+      if (!this.countdownAudioElement) {
+        // Attempts primary path, falling back automatically to the 24 Alarm Countdown asset
+        const audio = new Audio("/countdown.mp3");
+        audio.onerror = () => {
+          if (this.countdownAudioElement) {
+            this.countdownAudioElement.src = "/24 Alarm Countdown.mp3";
+            this.countdownAudioElement.load();
+            this.countdownAudioElement.play().catch(() => {});
+          }
+        };
+        this.countdownAudioElement = audio;
+      }
+      this.countdownAudioElement.volume = this.volume;
+      this.countdownAudioElement.currentTime = 0;
+      this.countdownAudioElement.play().catch(() => {
+        try {
+          const fallback = new Audio("/24 Alarm Countdown.mp3");
+          fallback.volume = this.volume;
+          fallback.play().catch(() => {});
+          this.countdownAudioElement = fallback;
+        } catch {}
+      });
+    } catch {}
+  }
+
+  public stopCountdownAudio(): void {
+    if (this.countdownAudioElement) {
+      try {
+        this.countdownAudioElement.pause();
+        this.countdownAudioElement.currentTime = 0;
+      } catch {}
+    }
   }
 
   /**
@@ -207,7 +256,7 @@ export class CTUAudio {
       } else if (type === "alarm") {
         this.startHauntingAlarmLoop();
       } else {
-        // ctu_beep triple burst
+        // ctu_beep signature triple pulse
         [0, 0.15, 0.3].forEach((offset) => {
           if (!this.ctx || !this.masterGain) return;
           const osc = this.ctx.createOscillator();
@@ -294,8 +343,10 @@ export class CTUAudio {
 
   public stopVoiceLoop(): void {
     if (this.voiceAudioElement) {
-      this.voiceAudioElement.pause();
-      this.voiceAudioElement.currentTime = 0;
+      try {
+        this.voiceAudioElement.pause();
+        this.voiceAudioElement.currentTime = 0;
+      } catch {}
     }
   }
 
@@ -317,18 +368,22 @@ export class CTUAudio {
 
   public stopCreditsAudio(): void {
     if (this.creditsAudioElement) {
-      this.creditsAudioElement.pause();
-      this.creditsAudioElement.currentTime = 0;
+      try {
+        this.creditsAudioElement.pause();
+        this.creditsAudioElement.currentTime = 0;
+      } catch {}
     }
   }
 
   public stopAll(): void {
+    this.stopCountdownAudio();
     this.stopHauntingAlarmLoop();
     this.stopVoiceLoop();
     this.stopCreditsAudio();
   }
 
-  // Static Facade methods
+  // --- Static Facade Methods ---
+
   public static async unlock(): Promise<boolean> {
     return CTUAudio.shared.unlock();
   }
@@ -339,6 +394,18 @@ export class CTUAudio {
 
   public static playChirp(): void {
     CTUAudio.shared.playChirp();
+  }
+
+  public static startCountdownAudio(): void {
+    CTUAudio.shared.startCountdownAudio();
+  }
+
+  public static stopCountdownAudio(): void {
+    CTUAudio.shared.stopCountdownAudio();
+  }
+
+  public static playCountdownAudio(): void {
+    CTUAudio.shared.startCountdownAudio();
   }
 
   public static playTick(isCrimson = false, isUrgent = true): void {
