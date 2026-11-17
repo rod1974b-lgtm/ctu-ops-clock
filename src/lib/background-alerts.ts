@@ -1,5 +1,4 @@
-// src/lib/background-alerts.ts — CTU Client-Side Background Alerts, Web Push & Phone Intent Wiring
-
+// src/lib/background-alerts.ts — FULL DROP-IN REPLACEMENT FILE
 export interface StoredDeadline {
   id: string;
   label: string;
@@ -83,65 +82,6 @@ export async function postToWorker(msg: unknown): Promise<void> {
   }
 }
 
-// Subscribe to Web Push via PushManager and sync with backend
-export async function enableWebPushSubscription(): Promise<PushSubscription | null> {
-  if (typeof window === "undefined" || !("PushManager" in window)) {
-    return null;
-  }
-
-  try {
-    const registration = await registerCTUWorker();
-    if (!registration) return null;
-
-    // Fetch server VAPID key
-    let vapidKey: string | null = null;
-    try {
-      const res = await fetch("/api/public/push");
-      if (res.ok) {
-        const json = await res.json();
-        vapidKey = json.vapidPublicKey || null;
-      }
-    } catch {
-      // VAPID endpoint unavailable
-    }
-
-    let subscription = await registration.pushManager.getSubscription();
-    if (!subscription && vapidKey) {
-      const urlBase64ToUint8Array = (base64String: string) => {
-        const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
-        const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
-        const rawData = window.atob(base64);
-        const outputArray = new Uint8Array(rawData.length);
-        for (let i = 0; i < rawData.length; ++i) {
-          outputArray[i] = rawData.charCodeAt(i);
-        }
-        return outputArray;
-      };
-
-      subscription = await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(vapidKey),
-      });
-    }
-
-    if (subscription) {
-      await fetch("/api/public/push", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "subscribe",
-          subscription: subscription.toJSON(),
-        }),
-      });
-    }
-
-    return subscription;
-  } catch (err) {
-    console.warn("[CTU] Web Push subscription failed:", err);
-    return null;
-  }
-}
-
 // Live Status Bar / Notification Shade HUD updates
 export async function updateLockscreenHUD(
   title: string,
@@ -186,7 +126,6 @@ export async function scheduleBackgroundAlert(deadline: {
     deadline,
   });
 
-  // Sync deadline with backend push scheduler if configured
   try {
     await fetch("/api/public/push", {
       method: "POST",
@@ -198,9 +137,7 @@ export async function scheduleBackgroundAlert(deadline: {
         targetEpochMs: deadline.targetEpochMs,
       }),
     });
-  } catch {
-    // Offline or server route optional
-  }
+  } catch {}
 }
 
 export async function cancelBackgroundAlert(id: string): Promise<void> {
@@ -219,8 +156,62 @@ export async function cancelBackgroundAlert(id: string): Promise<void> {
         alarmId: id,
       }),
     });
-  } catch {
-    // Offline or server route optional
+  } catch {}
+}
+
+// Subscribe to Web Push via PushManager and sync with backend
+export async function enableWebPushSubscription(): Promise<PushSubscription | null> {
+  if (typeof window === "undefined" || !("PushManager" in window)) {
+    return null;
+  }
+
+  try {
+    const registration = await registerCTUWorker();
+    if (!registration) return null;
+
+    let vapidKey: string | null = null;
+    try {
+      const res = await fetch("/api/public/push");
+      if (res.ok) {
+        const json = await res.json();
+        vapidKey = json.vapidPublicKey || null;
+      }
+    } catch {}
+
+    let subscription = await registration.pushManager.getSubscription();
+    if (!subscription && vapidKey) {
+      const urlBase64ToUint8Array = (base64String: string) => {
+        const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+        const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+        const rawData = window.atob(base64);
+        const outputArray = new Uint8Array(rawData.length);
+        for (let i = 0; i < rawData.length; ++i) {
+          outputArray[i] = rawData.charCodeAt(i);
+        }
+        return outputArray;
+      };
+
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(vapidKey),
+      });
+    }
+
+    if (subscription) {
+      await fetch("/api/public/push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "subscribe",
+          subscription: subscription.toJSON(),
+        }),
+      });
+    }
+
+    return subscription;
+  } catch (err) {
+    console.warn("[CTU] Web Push subscription failed:", err);
+    return null;
   }
 }
 
@@ -262,3 +253,8 @@ export function syncWithNativePhoneClock(
     }
   }
 }
+
+// Aliases for compatibility across route revisions
+export const initBackgroundAlerts = registerCTUWorker;
+export const scheduleLocalAlert = scheduleBackgroundAlert;
+export const cancelLocalAlert = cancelBackgroundAlert;
