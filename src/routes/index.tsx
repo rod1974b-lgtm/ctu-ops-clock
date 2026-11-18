@@ -10,6 +10,8 @@ import {
   updateLockscreenHUD,
   clearLockscreenHUD,
   syncWithNativePhoneClock,
+  getNotificationPermissionStatus,
+  requestNotificationPermission,
 } from "@/lib/background-alerts";
 
 export const Route = createFileRoute("/")({
@@ -98,11 +100,15 @@ export function CTUTacticalOpsTerminal() {
   const [bangkokTime, setBangkokTime] = useState<string>("00:00:00");
   const [zuluTime, setZuluTime] = useState<string>("00:00:00");
   const [colonVisible, setColonVisible] = useState<boolean>(true);
+  const [isClientHydrated, setIsClientHydrated] = useState<boolean>(false);
 
   // Timers & Alarms Queues
   const [timers, setTimers] = useState<TimerItem[]>(INITIAL_TIMERS);
   const [alarms, setAlarms] = useState<AlarmItem[]>(INITIAL_ALARMS);
   const [focusedTimerId, setFocusedTimerId] = useState<string>("timer-1");
+
+  // Phone Notification Permission State
+  const [notifPermission, setNotifPermission] = useState<NotificationPermission | "unsupported">("default");
 
   // Samsung Picker Modal State
   const [pickerOpen, setPickerOpen] = useState<boolean>(false);
@@ -137,9 +143,11 @@ export function CTUTacticalOpsTerminal() {
   const alarmsRef = useRef(alarms);
   alarmsRef.current = alarms;
 
-  // Clock Update & Init
+  // Clock Update & Client Init
   useEffect(() => {
+    setIsClientHydrated(true);
     initBackgroundAlerts().catch(() => {});
+    setNotifPermission(getNotificationPermissionStatus());
 
     if (typeof document !== "undefined") {
       setPipSupported("pictureInPictureEnabled" in document && document.pictureInPictureEnabled);
@@ -191,7 +199,7 @@ export function CTUTacticalOpsTerminal() {
       ctx.strokeStyle = takeoverOpen || ringingAlert ? "#ff1a1a" : "#ffcc00";
       ctx.strokeRect(3, 3, width - 6, height - 6);
 
-      // Header Bar (Extra Large 18px / 15px)
+      // Header Bar (XXL: 18px / 15px)
       ctx.fillStyle = takeoverOpen || ringingAlert ? "#ff1a1a" : "#ffcc00";
       ctx.font = "bold 18px 'Courier New', monospace";
       ctx.fillText(
@@ -370,6 +378,9 @@ export function CTUTacticalOpsTerminal() {
       );
     } catch (err) {
       console.warn("[CTU] Failed to start Picture-in-Picture HUD:", err);
+      alert(
+        "Picture-in-Picture could not launch.\n\nOn Android: Go to phone Settings > Apps > Chrome (or CTU App) > Special app access > Picture-in-picture, and verify it is set to Allowed."
+      );
     }
   };
 
@@ -438,12 +449,29 @@ export function CTUTacticalOpsTerminal() {
     return () => clearInterval(interval);
   }, [takeoverOpen, ringingAlert]);
 
+  // Request Notification Permissions from Phone / Browser
+  const handleRequestNotifPermission = async () => {
+    const res = await requestNotificationPermission();
+    setNotifPermission(res);
+    if (res === "denied") {
+      alert(
+        "Notification alerts are blocked.\n\nTo enable:\n1. Tap the lock/tune icon in the browser address bar.\n2. Tap 'Permissions' > 'Notifications' > 'Allow'.\n3. In Android Settings > Apps > Chrome/CTU > Notifications, ensure notifications are turned ON."
+      );
+    }
+  };
+
   // Timer Actions
-  const handleExecuteTimer = (id: string) => {
+  const handleExecuteTimer = async (id: string) => {
     try {
       CTUAudio.unlockAudio();
       CTUAudio.playChirp();
     } catch {}
+
+    // Auto-prompt notification permission on first timer start if not yet granted
+    if (notifPermission === "default") {
+      const res = await requestNotificationPermission();
+      setNotifPermission(res);
+    }
 
     setTimers((prev) =>
       prev.map((t) => {
@@ -643,7 +671,7 @@ export function CTUTacticalOpsTerminal() {
 
   return (
     <div className="min-h-screen bg-[#070a0e] text-[#ffcc00] font-mono select-none flex flex-col p-2 sm:p-4">
-      {/* Top Tactical Status Header Bar */}
+      {/* Top Tactical Status Header Bar with Permission & PiP Controls */}
       <header className="border-b border-[#ffcc00]/40 pb-2 mb-3 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <span className="w-3 h-3 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_#10b981]" />
@@ -655,8 +683,35 @@ export function CTUTacticalOpsTerminal() {
           </span>
         </div>
 
-        {/* Dual Dedicated PiP and Wake Lock Controls */}
-        <div className="flex items-center gap-2">
+        {/* Dual Dedicated PiP, Alerts Permission, and Wake Lock Controls */}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Notification Permission Chip / Trigger */}
+          {notifPermission === "granted" ? (
+            <span
+              className="px-2 py-1 text-[11px] font-bold uppercase tracking-wider rounded border border-emerald-500 bg-emerald-950/40 text-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.3)]"
+              title="Phone notification alerts granted"
+            >
+              [ALERTS: ACTIVE]
+            </span>
+          ) : notifPermission === "denied" ? (
+            <button
+              onClick={handleRequestNotifPermission}
+              className="px-2 py-1 text-[11px] font-bold uppercase tracking-wider rounded border border-red-500 bg-red-950/60 text-red-300 hover:bg-red-900/80 shadow-[0_0_8px_rgba(239,68,68,0.5)]"
+              title="Notifications are blocked in your phone settings. Click for instructions."
+            >
+              [ALERTS: BLOCKED IN SETTINGS]
+            </button>
+          ) : (
+            <button
+              onClick={handleRequestNotifPermission}
+              className="px-2 py-1 text-[11px] font-black uppercase tracking-wider rounded border border-amber-400 bg-amber-500/20 text-amber-300 hover:bg-amber-500/40 animate-pulse shadow-[0_0_10px_rgba(245,158,11,0.5)]"
+              title="Click to grant permission for phone notifications & background alarms"
+            >
+              [ALERTS: ENABLE PERMISSION]
+            </button>
+          )}
+
+          {/* Picture-in-Picture Controls */}
           <button
             onClick={() => openPipHud("TIMERS")}
             className={`px-2.5 py-1 text-xs font-bold uppercase tracking-wider rounded border transition-colors ${
@@ -681,6 +736,7 @@ export function CTUTacticalOpsTerminal() {
             [PIP ALARMS]
           </button>
 
+          {/* Wake Lock Control */}
           <button
             onClick={toggleWakeLock}
             className={`px-2 py-1 text-[11px] font-bold uppercase tracking-wider rounded border transition-colors ${
@@ -866,7 +922,7 @@ export function CTUTacticalOpsTerminal() {
           <div className="space-y-2 flex-1 overflow-y-auto max-h-[360px] pr-1">
             {alarms.map((a) => {
               const nextEpoch = getNextAlarmEpochMs(a.timeStr, a.days);
-              const deltaSec = nextEpoch ? Math.max(0, Math.floor((nextEpoch - Date.now()) / 1000)) : null;
+              const deltaSec = isClientHydrated && nextEpoch ? Math.max(0, Math.floor((nextEpoch - Date.now()) / 1000)) : null;
 
               return (
                 <div
