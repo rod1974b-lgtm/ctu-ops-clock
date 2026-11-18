@@ -1,4 +1,4 @@
-// src/routes/index.tsx — FULL DROP-IN REPLACEMENT FILE (MOBILE OPTIMIZED)
+// src/routes/index.tsx — FULL DROP-IN REPLACEMENT FILE (MOBILE OPTIMIZED & CTU CLEARANCE POPUP)
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { SamsungTimePicker, type SamsungTimePickerValues } from "@/components/samsung-time-picker";
@@ -113,6 +113,11 @@ export function CTUTacticalOpsTerminal() {
   // Phone Notification Permission State
   const [notifPermission, setNotifPermission] = useState<NotificationPermission | "unsupported">("default");
 
+  // CTU Operational Clearance Popup State (First launch / Install modal)
+  const [clearanceOpen, setClearanceOpen] = useState<boolean>(false);
+  const [clearanceDone, setClearanceDone] = useState<boolean>(false);
+  const [audioUnlocked, setAudioUnlocked] = useState<boolean>(false);
+
   // In-App Floating Tactical Mini-HUD (Mobile PiP Fallback)
   const [floatingHudActive, setFloatingHudActive] = useState<boolean>(false);
   const [floatingHudMode, setFloatingHudMode] = useState<"TIMERS" | "ALARMS">("TIMERS");
@@ -149,11 +154,23 @@ export function CTUTacticalOpsTerminal() {
   const alarmsRef = useRef(alarms);
   alarmsRef.current = alarms;
 
-  // Clock Update & Client Init
+  // Clock Update, Client Init & First-Launch Check
   useEffect(() => {
     setIsClientHydrated(true);
     initBackgroundAlerts().catch(() => {});
-    setNotifPermission(getNotificationPermissionStatus());
+    const currentPerm = getNotificationPermissionStatus();
+    setNotifPermission(currentPerm);
+
+    // Check if clearance completed in localStorage or if running as installed standalone app
+    try {
+      const savedClearance = localStorage.getItem("ctu_clearance_completed_v1");
+      if (savedClearance === "true") {
+        setClearanceDone(true);
+      } else {
+        // Trigger clearance popup automatically on first install or first load
+        setClearanceOpen(true);
+      }
+    } catch {}
 
     const clockInterval = setInterval(() => {
       const now = new Date();
@@ -328,6 +345,7 @@ export function CTUTacticalOpsTerminal() {
 
     try {
       await CTUAudio.unlockAudio();
+      setAudioUnlocked(true);
     } catch {}
 
     // Check if native PiP is supported and enabled
@@ -467,6 +485,7 @@ export function CTUTacticalOpsTerminal() {
     try {
       CTUAudio.unlockAudio();
       CTUAudio.playChirp();
+      setAudioUnlocked(true);
     } catch {}
 
     if (typeof navigator !== "undefined" && "vibrate" in navigator) {
@@ -491,11 +510,32 @@ export function CTUTacticalOpsTerminal() {
     }
   };
 
+  // Audio Unlock Action
+  const handleUnlockAudioEngine = async () => {
+    try {
+      await CTUAudio.unlockAudio();
+      CTUAudio.playChirp();
+      setAudioUnlocked(true);
+    } catch (e) {
+      console.warn("Audio unlock failed:", e);
+    }
+  };
+
+  // Complete Clearance & Save State
+  const handleCompleteClearance = () => {
+    try {
+      localStorage.setItem("ctu_clearance_completed_v1", "true");
+    } catch {}
+    setClearanceDone(true);
+    setClearanceOpen(false);
+  };
+
   // Timer Actions
   const handleExecuteTimer = async (id: string) => {
     try {
       CTUAudio.unlockAudio();
       CTUAudio.playChirp();
+      setAudioUnlocked(true);
     } catch {}
 
     // Auto-prompt notification permission on first timer start if not yet granted
@@ -712,6 +752,19 @@ export function CTUTacticalOpsTerminal() {
           <span className="text-[9px] bg-[#ffcc00]/10 border border-[#ffcc00]/30 px-1 py-0.5 rounded text-[#ffcc00]/80">
             DEFCON 2
           </span>
+
+          {/* Operational Clearance Modal Launcher */}
+          <button
+            onClick={() => setClearanceOpen(true)}
+            className={`px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider rounded border transition ${
+              clearanceDone
+                ? "border-emerald-500/60 bg-emerald-950/40 text-emerald-300 hover:bg-emerald-950/80"
+                : "border-amber-400 bg-amber-500/30 text-amber-300 animate-pulse hover:bg-amber-500/50"
+            }`}
+            title="Open CTU Operational Clearance & Samsung PiP / Permission Diagnostics"
+          >
+            {clearanceDone ? "CLEARANCE: OK" : "CLEARANCE: SETUP"}
+          </button>
         </div>
 
         {/* Dual Dedicated PiP, Alerts Permission, Test Alert, and Wake Lock Controls */}
@@ -1109,6 +1162,173 @@ export function CTUTacticalOpsTerminal() {
           onConfirm={handlePickerConfirm}
           onCancel={() => setPickerOpen(false)}
         />
+      )}
+
+      {/* CTU OPERATIONAL CLEARANCE & SAMSUNG PIP EXCEPTION POPUP */}
+      {clearanceOpen && (
+        <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="w-full max-w-lg bg-[#0a0f18] border-2 border-[#ffcc00] rounded-lg shadow-[0_0_30px_rgba(255,204,0,0.35)] p-4 sm:p-6 text-[#ffcc00] space-y-4 my-auto">
+            {/* Modal Header */}
+            <div className="border-b border-[#ffcc00]/40 pb-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="w-3 h-3 rounded-full bg-amber-500 animate-ping" />
+                  <span className="text-xs sm:text-sm font-black tracking-widest text-[#ffcc00] uppercase">
+                    CTU OPERATIONAL CLEARANCE PROTOCOL
+                  </span>
+                </div>
+                <button
+                  onClick={() => setClearanceOpen(false)}
+                  className="text-gray-400 hover:text-white text-xs px-2 py-0.5 border border-gray-700 rounded"
+                >
+                  ✕ CLOSE
+                </button>
+              </div>
+              <p className="text-[10px] text-gray-300 mt-1 uppercase tracking-wider">
+                First-launch hardware authorization for audio playback, phone lockscreen alerts & Samsung PiP exceptions.
+              </p>
+            </div>
+
+            {/* Checklist of Protocols */}
+            <div className="space-y-3 text-xs">
+              {/* Protocol 1: Audio Engine */}
+              <div className="border border-[#ffcc00]/30 bg-[#0c1322] p-2.5 rounded flex items-center justify-between gap-2">
+                <div>
+                  <div className="font-bold flex items-center gap-2">
+                    <span className="text-amber-400">1. AUDIO ENGINE UNLOCK</span>
+                    <span
+                      className={`text-[9px] px-1.5 py-0.2 rounded font-black ${
+                        audioUnlocked
+                          ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40"
+                          : "bg-amber-500/20 text-amber-300 border border-amber-500/40"
+                      }`}
+                    >
+                      {audioUnlocked ? "UNLOCKED" : "STANDBY"}
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-gray-400 mt-0.5">
+                    Authorizes 24 countdown ticking, sirens, and at-zero alarms.
+                  </div>
+                </div>
+                <button
+                  onClick={handleUnlockAudioEngine}
+                  className="px-3 py-1.5 bg-[#ffcc00] text-black font-black uppercase text-[10px] tracking-wider rounded hover:bg-[#ffd633]"
+                >
+                  ARM AUDIO
+                </button>
+              </div>
+
+              {/* Protocol 2: Phone Notification Shade & Lockscreen */}
+              <div className="border border-[#ffcc00]/30 bg-[#0c1322] p-2.5 rounded flex items-center justify-between gap-2">
+                <div>
+                  <div className="font-bold flex items-center gap-2">
+                    <span className="text-amber-400">2. NOTIFICATION SHADE ALERTS</span>
+                    <span
+                      className={`text-[9px] px-1.5 py-0.2 rounded font-black ${
+                        notifPermission === "granted"
+                          ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40"
+                          : notifPermission === "denied"
+                          ? "bg-red-500/20 text-red-400 border border-red-500/40"
+                          : "bg-amber-500/20 text-amber-300 border border-amber-500/40"
+                      }`}
+                    >
+                      {notifPermission === "granted" ? "GRANTED" : notifPermission === "denied" ? "BLOCKED" : "REQUIRED"}
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-gray-400 mt-0.5">
+                    Permits live timer countdowns in phone notifications & vibrations.
+                  </div>
+                </div>
+                <button
+                  onClick={handleRequestNotifPermission}
+                  className="px-3 py-1.5 bg-blue-500 text-white font-black uppercase text-[10px] tracking-wider rounded hover:bg-blue-400"
+                >
+                  ALLOW ALERTS
+                </button>
+              </div>
+
+              {/* Protocol 3: Picture-in-Picture & Samsung Exception */}
+              <div className="border border-sky-400/40 bg-[#081224] p-3 rounded space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="font-bold text-sky-400 flex items-center gap-2">
+                    <span>3. PICTURE-IN-PICTURE (PIP) EXCEPTION</span>
+                    <span className="text-[9px] px-1.5 py-0.2 rounded font-black bg-sky-500/20 text-sky-300 border border-sky-400/40">
+                      SAMSUNG / ANDROID
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => openPipHud("TIMERS")}
+                    className="px-2.5 py-1 bg-sky-400 text-black font-black uppercase text-[10px] tracking-wider rounded hover:bg-sky-300"
+                  >
+                    TEST PIP
+                  </button>
+                </div>
+
+                <div className="text-[10px] text-gray-300 bg-black/40 p-2 rounded border border-sky-400/20 space-y-1">
+                  <div className="font-bold text-sky-300 uppercase tracking-wide">
+                    ⚠️ Samsung OneUI / Android PiP Settings Exception:
+                  </div>
+                  <div className="text-gray-300 leading-relaxed">
+                    Android manages floating PiP in OS Special Access. If the PiP window does not float over your home screen:
+                  </div>
+                  <ol className="list-decimal list-inside space-y-0.5 text-gray-400 pl-1">
+                    <li>Open phone <strong>Settings</strong> → <strong>Apps</strong>.</li>
+                    <li>Tap the <strong>three dots menu (⋮)</strong> top right → <strong>Special app access</strong>.</li>
+                    <li>Select <strong>Picture-in-picture</strong>.</li>
+                    <li>Set <strong>Chrome / Samsung Internet</strong> &amp; <strong>CTU Ops</strong> to <strong>Allowed</strong>.</li>
+                  </ol>
+                  <div className="text-[9px] text-amber-300/90 pt-1">
+                    ✓ Floating In-App Tactical HUD fallback is permanently enabled if OS restricts native PiP.
+                  </div>
+                </div>
+              </div>
+
+              {/* Protocol 4: Screen Wake Lock */}
+              <div className="border border-[#ffcc00]/30 bg-[#0c1322] p-2.5 rounded flex items-center justify-between gap-2">
+                <div>
+                  <div className="font-bold flex items-center gap-2">
+                    <span className="text-amber-400">4. FIELD SCREEN WAKE LOCK</span>
+                    <span
+                      className={`text-[9px] px-1.5 py-0.2 rounded font-black ${
+                        wakeLockActive
+                          ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40"
+                          : "bg-gray-700 text-gray-300"
+                      }`}
+                    >
+                      {wakeLockActive ? "ACTIVE" : "STANDBY"}
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-gray-400 mt-0.5">
+                    Prevents display from sleeping during critical countdowns.
+                  </div>
+                </div>
+                <button
+                  onClick={toggleWakeLock}
+                  className="px-3 py-1.5 border border-emerald-500/60 text-emerald-300 hover:bg-emerald-500/20 font-bold uppercase text-[10px] tracking-wider rounded"
+                >
+                  {wakeLockActive ? "ENGAGED" : "ARM WAKE"}
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="pt-2 border-t border-[#ffcc00]/30 flex flex-wrap items-center justify-between gap-2">
+              <button
+                onClick={handleTestPhoneAlert}
+                className="px-3 py-2 border border-blue-500/60 text-blue-300 hover:bg-blue-500/20 text-xs font-bold uppercase tracking-wider rounded"
+              >
+                TEST VIBRATION &amp; ALERT
+              </button>
+
+              <button
+                onClick={handleCompleteClearance}
+                className="px-5 py-2 bg-[#ffcc00] hover:bg-[#ffd633] text-black font-black text-xs uppercase tracking-widest rounded shadow-[0_0_15px_rgba(255,204,0,0.5)] transition"
+              >
+                CONFIRM &amp; ENTER TERMINAL
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* T-10 Full Screen Crisis Countdown Takeover */}
