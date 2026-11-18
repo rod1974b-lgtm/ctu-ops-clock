@@ -1,4 +1,4 @@
-// src/routes/index.tsx — FULL DROP-IN REPLACEMENT FILE
+// src/routes/index.tsx — FULL DROP-IN REPLACEMENT FILE (MOBILE OPTIMIZED)
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { SamsungTimePicker, type SamsungTimePickerValues } from "@/components/samsung-time-picker";
@@ -102,6 +102,9 @@ export function CTUTacticalOpsTerminal() {
   const [colonVisible, setColonVisible] = useState<boolean>(true);
   const [isClientHydrated, setIsClientHydrated] = useState<boolean>(false);
 
+  // Mobile View Navigation Tab State ("FOCUS" | "TIMERS" | "ALARMS")
+  const [mobileTab, setMobileTab] = useState<"FOCUS" | "TIMERS" | "ALARMS">("FOCUS");
+
   // Timers & Alarms Queues
   const [timers, setTimers] = useState<TimerItem[]>(INITIAL_TIMERS);
   const [alarms, setAlarms] = useState<AlarmItem[]>(INITIAL_ALARMS);
@@ -109,6 +112,10 @@ export function CTUTacticalOpsTerminal() {
 
   // Phone Notification Permission State
   const [notifPermission, setNotifPermission] = useState<NotificationPermission | "unsupported">("default");
+
+  // In-App Floating Tactical Mini-HUD (Mobile PiP Fallback)
+  const [floatingHudActive, setFloatingHudActive] = useState<boolean>(false);
+  const [floatingHudMode, setFloatingHudMode] = useState<"TIMERS" | "ALARMS">("TIMERS");
 
   // Samsung Picker Modal State
   const [pickerOpen, setPickerOpen] = useState<boolean>(false);
@@ -126,10 +133,9 @@ export function CTUTacticalOpsTerminal() {
   // Ringing Banner State
   const [ringingAlert, setRingingAlert] = useState<{ id: string; label: string; sound: ZeroSoundType } | null>(null);
 
-  // PiP Tactical HUD
+  // PiP Native Tactical HUD
   const [pipActive, setPipActive] = useState<boolean>(false);
   const [pipMode, setPipMode] = useState<"TIMERS" | "ALARMS">("TIMERS");
-  const [pipSupported, setPipSupported] = useState<boolean>(true);
   const pipCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const pipVideoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -148,10 +154,6 @@ export function CTUTacticalOpsTerminal() {
     setIsClientHydrated(true);
     initBackgroundAlerts().catch(() => {});
     setNotifPermission(getNotificationPermissionStatus());
-
-    if (typeof document !== "undefined") {
-      setPipSupported("pictureInPictureEnabled" in document && document.pictureInPictureEnabled);
-    }
 
     const clockInterval = setInterval(() => {
       const now = new Date();
@@ -319,22 +321,23 @@ export function CTUTacticalOpsTerminal() {
     return () => clearInterval(interval);
   }, [pipActive, pipMode, renderPipFrame]);
 
-  // Open PiP with specific mode (640x360 HD Canvas buffer)
+  // Open PiP (Attempts Native PiP, Falls Back to Floating Tactical Mini-HUD)
   const openPipHud = async (targetMode: "TIMERS" | "ALARMS") => {
     setPipMode(targetMode);
+    setFloatingHudMode(targetMode);
 
     try {
       await CTUAudio.unlockAudio();
     } catch {}
 
-    // If PiP is already open, immediately re-render with the switched mode
-    if (pipActive && document.pictureInPictureElement) {
-      renderPipFrame(targetMode);
-      return;
-    }
+    // Check if native PiP is supported and enabled
+    const isSupported =
+      typeof document !== "undefined" &&
+      "pictureInPictureEnabled" in document &&
+      document.pictureInPictureEnabled;
 
-    if (typeof document === "undefined" || !("pictureInPictureEnabled" in document) || !document.pictureInPictureEnabled) {
-      alert("Picture-in-Picture is not supported or not enabled in this browser.");
+    if (!isSupported) {
+      setFloatingHudActive(true);
       return;
     }
 
@@ -352,11 +355,11 @@ export function CTUTacticalOpsTerminal() {
         video.playsInline = true;
         video.autoplay = true;
         video.style.position = "fixed";
-        video.style.top = "-9999px";
-        video.style.left = "-9999px";
-        video.style.width = "1px";
-        video.style.height = "1px";
-        video.style.opacity = "0";
+        video.style.bottom = "0";
+        video.style.right = "0";
+        video.style.width = "40px";
+        video.style.height = "25px";
+        video.style.opacity = "0.01";
         video.style.pointerEvents = "none";
         document.body.appendChild(video);
         pipVideoRef.current = video;
@@ -377,10 +380,9 @@ export function CTUTacticalOpsTerminal() {
         { once: true }
       );
     } catch (err) {
-      console.warn("[CTU] Failed to start Picture-in-Picture HUD:", err);
-      alert(
-        "Picture-in-Picture could not launch.\n\nOn Android: Go to phone Settings > Apps > Chrome (or CTU App) > Special app access > Picture-in-picture, and verify it is set to Allowed."
-      );
+      console.warn("[CTU] Native PiP restricted or blocked by OS. Engaging In-App Tactical HUD:", err);
+      // Fallback to in-app floating mini HUD for mobile devices
+      setFloatingHudActive(true);
     }
   };
 
@@ -455,7 +457,36 @@ export function CTUTacticalOpsTerminal() {
     setNotifPermission(res);
     if (res === "denied") {
       alert(
-        "Notification alerts are blocked.\n\nTo enable:\n1. Tap the lock/tune icon in the browser address bar.\n2. Tap 'Permissions' > 'Notifications' > 'Allow'.\n3. In Android Settings > Apps > Chrome/CTU > Notifications, ensure notifications are turned ON."
+        "Notification alerts are blocked in browser permissions.\n\nTo unblock on phone:\n1. Tap the lock/tune icon on the left of the address bar.\n2. Tap 'Permissions' > 'Reset permissions' (or set Notifications to 'Allow').\n3. Reload the page."
+      );
+    }
+  };
+
+  // Instant Phone Notification & Vibration Diagnostic
+  const handleTestPhoneAlert = async () => {
+    try {
+      CTUAudio.unlockAudio();
+      CTUAudio.playChirp();
+    } catch {}
+
+    if (typeof navigator !== "undefined" && "vibrate" in navigator) {
+      try {
+        navigator.vibrate([200, 100, 200, 100, 400]);
+      } catch {}
+    }
+
+    let perm = notifPermission;
+    if (perm !== "granted") {
+      perm = await requestNotificationPermission();
+      setNotifPermission(perm);
+    }
+
+    if (perm === "granted") {
+      await updateLockscreenHUD(
+        "CTU TACTICAL OPS // TEST ALERT",
+        "Phone notification channel verified active. Ticking countdowns armed.",
+        "test-diagnostic",
+        Date.now() + 60000
       );
     }
   };
@@ -670,310 +701,401 @@ export function CTUTacticalOpsTerminal() {
   };
 
   return (
-    <div className="min-h-screen bg-[#070a0e] text-[#ffcc00] font-mono select-none flex flex-col p-2 sm:p-4">
-      {/* Top Tactical Status Header Bar with Permission & PiP Controls */}
-      <header className="border-b border-[#ffcc00]/40 pb-2 mb-3 flex flex-wrap items-center justify-between gap-2">
+    <div className="min-h-screen bg-[#070a0e] text-[#ffcc00] font-mono select-none flex flex-col p-2 sm:p-4 pb-20 md:pb-4">
+      {/* Top Tactical Status Header Bar */}
+      <header className="border-b border-[#ffcc00]/40 pb-2 mb-2 flex flex-wrap items-center justify-between gap-1.5">
         <div className="flex items-center gap-2">
-          <span className="w-3 h-3 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_#10b981]" />
-          <span className="font-black text-sm tracking-widest text-[#ffcc00]">
-            CTU // LOS ANGELES FIELD OFFICE
+          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_#10b981]" />
+          <span className="font-black text-xs sm:text-sm tracking-widest text-[#ffcc00]">
+            CTU // LA OPS
           </span>
-          <span className="text-[10px] bg-[#ffcc00]/10 border border-[#ffcc00]/30 px-1.5 py-0.5 rounded text-[#ffcc00]/80">
+          <span className="text-[9px] bg-[#ffcc00]/10 border border-[#ffcc00]/30 px-1 py-0.5 rounded text-[#ffcc00]/80">
             DEFCON 2
           </span>
         </div>
 
-        {/* Dual Dedicated PiP, Alerts Permission, and Wake Lock Controls */}
-        <div className="flex flex-wrap items-center gap-2">
+        {/* Dual Dedicated PiP, Alerts Permission, Test Alert, and Wake Lock Controls */}
+        <div className="flex flex-wrap items-center gap-1.5">
           {/* Notification Permission Chip / Trigger */}
           {notifPermission === "granted" ? (
             <span
-              className="px-2 py-1 text-[11px] font-bold uppercase tracking-wider rounded border border-emerald-500 bg-emerald-950/40 text-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.3)]"
+              className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded border border-emerald-500 bg-emerald-950/40 text-emerald-400"
               title="Phone notification alerts granted"
             >
-              [ALERTS: ACTIVE]
+              ALERTS: ON
             </span>
           ) : notifPermission === "denied" ? (
             <button
               onClick={handleRequestNotifPermission}
-              className="px-2 py-1 text-[11px] font-bold uppercase tracking-wider rounded border border-red-500 bg-red-950/60 text-red-300 hover:bg-red-900/80 shadow-[0_0_8px_rgba(239,68,68,0.5)]"
+              className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded border border-red-500 bg-red-950/60 text-red-300"
               title="Notifications are blocked in your phone settings. Click for instructions."
             >
-              [ALERTS: BLOCKED IN SETTINGS]
+              ALERTS: BLOCKED
             </button>
           ) : (
             <button
               onClick={handleRequestNotifPermission}
-              className="px-2 py-1 text-[11px] font-black uppercase tracking-wider rounded border border-amber-400 bg-amber-500/20 text-amber-300 hover:bg-amber-500/40 animate-pulse shadow-[0_0_10px_rgba(245,158,11,0.5)]"
+              className="px-2 py-0.5 text-[10px] font-black uppercase tracking-wider rounded border border-amber-400 bg-amber-500/20 text-amber-300 animate-pulse shadow-[0_0_8px_rgba(245,158,11,0.5)]"
               title="Click to grant permission for phone notifications & background alarms"
             >
-              [ALERTS: ENABLE PERMISSION]
+              ALLOW ALERTS
             </button>
           )}
 
-          {/* Picture-in-Picture Controls */}
+          {/* Test Alert Diagnostic Button */}
+          <button
+            onClick={handleTestPhoneAlert}
+            className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded border border-blue-500/60 hover:bg-blue-500/20 text-blue-300"
+            title="Fire an instant test alert and vibration"
+          >
+            TEST ALERT
+          </button>
+
+          {/* PiP Controls */}
           <button
             onClick={() => openPipHud("TIMERS")}
-            className={`px-2.5 py-1 text-xs font-bold uppercase tracking-wider rounded border transition-colors ${
-              pipActive && pipMode === "TIMERS"
-                ? "bg-[#ffcc00] text-black border-[#ffcc00] shadow-[0_0_10px_#ffcc00]"
+            className={`px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded border transition-colors ${
+              (pipActive && pipMode === "TIMERS") || (floatingHudActive && floatingHudMode === "TIMERS")
+                ? "bg-[#ffcc00] text-black border-[#ffcc00] shadow-[0_0_8px_#ffcc00]"
                 : "border-[#ffcc00]/40 hover:bg-[#ffcc00]/20 text-[#ffcc00]"
             }`}
-            title="Launch or switch Picture-in-Picture display to all active timers"
+            title="Launch Picture-in-Picture display to all active timers"
           >
-            [PIP TIMERS]
+            PIP TIMERS
           </button>
 
           <button
             onClick={() => openPipHud("ALARMS")}
-            className={`px-2.5 py-1 text-xs font-bold uppercase tracking-wider rounded border transition-colors ${
-              pipActive && pipMode === "ALARMS"
-                ? "bg-sky-400 text-black border-sky-400 shadow-[0_0_10px_#38bdf8]"
+            className={`px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded border transition-colors ${
+              (pipActive && pipMode === "ALARMS") || (floatingHudActive && floatingHudMode === "ALARMS")
+                ? "bg-sky-400 text-black border-sky-400 shadow-[0_0_8px_#38bdf8]"
                 : "border-sky-400/40 hover:bg-sky-400/20 text-sky-400"
             }`}
-            title="Launch or switch Picture-in-Picture display to all active alarms"
+            title="Launch Picture-in-Picture display to all active alarms"
           >
-            [PIP ALARMS]
+            PIP ALARMS
           </button>
 
           {/* Wake Lock Control */}
           <button
             onClick={toggleWakeLock}
-            className={`px-2 py-1 text-[11px] font-bold uppercase tracking-wider rounded border transition-colors ${
+            className={`px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded border transition-colors ${
               wakeLockActive
-                ? "bg-emerald-600/80 text-white border-emerald-500 shadow-[0_0_10px_#10b981]"
-                : "border-gray-600 text-gray-400 hover:text-white"
+                ? "bg-emerald-600/80 text-white border-emerald-500"
+                : "border-gray-700 text-gray-400"
             }`}
           >
-            {wakeLockActive ? "WAKE: ENGAGED" : "WAKE: IDLE"}
+            {wakeLockActive ? "WAKE" : "WAKE OFF"}
           </button>
         </div>
       </header>
 
       {/* Ringing Alert Notification Banner */}
       {ringingAlert && (
-        <div className="mb-4 bg-red-950/90 border-2 border-red-500 text-red-100 p-3 rounded flex items-center justify-between shadow-[0_0_25px_rgba(239,68,68,0.7)] animate-bounce">
-          <div className="flex items-center gap-3">
-            <span className="text-xl">⚠️</span>
+        <div className="mb-3 bg-red-950/90 border-2 border-red-500 text-red-100 p-2.5 rounded flex items-center justify-between shadow-[0_0_25px_rgba(239,68,68,0.7)] animate-bounce">
+          <div className="flex items-center gap-2">
+            <span className="text-lg">⚠️</span>
             <div>
-              <div className="font-black text-sm uppercase tracking-widest text-red-300">
-                CRITICAL ZERO EVENT // {ringingAlert.label}
+              <div className="font-black text-xs uppercase tracking-widest text-red-300">
+                ZERO EVENT // {ringingAlert.label}
               </div>
-              <div className="text-xs text-red-200">
-                Audio payload playing. Silence to clear emergency status.
+              <div className="text-[10px] text-red-200">
+                Audio playing. Silence to clear emergency.
               </div>
             </div>
           </div>
           <button
             onClick={silenceActiveRinging}
-            className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white font-black text-xs uppercase tracking-widest rounded border border-white/50"
+            className="px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white font-black text-xs uppercase tracking-widest rounded border border-white/50"
           >
-            SILENCE ALARM
+            SILENCE
           </button>
         </div>
       )}
 
-      {/* Synchronized Twin Clocks */}
-      <section className="grid grid-cols-2 gap-2 sm:gap-4 mb-4">
-        <div className="border border-[#ffcc00]/40 bg-[#090d16] p-3 rounded">
-          <div className="text-[10px] text-gray-400 tracking-wider">LOCAL TIME // BANGKOK (ICT)</div>
-          <div className="text-2xl sm:text-4xl font-black text-[#ffcc00] tracking-widest">
+      {/* In-App Floating Tactical Mini-HUD (Mobile PiP Fallback) */}
+      {floatingHudActive && (
+        <div className="mb-3 border-2 border-[#ffcc00] bg-[#0c111c] rounded p-2 shadow-[0_0_15px_rgba(255,204,0,0.3)] flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-[#ffcc00] animate-ping" />
+            <div className="text-xs font-bold text-[#ffcc00]">
+              FLOATING HUD // {floatingHudMode}:{" "}
+              {floatingHudMode === "TIMERS"
+                ? formatHMS(activeTimer.remainingSec)
+                : `${alarms.filter((a) => a.enabled).length} ARMED`}
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => setFloatingHudMode((m) => (m === "TIMERS" ? "ALARMS" : "TIMERS"))}
+              className="px-2 py-0.5 text-[10px] border border-[#ffcc00]/40 rounded hover:bg-[#ffcc00]/20"
+            >
+              SWITCH
+            </button>
+            <button
+              onClick={() => setFloatingHudActive(false)}
+              className="px-2 py-0.5 text-[10px] border border-red-500/50 text-red-400 rounded hover:bg-red-500/20"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Synchronized High-Density Twin Clocks */}
+      <section className="grid grid-cols-2 gap-2 mb-3">
+        <div className="border border-[#ffcc00]/40 bg-[#090d16] p-2 rounded">
+          <div className="text-[9px] text-gray-400 tracking-wider">LOCAL TIME // BANGKOK</div>
+          <div className="text-xl sm:text-3xl font-black text-[#ffcc00] tracking-widest">
             {colonVisible ? bangkokTime : bangkokTime.replace(/:/g, " ")}
           </div>
         </div>
 
-        <div className="border border-[#ffcc00]/40 bg-[#090d16] p-3 rounded">
-          <div className="text-[10px] text-gray-400 tracking-wider">MISSION TIME // ZULU (UTC)</div>
-          <div className="text-2xl sm:text-4xl font-black text-sky-400 tracking-widest">
+        <div className="border border-[#ffcc00]/40 bg-[#090d16] p-2 rounded">
+          <div className="text-[9px] text-gray-400 tracking-wider">MISSION TIME // ZULU</div>
+          <div className="text-xl sm:text-3xl font-black text-sky-400 tracking-widest">
             {colonVisible ? zuluTime : zuluTime.replace(/:/g, " ")}
           </div>
         </div>
       </section>
 
-      {/* Primary Focus Timer Showcase */}
-      <section className="border-2 border-[#ffcc00] bg-[#090d16] p-4 rounded mb-4 shadow-[0_0_20px_rgba(255,204,0,0.2)]">
-        <div className="flex items-center justify-between text-xs font-bold uppercase tracking-widest border-b border-[#ffcc00]/30 pb-2 mb-3">
-          <span className="text-[#ffcc00]">
-            PRIMARY FOCUS: {activeTimer.label} [{activeTimer.status}]
-          </span>
-          <span className="text-gray-400">DURATION: {formatHMS(activeTimer.durationSec)}</span>
-        </div>
-
-        <div className="text-center py-4">
-          <div className="text-5xl sm:text-7xl font-black tracking-widest text-[#ffcc00]">
-            {formatHMS(activeTimer.remainingSec)}
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
-          {activeTimer.status !== "RUNNING" ? (
-            <button
-              onClick={() => handleExecuteTimer(activeTimer.id)}
-              className="px-6 py-2 bg-[#ffcc00] text-black font-black uppercase text-xs sm:text-sm tracking-widest rounded hover:bg-[#ffd633]"
-            >
-              EXECUTE TIMER
-            </button>
-          ) : (
-            <button
-              onClick={() => handlePauseTimer(activeTimer.id)}
-              className="px-6 py-2 bg-amber-600 text-black font-black uppercase text-xs sm:text-sm tracking-widest rounded hover:bg-amber-500"
-            >
-              HOLD / PAUSE
-            </button>
-          )}
-
-          <button
-            onClick={() => handleStopAndResetTimer(activeTimer.id)}
-            className="px-4 py-2 border border-red-500/70 text-red-400 font-bold uppercase text-xs tracking-widest rounded hover:bg-red-500/20"
-          >
-            STOP / RESET
-          </button>
-
-          <button
-            onClick={() => handleOpenPickerForTimer(activeTimer.id)}
-            className="px-4 py-2 border border-[#ffcc00]/60 text-[#ffcc00] font-bold uppercase text-xs tracking-widest rounded hover:bg-[#ffcc00]/20"
-          >
-            EDIT DURATION
-          </button>
-
-          <button
-            onClick={() =>
-              syncWithNativePhoneClock("timer", {
-                durationSec: activeTimer.durationSec,
-                label: activeTimer.label,
-              })
-            }
-            className="px-3 py-2 border border-blue-500/50 text-blue-400 font-bold uppercase text-xs tracking-widest rounded hover:bg-blue-500/20"
-          >
-            SAMSUNG PHONE SYNC
-          </button>
-        </div>
-      </section>
-
-      {/* Split Surveillance Tactical Grid: Active Timers & Alarms Queues */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1">
-        {/* Left Column: Mission Timers Queue */}
-        <div className="border border-[#ffcc00]/40 bg-[#090d16] p-3 rounded flex flex-col">
-          <div className="flex items-center justify-between text-xs font-bold text-[#ffcc00] uppercase tracking-wider pb-2 border-b border-[#ffcc00]/20 mb-3">
-            <span>TACTICAL TIMERS QUEUE ({timers.length})</span>
-            <span className="text-[10px] text-gray-400">SELECT TO FOCUS</span>
+      {/* Main Content Area: Responsive Mobile-Tabbed Layout */}
+      <div className="flex-1 flex flex-col gap-3">
+        {/* View 1: Primary Mission Focus Showcase (Always active on desktop, tabbed on mobile) */}
+        <section
+          className={`border-2 border-[#ffcc00] bg-[#090d16] p-3 sm:p-4 rounded shadow-[0_0_15px_rgba(255,204,0,0.15)] ${
+            mobileTab === "FOCUS" ? "block" : "hidden md:block"
+          }`}
+        >
+          <div className="flex items-center justify-between text-xs font-bold uppercase tracking-widest border-b border-[#ffcc00]/30 pb-2 mb-2">
+            <span className="text-[#ffcc00]">
+              FOCUS: {activeTimer.label} [{activeTimer.status}]
+            </span>
+            <span className="text-gray-400 text-[10px]">PRESET: {formatHMS(activeTimer.durationSec)}</span>
           </div>
 
-          <div className="space-y-2 flex-1 overflow-y-auto max-h-[360px] pr-1">
-            {timers.map((t) => {
-              const isFocused = t.id === focusedTimerId;
-              const isRunning = t.status === "RUNNING";
+          <div className="text-center py-2 sm:py-4">
+            <div className="text-5xl sm:text-7xl font-black tracking-widest text-[#ffcc00]">
+              {formatHMS(activeTimer.remainingSec)}
+            </div>
+          </div>
 
-              return (
-                <div
-                  key={t.id}
-                  onClick={() => setFocusedTimerId(t.id)}
-                  className={`p-2.5 rounded border cursor-pointer transition-all flex items-center justify-between ${
-                    isFocused
-                      ? "border-[#ffcc00] bg-[#ffcc00]/10 shadow-[0_0_10px_rgba(255,204,0,0.2)]"
-                      : "border-gray-800 bg-[#0c111c] hover:border-gray-600"
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`w-2 h-2 rounded-full ${
-                        isRunning ? "bg-emerald-400 animate-ping" : "bg-gray-600"
-                      }`}
-                    />
+          <div className="flex flex-wrap items-center justify-center gap-1.5 pt-2">
+            {activeTimer.status !== "RUNNING" ? (
+              <button
+                onClick={() => handleExecuteTimer(activeTimer.id)}
+                className="flex-1 sm:flex-none px-5 py-2.5 bg-[#ffcc00] text-black font-black uppercase text-xs sm:text-sm tracking-widest rounded hover:bg-[#ffd633] active:scale-95 transition"
+              >
+                EXECUTE TIMER
+              </button>
+            ) : (
+              <button
+                onClick={() => handlePauseTimer(activeTimer.id)}
+                className="flex-1 sm:flex-none px-5 py-2.5 bg-amber-600 text-black font-black uppercase text-xs sm:text-sm tracking-widest rounded hover:bg-amber-500 active:scale-95 transition"
+              >
+                HOLD / PAUSE
+              </button>
+            )}
+
+            <button
+              onClick={() => handleStopAndResetTimer(activeTimer.id)}
+              className="px-3.5 py-2 border border-red-500/70 text-red-400 font-bold uppercase text-xs tracking-widest rounded hover:bg-red-500/20"
+            >
+              STOP / RESET
+            </button>
+
+            <button
+              onClick={() => handleOpenPickerForTimer(activeTimer.id)}
+              className="px-3.5 py-2 border border-[#ffcc00]/60 text-[#ffcc00] font-bold uppercase text-xs tracking-widest rounded hover:bg-[#ffcc00]/20"
+            >
+              EDIT
+            </button>
+
+            <button
+              onClick={() =>
+                syncWithNativePhoneClock("timer", {
+                  durationSec: activeTimer.durationSec,
+                  label: activeTimer.label,
+                })
+              }
+              className="w-full sm:w-auto px-3.5 py-2 border border-blue-500/50 text-blue-300 font-bold uppercase text-xs tracking-widest rounded hover:bg-blue-500/20 text-center"
+            >
+              SAMSUNG PHONE SYNC
+            </button>
+          </div>
+        </section>
+
+        {/* Split Surveillance Tactical Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 flex-1">
+          {/* Left Column: Mission Timers Queue */}
+          <div
+            className={`border border-[#ffcc00]/40 bg-[#090d16] p-2.5 rounded flex flex-col ${
+              mobileTab === "TIMERS" ? "block" : "hidden md:flex"
+            }`}
+          >
+            <div className="flex items-center justify-between text-xs font-bold text-[#ffcc00] uppercase tracking-wider pb-1.5 border-b border-[#ffcc00]/20 mb-2">
+              <span>TACTICAL TIMERS QUEUE ({timers.length})</span>
+              <span className="text-[10px] text-gray-400">TAP TO FOCUS</span>
+            </div>
+
+            <div className="space-y-1.5 flex-1 overflow-y-auto max-h-[380px] pr-1">
+              {timers.map((t) => {
+                const isFocused = t.id === focusedTimerId;
+                const isRunning = t.status === "RUNNING";
+
+                return (
+                  <div
+                    key={t.id}
+                    onClick={() => {
+                      setFocusedTimerId(t.id);
+                      setMobileTab("FOCUS");
+                    }}
+                    className={`p-2 rounded border cursor-pointer transition-all flex items-center justify-between ${
+                      isFocused
+                        ? "border-[#ffcc00] bg-[#ffcc00]/10 shadow-[0_0_8px_rgba(255,204,0,0.2)]"
+                        : "border-gray-800 bg-[#0c111c] hover:border-gray-600"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`w-2 h-2 rounded-full ${
+                          isRunning ? "bg-emerald-400 animate-ping" : "bg-gray-600"
+                        }`}
+                      />
+                      <div>
+                        <div className="font-bold text-xs text-[#ffcc00]">{t.label}</div>
+                        <div className="text-[9px] text-gray-400">Preset: {formatHMS(t.durationSec)}</div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <div className="text-right">
+                        <div className="text-xs sm:text-sm font-black text-[#ffcc00] tracking-wider">
+                          {formatHMS(t.remainingSec)}
+                        </div>
+                        <div className="text-[8px] text-gray-400 uppercase">[{t.status}]</div>
+                      </div>
+
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleOpenPickerForTimer(t.id);
+                        }}
+                        className="px-2 py-1 text-[10px] border border-gray-600 text-gray-300 hover:text-white rounded"
+                      >
+                        EDIT
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Right Column: Armed Alarms Queue */}
+          <div
+            className={`border border-sky-400/40 bg-[#090d16] p-2.5 rounded flex flex-col ${
+              mobileTab === "ALARMS" ? "block" : "hidden md:flex"
+            }`}
+          >
+            <div className="flex items-center justify-between text-xs font-bold text-sky-400 uppercase tracking-wider pb-1.5 border-b border-sky-400/20 mb-2">
+              <span>ARMED ALARMS QUEUE ({alarms.length})</span>
+              <span className="text-[10px] text-gray-400">RECURRING SCHEDULE</span>
+            </div>
+
+            <div className="space-y-1.5 flex-1 overflow-y-auto max-h-[380px] pr-1">
+              {alarms.map((a) => {
+                const nextEpoch = getNextAlarmEpochMs(a.timeStr, a.days);
+                const deltaSec =
+                  isClientHydrated && nextEpoch ? Math.max(0, Math.floor((nextEpoch - Date.now()) / 1000)) : null;
+
+                return (
+                  <div
+                    key={a.id}
+                    className={`p-2 rounded border transition-all flex items-center justify-between ${
+                      a.enabled
+                        ? "border-sky-500/60 bg-sky-950/20"
+                        : "border-gray-800 bg-[#0c111c] opacity-60"
+                    }`}
+                  >
                     <div>
-                      <div className="font-bold text-xs text-[#ffcc00]">{t.label}</div>
-                      <div className="text-[10px] text-gray-400">
-                        Preset: {formatHMS(t.durationSec)}
+                      <div className="font-bold text-xs text-sky-300">{a.label}</div>
+                      <div className="text-[9px] text-gray-400">
+                        Days: {a.days.map((d) => ["SU", "MO", "TU", "WE", "TH", "FR", "SA"][d]).join(" ")}
                       </div>
                     </div>
-                  </div>
 
-                  <div className="flex items-center gap-2">
-                    <div className="text-right">
-                      <div className="text-sm font-black text-[#ffcc00] tracking-wider">
-                        {formatHMS(t.remainingSec)}
+                    <div className="flex items-center gap-2">
+                      <div className="text-right">
+                        <div className="text-xs sm:text-sm font-black text-sky-400 tracking-wider">
+                          {a.timeStr}
+                        </div>
+                        {deltaSec !== null && a.enabled && (
+                          <div className="text-[8px] text-gray-400">IN {formatHMS(deltaSec)}</div>
+                        )}
                       </div>
-                      <div className="text-[9px] text-gray-400 uppercase">[{t.status}]</div>
-                    </div>
 
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleOpenPickerForTimer(t.id);
-                      }}
-                      className="px-2 py-1 text-[10px] border border-gray-600 text-gray-300 hover:text-white rounded"
-                    >
-                      EDIT
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
+                      <button
+                        onClick={() => toggleAlarmEnabled(a.id)}
+                        className={`px-2 py-1 text-[10px] font-bold uppercase rounded border ${
+                          a.enabled
+                            ? "bg-sky-500 text-black border-sky-400"
+                            : "border-gray-700 text-gray-500"
+                        }`}
+                      >
+                        {a.enabled ? "ARMED" : "OFF"}
+                      </button>
 
-        {/* Right Column: Armed Alarms Queue */}
-        <div className="border border-sky-400/40 bg-[#090d16] p-3 rounded flex flex-col">
-          <div className="flex items-center justify-between text-xs font-bold text-sky-400 uppercase tracking-wider pb-2 border-b border-sky-400/20 mb-3">
-            <span>ARMED ALARMS QUEUE ({alarms.length})</span>
-            <span className="text-[10px] text-gray-400">RECURRING SCHEDULE</span>
-          </div>
-
-          <div className="space-y-2 flex-1 overflow-y-auto max-h-[360px] pr-1">
-            {alarms.map((a) => {
-              const nextEpoch = getNextAlarmEpochMs(a.timeStr, a.days);
-              const deltaSec = isClientHydrated && nextEpoch ? Math.max(0, Math.floor((nextEpoch - Date.now()) / 1000)) : null;
-
-              return (
-                <div
-                  key={a.id}
-                  className={`p-2.5 rounded border transition-all flex items-center justify-between ${
-                    a.enabled
-                      ? "border-sky-500/60 bg-sky-950/20"
-                      : "border-gray-800 bg-[#0c111c] opacity-60"
-                  }`}
-                >
-                  <div>
-                    <div className="font-bold text-xs text-sky-300">{a.label}</div>
-                    <div className="text-[10px] text-gray-400">
-                      Days: {a.days.map((d) => ["SU", "MO", "TU", "WE", "TH", "FR", "SA"][d]).join(" ")}
+                      <button
+                        onClick={() => handleOpenPickerForAlarm(a.id)}
+                        className="px-2 py-1 text-[10px] border border-gray-600 text-gray-300 hover:text-white rounded"
+                      >
+                        EDIT
+                      </button>
                     </div>
                   </div>
-
-                  <div className="flex items-center gap-2">
-                    <div className="text-right">
-                      <div className="text-sm font-black text-sky-400 tracking-wider">
-                        {a.timeStr}
-                      </div>
-                      {deltaSec !== null && a.enabled && (
-                        <div className="text-[9px] text-gray-400">IN {formatHMS(deltaSec)}</div>
-                      )}
-                    </div>
-
-                    <button
-                      onClick={() => toggleAlarmEnabled(a.id)}
-                      className={`px-2 py-1 text-[10px] font-bold uppercase rounded border ${
-                        a.enabled
-                          ? "bg-sky-500 text-black border-sky-400"
-                          : "border-gray-700 text-gray-500"
-                      }`}
-                    >
-                      {a.enabled ? "ARMED" : "OFF"}
-                    </button>
-
-                    <button
-                      onClick={() => handleOpenPickerForAlarm(a.id)}
-                      className="px-2 py-1 text-[10px] border border-gray-600 text-gray-300 hover:text-white rounded"
-                    >
-                      EDIT
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
         </div>
       </div>
+
+      {/* Mobile-Only Bottom Tactical Navigation Bar */}
+      <nav className="md:hidden fixed bottom-0 inset-x-0 bg-[#070a0e]/95 backdrop-blur-md border-t border-[#ffcc00]/40 p-2 flex items-center justify-around z-40">
+        <button
+          onClick={() => setMobileTab("FOCUS")}
+          className={`px-3 py-1.5 rounded text-xs font-black uppercase tracking-wider transition ${
+            mobileTab === "FOCUS"
+              ? "bg-[#ffcc00] text-black shadow-[0_0_10px_#ffcc00]"
+              : "text-[#ffcc00]/70 hover:text-[#ffcc00]"
+          }`}
+        >
+          FOCUS
+        </button>
+
+        <button
+          onClick={() => setMobileTab("TIMERS")}
+          className={`px-3 py-1.5 rounded text-xs font-black uppercase tracking-wider transition ${
+            mobileTab === "TIMERS"
+              ? "bg-[#ffcc00] text-black shadow-[0_0_10px_#ffcc00]"
+              : "text-[#ffcc00]/70 hover:text-[#ffcc00]"
+          }`}
+        >
+          TIMERS ({timers.length})
+        </button>
+
+        <button
+          onClick={() => setMobileTab("ALARMS")}
+          className={`px-3 py-1.5 rounded text-xs font-black uppercase tracking-wider transition ${
+            mobileTab === "ALARMS"
+              ? "bg-sky-400 text-black shadow-[0_0_10px_#38bdf8]"
+              : "text-sky-400/70 hover:text-sky-400"
+          }`}
+        >
+          ALARMS ({alarms.length})
+        </button>
+      </nav>
 
       {/* Samsung Time Picker Modal */}
       {pickerOpen && (
@@ -995,7 +1117,7 @@ export function CTUTacticalOpsTerminal() {
           <div className="text-red-500 font-black text-xl sm:text-2xl uppercase tracking-widest mb-2">
             ⚠️ T-MINUS EMERGENCY TAKEOVER ⚠️
           </div>
-          <div className="text-gray-300 text-xs sm:text-sm uppercase tracking-wider mb-8">
+          <div className="text-gray-300 text-xs sm:text-sm uppercase tracking-wider mb-8 text-center">
             MISSION EVENT IMMINENT // {takeoverSourceLabel}
           </div>
 
