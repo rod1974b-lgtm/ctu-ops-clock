@@ -82,6 +82,31 @@ export async function postToWorker(msg: unknown): Promise<void> {
   }
 }
 
+// Notification Permission Helpers for Phones and Browsers
+export function getNotificationPermissionStatus(): NotificationPermission | "unsupported" {
+  if (typeof window === "undefined" || !("Notification" in window)) {
+    return "unsupported";
+  }
+  return Notification.permission;
+}
+
+export async function requestNotificationPermission(): Promise<NotificationPermission> {
+  if (typeof window === "undefined" || !("Notification" in window)) {
+    return "denied";
+  }
+
+  try {
+    const permission = await Notification.requestPermission();
+    if (permission === "granted") {
+      await enableWebPushSubscription().catch(() => {});
+    }
+    return permission;
+  } catch (err) {
+    console.warn("[CTU] Failed to request notification permission:", err);
+    return "denied";
+  }
+}
+
 // Live Status Bar / Notification Shade HUD updates
 export async function updateLockscreenHUD(
   title: string,
