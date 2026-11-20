@@ -1,4 +1,4 @@
-// src/routes/index.tsx — FULL DROP-IN REPLACEMENT FILE (STABLE CLOCKS & BALANCED FOCUS TIMER)
+// src/routes/index.tsx — FULL DROP-IN REPLACEMENT FILE (MEDIAN APK & ONESIGNAL OS ALERTS)
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { SamsungTimePicker, type SamsungTimePickerValues } from "@/components/samsung-time-picker";
@@ -13,6 +13,13 @@ import {
   getNotificationPermissionStatus,
   requestNotificationPermission,
 } from "@/lib/background-alerts";
+import {
+  isMedianApp,
+  requestMedianOneSignalPermission,
+  isMedianAlertsArmed,
+  setMedianAlertsArmed,
+  sendMedianTestAlert,
+} from "@/lib/median-bridge";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -102,6 +109,10 @@ export function CTUTacticalOpsTerminal() {
   const [colonVisible, setColonVisible] = useState<boolean>(true);
   const [isClientHydrated, setIsClientHydrated] = useState<boolean>(false);
 
+  // Runtime Environment Detection
+  const [inMedian, setInMedian] = useState<boolean>(false);
+  const [medianArmed, setMedianArmed] = useState<boolean>(false);
+
   // Mobile View Navigation Tab State ("FOCUS" | "TIMERS" | "ALARMS")
   const [mobileTab, setMobileTab] = useState<"FOCUS" | "TIMERS" | "ALARMS">("FOCUS");
 
@@ -110,10 +121,10 @@ export function CTUTacticalOpsTerminal() {
   const [alarms, setAlarms] = useState<AlarmItem[]>(INITIAL_ALARMS);
   const [focusedTimerId, setFocusedTimerId] = useState<string>("timer-1");
 
-  // Phone Notification Permission State
+  // Phone Notification Permission State (Browser)
   const [notifPermission, setNotifPermission] = useState<NotificationPermission | "unsupported">("default");
 
-  // CTU Operational Clearance Popup State (First launch / Install modal)
+  // CTU Operational Clearance Popup State
   const [clearanceOpen, setClearanceOpen] = useState<boolean>(false);
   const [clearanceDone, setClearanceDone] = useState<boolean>(false);
   const [audioUnlocked, setAudioUnlocked] = useState<boolean>(false);
@@ -154,12 +165,19 @@ export function CTUTacticalOpsTerminal() {
   const alarmsRef = useRef(alarms);
   alarmsRef.current = alarms;
 
-  // Clock Update, Client Init & First-Launch Check
+  // Clock Update, Client Init & Median Detection
   useEffect(() => {
     setIsClientHydrated(true);
     initBackgroundAlerts().catch(() => {});
-    const currentPerm = getNotificationPermissionStatus();
-    setNotifPermission(currentPerm);
+
+    // Detect if running inside Median APK
+    const detectedMedian = isMedianApp();
+    setInMedian(detectedMedian);
+    if (detectedMedian) {
+      setMedianArmed(isMedianAlertsArmed());
+    } else {
+      setNotifPermission(getNotificationPermissionStatus());
+    }
 
     try {
       const savedClearance = localStorage.getItem("ctu_clearance_completed_v1");
@@ -196,7 +214,7 @@ export function CTUTacticalOpsTerminal() {
     return () => clearInterval(clockInterval);
   }, []);
 
-  // Tactical Offscreen Canvas PiP HUD Renderer (EXTRA LARGE FONTS & CHRONOLOGICAL SORTING)
+  // Tactical Offscreen Canvas PiP HUD Renderer
   const renderPipFrame = useCallback(
     (mode: "TIMERS" | "ALARMS") => {
       const canvas = pipCanvasRef.current;
@@ -207,16 +225,13 @@ export function CTUTacticalOpsTerminal() {
       const width = canvas.width;
       const height = canvas.height;
 
-      // Terminal dark background
       ctx.fillStyle = "#070a0e";
       ctx.fillRect(0, 0, width, height);
 
-      // Outer crisis/watch border outline
       ctx.lineWidth = 6;
       ctx.strokeStyle = takeoverOpen || ringingAlert ? "#ff1a1a" : "#ffcc00";
       ctx.strokeRect(3, 3, width - 6, height - 6);
 
-      // Header Bar (XXL: 18px / 15px)
       ctx.fillStyle = takeoverOpen || ringingAlert ? "#ff1a1a" : "#ffcc00";
       ctx.font = "bold 18px 'Courier New', monospace";
       ctx.fillText(
@@ -229,7 +244,6 @@ export function CTUTacticalOpsTerminal() {
       ctx.font = "bold 15px 'Courier New', monospace";
       ctx.fillText(`BKK ${bangkokTime}`, width - 145, 32);
 
-      // Dividing separator
       ctx.strokeStyle = "rgba(255, 204, 0, 0.4)";
       ctx.lineWidth = 2;
       ctx.beginPath();
@@ -328,7 +342,7 @@ export function CTUTacticalOpsTerminal() {
     return () => clearInterval(interval);
   }, [pipActive, pipMode, renderPipFrame]);
 
-  // Open PiP with Android Chrome Gesture Preservation & Visible Surface Initialization
+  // Open PiP with Android Chrome Gesture Preservation
   const openPipHud = async (targetMode: "TIMERS" | "ALARMS") => {
     setPipMode(targetMode);
     setFloatingHudMode(targetMode);
@@ -467,14 +481,28 @@ export function CTUTacticalOpsTerminal() {
     return () => clearInterval(interval);
   }, [takeoverOpen, ringingAlert]);
 
-  // Request Notification Permissions from Phone / Browser
-  const handleRequestNotifPermission = async () => {
-    const res = await requestNotificationPermission();
-    setNotifPermission(res);
-    if (res === "denied") {
-      alert(
-        "Notification alerts are blocked in browser permissions.\n\nTo unblock on phone:\n1. Tap the lock/tune icon on the left of the address bar.\n2. Tap 'Permissions' > 'Reset permissions' (or set Notifications to 'Allow').\n3. Reload the page."
-      );
+  // Request Notification Permissions from Phone / Browser OR Median OneSignal Bridge
+  const handleRequestAlertPermission = async () => {
+    if (inMedian) {
+      // In Median APK: Trigger OneSignal Native Android System Popup
+      const granted = await requestMedianOneSignalPermission();
+      if (granted) {
+        setMedianArmed(true);
+        setMedianAlertsArmed(true);
+      } else {
+        alert(
+          "Notification alerts are blocked.\n\nTo unblock in the app:\n1. Long-press the CTU app icon on your Home Screen > App info > Notifications > Allow.\n2. Also set App info > Battery > Unrestricted.\n3. Reopen the app and tap LINK OS ALERTS again.\n\nThere is no lock icon / address bar in the app version."
+        );
+      }
+    } else {
+      // In Standard Browser (Chrome, etc.): Call Web Notification API
+      const res = await requestNotificationPermission();
+      setNotifPermission(res);
+      if (res === "denied") {
+        alert(
+          "Notification alerts are blocked in browser permissions.\n\nTo unblock on phone:\n1. Tap the lock/tune icon on the left of the address bar.\n2. Tap 'Permissions' > 'Reset permissions' (or set Notifications to 'Allow').\n3. Reload the page."
+        );
+      }
     }
   };
 
@@ -486,6 +514,18 @@ export function CTUTacticalOpsTerminal() {
       setAudioUnlocked(true);
     } catch {}
 
+    if (inMedian) {
+      // Median native test alert & hardware vibration
+      await sendMedianTestAlert(
+        "CTU TACTICAL OPS // TEST ALERT",
+        "Median APK notification channel armed. Ticking countdowns verified."
+      );
+      setMedianArmed(true);
+      setMedianAlertsArmed(true);
+      return;
+    }
+
+    // Standard Browser path
     if (typeof navigator !== "undefined" && "vibrate" in navigator) {
       try {
         navigator.vibrate([200, 100, 200, 100, 400]);
@@ -536,9 +576,16 @@ export function CTUTacticalOpsTerminal() {
       setAudioUnlocked(true);
     } catch {}
 
-    if (notifPermission === "default") {
+    if (!inMedian && notifPermission === "default") {
       const res = await requestNotificationPermission();
       setNotifPermission(res);
+    } else if (inMedian && !medianArmed) {
+      requestMedianOneSignalPermission().then((granted) => {
+        if (granted) {
+          setMedianArmed(true);
+          setMedianAlertsArmed(true);
+        }
+      });
     }
 
     setTimers((prev) =>
@@ -728,7 +775,6 @@ export function CTUTacticalOpsTerminal() {
     setTakeoverOpen(false);
   };
 
-  // Helper to render non-wrapping, jitter-free digital clocks
   const renderDigitalClock = (timeStr: string, colorClass: string) => {
     const parts = timeStr.split(":");
     const h = parts[0] || "00";
@@ -765,7 +811,7 @@ export function CTUTacticalOpsTerminal() {
             CTU // LA OPS
           </span>
           <span className="text-[9px] bg-[#ffcc00]/10 border border-[#ffcc00]/30 px-1 py-0.5 rounded text-[#ffcc00]/80">
-            DEFCON 2
+            {inMedian ? "MEDIAN APK" : "DEFCON 2"}
           </span>
 
           {/* Operational Clearance Modal Launcher */}
@@ -776,7 +822,7 @@ export function CTUTacticalOpsTerminal() {
                 ? "border-emerald-500/60 bg-emerald-950/40 text-emerald-300 hover:bg-emerald-950/80"
                 : "border-amber-400 bg-amber-500/30 text-amber-300 animate-pulse hover:bg-amber-500/50"
             }`}
-            title="Open CTU Operational Clearance & Samsung PiP / Permission Diagnostics"
+            title="Open CTU Operational Clearance & Permissions Diagnostic"
           >
             {clearanceDone ? "CLEARANCE: OK" : "CLEARANCE: SETUP"}
           </button>
@@ -784,25 +830,42 @@ export function CTUTacticalOpsTerminal() {
 
         {/* Dual Dedicated PiP, Alerts Permission, Test Alert, and Wake Lock Controls */}
         <div className="flex flex-wrap items-center gap-1.5">
-          {/* Notification Permission Chip / Trigger */}
-          {notifPermission === "granted" ? (
+          {/* OS Notification Alert Status Button */}
+          {inMedian ? (
+            medianArmed ? (
+              <span
+                className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded border border-emerald-500 bg-emerald-950/40 text-emerald-400"
+                title="Median OneSignal native Android alerts armed"
+              >
+                OS ALERTS: ARMED
+              </span>
+            ) : (
+              <button
+                onClick={handleRequestAlertPermission}
+                className="px-2 py-0.5 text-[10px] font-black uppercase tracking-wider rounded border border-amber-400 bg-amber-500/20 text-amber-300 animate-pulse shadow-[0_0_8px_rgba(245,158,11,0.5)]"
+                title="Tap to trigger Android native OneSignal notification permissions"
+              >
+                LINK OS ALERTS
+              </button>
+            )
+          ) : notifPermission === "granted" ? (
             <span
               className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded border border-emerald-500 bg-emerald-950/40 text-emerald-400"
-              title="Phone notification alerts granted"
+              title="Browser notification alerts granted"
             >
               ALERTS: ON
             </span>
           ) : notifPermission === "denied" ? (
             <button
-              onClick={handleRequestNotifPermission}
+              onClick={handleRequestAlertPermission}
               className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded border border-red-500 bg-red-950/60 text-red-300"
-              title="Notifications are blocked in your phone settings. Click for instructions."
+              title="Notifications are blocked in your browser settings. Click for instructions."
             >
               ALERTS: BLOCKED
             </button>
           ) : (
             <button
-              onClick={handleRequestNotifPermission}
+              onClick={handleRequestAlertPermission}
               className="px-2 py-0.5 text-[10px] font-black uppercase tracking-wider rounded border border-amber-400 bg-amber-500/20 text-amber-300 animate-pulse shadow-[0_0_8px_rgba(245,158,11,0.5)]"
               title="Click to grant permission for phone notifications & background alarms"
             >
@@ -819,7 +882,7 @@ export function CTUTacticalOpsTerminal() {
             TEST ALERT
           </button>
 
-          {/* PiP Controls (Optimized for Android Chrome) */}
+          {/* PiP Controls */}
           <button
             onClick={() => openPipHud("TIMERS")}
             className={`px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded border transition-colors ${
@@ -925,7 +988,7 @@ export function CTUTacticalOpsTerminal() {
 
       {/* Main Content Area: Responsive Mobile-Tabbed Layout */}
       <div className="flex-1 flex flex-col gap-3">
-        {/* View 1: Primary Mission Focus Showcase (BALANCED PROPORTIONAL TIMER) */}
+        {/* View 1: Primary Mission Focus Showcase */}
         <section
           className={`border-2 border-[#ffcc00] bg-[#090d16] p-3 rounded shadow-[0_0_15px_rgba(255,204,0,0.15)] ${
             mobileTab === "FOCUS" ? "block" : "hidden md:block"
@@ -938,7 +1001,6 @@ export function CTUTacticalOpsTerminal() {
             <span className="text-gray-400 text-[10px]">PRESET: {formatHMS(activeTimer.durationSec)}</span>
           </div>
 
-          {/* Scaled-down, balanced readable readout */}
           <div className="text-center py-1 sm:py-2">
             <div className="text-3xl sm:text-5xl font-black tracking-wider text-[#ffcc00] font-mono tabular-nums whitespace-nowrap">
               {formatHMS(activeTimer.remainingSec)}
@@ -1176,7 +1238,7 @@ export function CTUTacticalOpsTerminal() {
         />
       )}
 
-      {/* CTU OPERATIONAL CLEARANCE & SAMSUNG PIP EXCEPTION POPUP */}
+      {/* CTU OPERATIONAL CLEARANCE & PERMISSIONS POPUP */}
       {clearanceOpen && (
         <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
           <div className="w-full max-w-lg bg-[#0a0f18] border-2 border-[#ffcc00] rounded-lg shadow-[0_0_30px_rgba(255,204,0,0.35)] p-4 sm:p-6 text-[#ffcc00] space-y-4 my-auto">
@@ -1197,7 +1259,9 @@ export function CTUTacticalOpsTerminal() {
                 </button>
               </div>
               <p className="text-[10px] text-gray-300 mt-1 uppercase tracking-wider">
-                First-launch hardware authorization for audio playback, phone lockscreen alerts & Samsung PiP exceptions.
+                {inMedian
+                  ? "Median APK hardware authorization for audio playback & OneSignal Android system alerts."
+                  : "First-launch hardware authorization for audio playback, phone lockscreen alerts & Samsung PiP exceptions."}
               </p>
             </div>
 
@@ -1234,28 +1298,34 @@ export function CTUTacticalOpsTerminal() {
               <div className="border border-[#ffcc00]/30 bg-[#0c1322] p-2.5 rounded flex items-center justify-between gap-2">
                 <div>
                   <div className="font-bold flex items-center gap-2">
-                    <span className="text-amber-400">2. NOTIFICATION SHADE ALERTS</span>
+                    <span className="text-amber-400">2. {inMedian ? "ONESIGNAL OS ALERTS" : "NOTIFICATION SHADE ALERTS"}</span>
                     <span
                       className={`text-[9px] px-1.5 py-0.2 rounded font-black ${
-                        notifPermission === "granted"
+                        (inMedian ? medianArmed : notifPermission === "granted")
                           ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40"
-                          : notifPermission === "denied"
+                          : (!inMedian && notifPermission === "denied")
                           ? "bg-red-500/20 text-red-400 border border-red-500/40"
                           : "bg-amber-500/20 text-amber-300 border border-amber-500/40"
                       }`}
                     >
-                      {notifPermission === "granted" ? "GRANTED" : notifPermission === "denied" ? "BLOCKED" : "REQUIRED"}
+                      {(inMedian ? medianArmed : notifPermission === "granted")
+                        ? "ARMED"
+                        : (!inMedian && notifPermission === "denied")
+                        ? "BLOCKED"
+                        : "REQUIRED"}
                     </span>
                   </div>
                   <div className="text-[10px] text-gray-400 mt-0.5">
-                    Permits live timer countdowns in phone notifications & vibrations.
+                    {inMedian
+                      ? "Requests native Android push & local alarm alerts through the Median bridge."
+                      : "Permits live timer countdowns in phone notifications & vibrations."}
                   </div>
                 </div>
                 <button
-                  onClick={handleRequestNotifPermission}
+                  onClick={handleRequestAlertPermission}
                   className="px-3 py-1.5 bg-blue-500 text-white font-black uppercase text-[10px] tracking-wider rounded hover:bg-blue-400"
                 >
-                  ALLOW ALERTS
+                  {inMedian ? "LINK OS ALERTS" : "ALLOW ALERTS"}
                 </button>
               </div>
 
@@ -1265,7 +1335,7 @@ export function CTUTacticalOpsTerminal() {
                   <div className="font-bold text-sky-400 flex items-center gap-2">
                     <span>3. PICTURE-IN-PICTURE (PIP) EXCEPTION</span>
                     <span className="text-[9px] px-1.5 py-0.2 rounded font-black bg-sky-500/20 text-sky-300 border border-sky-400/40">
-                      GOOGLE CHROME
+                      {inMedian ? "MEDIAN APK" : "GOOGLE CHROME"}
                     </span>
                   </div>
                   <button
@@ -1281,16 +1351,16 @@ export function CTUTacticalOpsTerminal() {
                     ⚠️ Samsung OneUI / Android PiP Settings Exception:
                   </div>
                   <div className="text-gray-300 leading-relaxed">
-                    Android requires Google Chrome and an OS Special Access toggle for PiP windows:
+                    Android manages floating PiP in OS Special Access. If the PiP window does not float:
                   </div>
                   <ol className="list-decimal list-inside space-y-0.5 text-gray-400 pl-1">
                     <li>Open phone <strong>Settings</strong> → <strong>Apps</strong>.</li>
                     <li>Tap the <strong>three dots menu (⋮)</strong> top right → <strong>Special app access</strong>.</li>
                     <li>Select <strong>Picture-in-picture</strong>.</li>
-                    <li>Set <strong>Chrome</strong> &amp; <strong>CTU Ops</strong> to <strong>Allowed</strong>.</li>
+                    <li>Set <strong>CTU Ops</strong> to <strong>Allowed</strong>.</li>
                   </ol>
                   <div className="text-[9px] text-amber-300/90 pt-1">
-                    ✓ Note: Samsung Internet blocks canvas PiP. Always use Google Chrome for Android PiP.
+                    ✓ Note: Floating In-App Tactical HUD fallback is permanently enabled if OS restricts native PiP.
                   </div>
                 </div>
               </div>
