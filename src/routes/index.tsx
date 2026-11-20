@@ -1,4 +1,4 @@
-// src/routes/index.tsx — FULL DROP-IN REPLACEMENT FILE (MOBILE OPTIMIZED & CTU CLEARANCE POPUP)
+// src/routes/index.tsx — FULL DROP-IN REPLACEMENT FILE (ANDROID PIP & CHROME GESTURE FIX)
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { SamsungTimePicker, type SamsungTimePickerValues } from "@/components/samsung-time-picker";
@@ -138,7 +138,7 @@ export function CTUTacticalOpsTerminal() {
   // Ringing Banner State
   const [ringingAlert, setRingingAlert] = useState<{ id: string; label: string; sound: ZeroSoundType } | null>(null);
 
-  // PiP Native Tactical HUD
+  // PiP Native Tactical HUD Canvas & Video State
   const [pipActive, setPipActive] = useState<boolean>(false);
   const [pipMode, setPipMode] = useState<"TIMERS" | "ALARMS">("TIMERS");
   const pipCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -161,13 +161,11 @@ export function CTUTacticalOpsTerminal() {
     const currentPerm = getNotificationPermissionStatus();
     setNotifPermission(currentPerm);
 
-    // Check if clearance completed in localStorage or if running as installed standalone app
     try {
       const savedClearance = localStorage.getItem("ctu_clearance_completed_v1");
       if (savedClearance === "true") {
         setClearanceDone(true);
       } else {
-        // Trigger clearance popup automatically on first install or first load
         setClearanceOpen(true);
       }
     } catch {}
@@ -264,18 +262,15 @@ export function CTUTacticalOpsTerminal() {
           const isUrgent = timer.status === "RUNNING" && timer.remainingSec <= 10;
           const isRunning = timer.status === "RUNNING";
 
-          // Label (XXL: 18px bold)
           ctx.fillStyle = isUrgent ? "#ff3333" : isRunning ? "#ffcc00" : "#6b7280";
           ctx.font = "bold 18px 'Courier New', monospace";
           const label = `${idx + 1}. ${timer.label.slice(0, 12).padEnd(12, " ")}`;
           ctx.fillText(label, 18, startY);
 
-          // Digital Timer Readout (XXL: 24px bold)
           ctx.font = "bold 24px 'Courier New', monospace";
           const timeText = formatHMS(timer.remainingSec);
           ctx.fillText(timeText, 250, startY);
 
-          // Status Badge (XXL: 15px bold)
           ctx.font = "bold 15px 'Courier New', monospace";
           const statusText = `[${timer.status}]`;
           ctx.fillText(statusText, 450, startY);
@@ -307,17 +302,14 @@ export function CTUTacticalOpsTerminal() {
           const deltaSec = alarm.deltaSec === Infinity ? 0 : alarm.deltaSec;
           const isUrgent = isEnabled && deltaSec <= 10 && deltaSec > 0;
 
-          // Label (XXL: 18px bold)
           ctx.fillStyle = isUrgent ? "#ff3333" : isEnabled ? "#38bdf8" : "#4b5563";
           ctx.font = "bold 18px 'Courier New', monospace";
           const label = `${idx + 1}. ${alarm.label.slice(0, 12).padEnd(12, " ")}`;
           ctx.fillText(label, 18, startY);
 
-          // Digital Alarm Time Readout (XXL: 24px bold)
           ctx.font = "bold 24px 'Courier New', monospace";
           ctx.fillText(alarm.timeStr, 250, startY);
 
-          // Status Badge (XXL: 15px bold)
           ctx.font = "bold 15px 'Courier New', monospace";
           const statusText = isEnabled ? `IN ${formatHMS(deltaSec)}` : "[OFF]";
           ctx.fillText(statusText, 420, startY);
@@ -338,17 +330,25 @@ export function CTUTacticalOpsTerminal() {
     return () => clearInterval(interval);
   }, [pipActive, pipMode, renderPipFrame]);
 
-  // Open PiP (Attempts Native PiP, Falls Back to Floating Tactical Mini-HUD)
+  // Open PiP with Android Chrome Gesture Preservation & Visible Surface Initialization
   const openPipHud = async (targetMode: "TIMERS" | "ALARMS") => {
     setPipMode(targetMode);
     setFloatingHudMode(targetMode);
 
-    try {
-      await CTUAudio.unlockAudio();
-      setAudioUnlocked(true);
-    } catch {}
+    // Synchronously unlock audio in background WITHOUT awaiting to preserve the mobile gesture token
+    CTUAudio.unlockAudio()
+      .then(() => setAudioUnlocked(true))
+      .catch(() => {});
 
-    // Check if native PiP is supported and enabled
+    // Check for Samsung Internet which restricts canvas stream PiP
+    if (typeof navigator !== "undefined" && /SamsungBrowser/i.test(navigator.userAgent)) {
+      alert(
+        "Samsung Internet restricts dynamic Picture-in-Picture streams.\n\nFor floating background PiP on Samsung devices, please open this app in Google Chrome."
+      );
+      setFloatingHudActive(true);
+      return;
+    }
+
     const isSupported =
       typeof document !== "undefined" &&
       "pictureInPictureEnabled" in document &&
@@ -360,6 +360,7 @@ export function CTUTacticalOpsTerminal() {
     }
 
     try {
+      // Initialize 640x360 canvas if needed
       if (!pipCanvasRef.current) {
         const canvas = document.createElement("canvas");
         canvas.width = 640;
@@ -367,6 +368,10 @@ export function CTUTacticalOpsTerminal() {
         pipCanvasRef.current = canvas;
       }
 
+      // Draw immediate frame before creating stream
+      renderPipFrame(targetMode);
+
+      // Create video element attached to DOM so Android hardware compositor treats it as active
       if (!pipVideoRef.current) {
         const video = document.createElement("video");
         video.muted = true;
@@ -375,18 +380,22 @@ export function CTUTacticalOpsTerminal() {
         video.style.position = "fixed";
         video.style.bottom = "0";
         video.style.right = "0";
-        video.style.width = "40px";
-        video.style.height = "25px";
-        video.style.opacity = "0.01";
+        video.style.width = "160px";
+        video.style.height = "90px";
+        video.style.opacity = "0.05";
         video.style.pointerEvents = "none";
+        video.style.zIndex = "1";
         document.body.appendChild(video);
         pipVideoRef.current = video;
       }
 
-      renderPipFrame(targetMode);
-      const stream = pipCanvasRef.current.captureStream(10);
+      const stream = pipCanvasRef.current.captureStream(25);
       pipVideoRef.current.srcObject = stream;
+
+      // Play video track
       await pipVideoRef.current.play();
+
+      // Trigger Picture-in-Picture directly within user gesture scope
       await pipVideoRef.current.requestPictureInPicture();
       setPipActive(true);
 
@@ -538,7 +547,6 @@ export function CTUTacticalOpsTerminal() {
       setAudioUnlocked(true);
     } catch {}
 
-    // Auto-prompt notification permission on first timer start if not yet granted
     if (notifPermission === "default") {
       const res = await requestNotificationPermission();
       setNotifPermission(res);
@@ -804,7 +812,7 @@ export function CTUTacticalOpsTerminal() {
             TEST ALERT
           </button>
 
-          {/* PiP Controls */}
+          {/* PiP Controls (Optimized for Android Chrome) */}
           <button
             onClick={() => openPipHud("TIMERS")}
             className={`px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded border transition-colors ${
@@ -914,7 +922,7 @@ export function CTUTacticalOpsTerminal() {
 
       {/* Main Content Area: Responsive Mobile-Tabbed Layout */}
       <div className="flex-1 flex flex-col gap-3">
-        {/* View 1: Primary Mission Focus Showcase (Always active on desktop, tabbed on mobile) */}
+        {/* View 1: Primary Mission Focus Showcase */}
         <section
           className={`border-2 border-[#ffcc00] bg-[#090d16] p-3 sm:p-4 rounded shadow-[0_0_15px_rgba(255,204,0,0.15)] ${
             mobileTab === "FOCUS" ? "block" : "hidden md:block"
@@ -1253,7 +1261,7 @@ export function CTUTacticalOpsTerminal() {
                   <div className="font-bold text-sky-400 flex items-center gap-2">
                     <span>3. PICTURE-IN-PICTURE (PIP) EXCEPTION</span>
                     <span className="text-[9px] px-1.5 py-0.2 rounded font-black bg-sky-500/20 text-sky-300 border border-sky-400/40">
-                      SAMSUNG / ANDROID
+                      GOOGLE CHROME
                     </span>
                   </div>
                   <button
@@ -1269,16 +1277,16 @@ export function CTUTacticalOpsTerminal() {
                     ⚠️ Samsung OneUI / Android PiP Settings Exception:
                   </div>
                   <div className="text-gray-300 leading-relaxed">
-                    Android manages floating PiP in OS Special Access. If the PiP window does not float over your home screen:
+                    Android requires Google Chrome and an OS Special Access toggle for PiP windows:
                   </div>
                   <ol className="list-decimal list-inside space-y-0.5 text-gray-400 pl-1">
                     <li>Open phone <strong>Settings</strong> → <strong>Apps</strong>.</li>
                     <li>Tap the <strong>three dots menu (⋮)</strong> top right → <strong>Special app access</strong>.</li>
                     <li>Select <strong>Picture-in-picture</strong>.</li>
-                    <li>Set <strong>Chrome / Samsung Internet</strong> &amp; <strong>CTU Ops</strong> to <strong>Allowed</strong>.</li>
+                    <li>Set <strong>Chrome</strong> &amp; <strong>CTU Ops</strong> to <strong>Allowed</strong>.</li>
                   </ol>
                   <div className="text-[9px] text-amber-300/90 pt-1">
-                    ✓ Floating In-App Tactical HUD fallback is permanently enabled if OS restricts native PiP.
+                    ✓ Note: Samsung Internet blocks canvas PiP. Always use Google Chrome for Android PiP.
                   </div>
                 </div>
               </div>
