@@ -1,4 +1,4 @@
-// src/routes/index.tsx — FULL DROP-IN REPLACEMENT FILE (ANDROID PIP & CHROME GESTURE FIX)
+// src/routes/index.tsx — FULL DROP-IN REPLACEMENT FILE (STABLE CLOCKS & BALANCED FOCUS TIMER)
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { SamsungTimePicker, type SamsungTimePickerValues } from "@/components/samsung-time-picker";
@@ -238,7 +238,6 @@ export function CTUTacticalOpsTerminal() {
       ctx.stroke();
 
       if (mode === "TIMERS") {
-        // Chronological sort: RUNNING by smallest remainingSec first, then PAUSED, then IDLE / EXPIRED
         const currentTimers = [...timersRef.current]
           .sort((a, b) => {
             const statusPriority: Record<string, number> = {
@@ -278,7 +277,6 @@ export function CTUTacticalOpsTerminal() {
           startY += 48;
         });
       } else {
-        // Chronological sort for alarms: nearest trigger time first, then disabled alarms
         const currentAlarms = [...alarmsRef.current]
           .map((alarm) => {
             const nextMs = getNextAlarmEpochMs(alarm.timeStr, alarm.days);
@@ -335,12 +333,10 @@ export function CTUTacticalOpsTerminal() {
     setPipMode(targetMode);
     setFloatingHudMode(targetMode);
 
-    // Synchronously unlock audio in background WITHOUT awaiting to preserve the mobile gesture token
     CTUAudio.unlockAudio()
       .then(() => setAudioUnlocked(true))
       .catch(() => {});
 
-    // Check for Samsung Internet which restricts canvas stream PiP
     if (typeof navigator !== "undefined" && /SamsungBrowser/i.test(navigator.userAgent)) {
       alert(
         "Samsung Internet restricts dynamic Picture-in-Picture streams.\n\nFor floating background PiP on Samsung devices, please open this app in Google Chrome."
@@ -360,7 +356,6 @@ export function CTUTacticalOpsTerminal() {
     }
 
     try {
-      // Initialize 640x360 canvas if needed
       if (!pipCanvasRef.current) {
         const canvas = document.createElement("canvas");
         canvas.width = 640;
@@ -368,10 +363,8 @@ export function CTUTacticalOpsTerminal() {
         pipCanvasRef.current = canvas;
       }
 
-      // Draw immediate frame before creating stream
       renderPipFrame(targetMode);
 
-      // Create video element attached to DOM so Android hardware compositor treats it as active
       if (!pipVideoRef.current) {
         const video = document.createElement("video");
         video.muted = true;
@@ -392,10 +385,7 @@ export function CTUTacticalOpsTerminal() {
       const stream = pipCanvasRef.current.captureStream(25);
       pipVideoRef.current.srcObject = stream;
 
-      // Play video track
       await pipVideoRef.current.play();
-
-      // Trigger Picture-in-Picture directly within user gesture scope
       await pipVideoRef.current.requestPictureInPicture();
       setPipActive(true);
 
@@ -408,7 +398,6 @@ export function CTUTacticalOpsTerminal() {
       );
     } catch (err) {
       console.warn("[CTU] Native PiP restricted or blocked by OS. Engaging In-App Tactical HUD:", err);
-      // Fallback to in-app floating mini HUD for mobile devices
       setFloatingHudActive(true);
     }
   };
@@ -739,6 +728,24 @@ export function CTUTacticalOpsTerminal() {
     setTakeoverOpen(false);
   };
 
+  // Helper to render non-wrapping, jitter-free digital clocks
+  const renderDigitalClock = (timeStr: string, colorClass: string) => {
+    const parts = timeStr.split(":");
+    const h = parts[0] || "00";
+    const m = parts[1] || "00";
+    const s = parts[2] || "00";
+
+    return (
+      <div className={`text-lg sm:text-2xl font-black ${colorClass} tracking-wider font-mono tabular-nums whitespace-nowrap`}>
+        <span>{h}</span>
+        <span className={`inline-block px-[1px] transition-opacity duration-75 ${colonVisible ? "opacity-100" : "opacity-15"}`}>:</span>
+        <span>{m}</span>
+        <span className={`inline-block px-[1px] transition-opacity duration-75 ${colonVisible ? "opacity-100" : "opacity-15"}`}>:</span>
+        <span>{s}</span>
+      </div>
+    );
+  };
+
   const activeTimer: TimerItem = timers.find((t) => t.id === focusedTimerId) || timers[0] || {
     id: "timer-1",
     label: "TAC SPRINT",
@@ -903,56 +910,53 @@ export function CTUTacticalOpsTerminal() {
         </div>
       )}
 
-      {/* Synchronized High-Density Twin Clocks */}
+      {/* Synchronized Twin Clocks (STABLE SINGLE-LINE TABULAR NUMS) */}
       <section className="grid grid-cols-2 gap-2 mb-3">
-        <div className="border border-[#ffcc00]/40 bg-[#090d16] p-2 rounded">
-          <div className="text-[9px] text-gray-400 tracking-wider">LOCAL TIME // BANGKOK</div>
-          <div className="text-xl sm:text-3xl font-black text-[#ffcc00] tracking-widest">
-            {colonVisible ? bangkokTime : bangkokTime.replace(/:/g, " ")}
-          </div>
+        <div className="border border-[#ffcc00]/40 bg-[#090d16] p-2 rounded overflow-hidden">
+          <div className="text-[9px] text-gray-400 tracking-wider truncate mb-0.5">LOCAL TIME // BANGKOK</div>
+          {renderDigitalClock(bangkokTime, "text-[#ffcc00]")}
         </div>
 
-        <div className="border border-[#ffcc00]/40 bg-[#090d16] p-2 rounded">
-          <div className="text-[9px] text-gray-400 tracking-wider">MISSION TIME // ZULU</div>
-          <div className="text-xl sm:text-3xl font-black text-sky-400 tracking-widest">
-            {colonVisible ? zuluTime : zuluTime.replace(/:/g, " ")}
-          </div>
+        <div className="border border-[#ffcc00]/40 bg-[#090d16] p-2 rounded overflow-hidden">
+          <div className="text-[9px] text-gray-400 tracking-wider truncate mb-0.5">MISSION TIME // ZULU</div>
+          {renderDigitalClock(zuluTime, "text-sky-400")}
         </div>
       </section>
 
       {/* Main Content Area: Responsive Mobile-Tabbed Layout */}
       <div className="flex-1 flex flex-col gap-3">
-        {/* View 1: Primary Mission Focus Showcase */}
+        {/* View 1: Primary Mission Focus Showcase (BALANCED PROPORTIONAL TIMER) */}
         <section
-          className={`border-2 border-[#ffcc00] bg-[#090d16] p-3 sm:p-4 rounded shadow-[0_0_15px_rgba(255,204,0,0.15)] ${
+          className={`border-2 border-[#ffcc00] bg-[#090d16] p-3 rounded shadow-[0_0_15px_rgba(255,204,0,0.15)] ${
             mobileTab === "FOCUS" ? "block" : "hidden md:block"
           }`}
         >
-          <div className="flex items-center justify-between text-xs font-bold uppercase tracking-widest border-b border-[#ffcc00]/30 pb-2 mb-2">
+          <div className="flex items-center justify-between text-xs font-bold uppercase tracking-widest border-b border-[#ffcc00]/30 pb-1.5 mb-1.5">
             <span className="text-[#ffcc00]">
               FOCUS: {activeTimer.label} [{activeTimer.status}]
             </span>
             <span className="text-gray-400 text-[10px]">PRESET: {formatHMS(activeTimer.durationSec)}</span>
           </div>
 
-          <div className="text-center py-2 sm:py-4">
-            <div className="text-5xl sm:text-7xl font-black tracking-widest text-[#ffcc00]">
+          {/* Scaled-down, balanced readable readout */}
+          <div className="text-center py-1 sm:py-2">
+            <div className="text-3xl sm:text-5xl font-black tracking-wider text-[#ffcc00] font-mono tabular-nums whitespace-nowrap">
               {formatHMS(activeTimer.remainingSec)}
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center justify-center gap-1.5 pt-2">
+          <div className="flex flex-wrap items-center justify-center gap-1.5 pt-1.5">
             {activeTimer.status !== "RUNNING" ? (
               <button
                 onClick={() => handleExecuteTimer(activeTimer.id)}
-                className="flex-1 sm:flex-none px-5 py-2.5 bg-[#ffcc00] text-black font-black uppercase text-xs sm:text-sm tracking-widest rounded hover:bg-[#ffd633] active:scale-95 transition"
+                className="flex-1 sm:flex-none px-4 py-2 bg-[#ffcc00] text-black font-black uppercase text-xs sm:text-sm tracking-widest rounded hover:bg-[#ffd633] active:scale-95 transition"
               >
                 EXECUTE TIMER
               </button>
             ) : (
               <button
                 onClick={() => handlePauseTimer(activeTimer.id)}
-                className="flex-1 sm:flex-none px-5 py-2.5 bg-amber-600 text-black font-black uppercase text-xs sm:text-sm tracking-widest rounded hover:bg-amber-500 active:scale-95 transition"
+                className="flex-1 sm:flex-none px-4 py-2 bg-amber-600 text-black font-black uppercase text-xs sm:text-sm tracking-widest rounded hover:bg-amber-500 active:scale-95 transition"
               >
                 HOLD / PAUSE
               </button>
@@ -960,14 +964,14 @@ export function CTUTacticalOpsTerminal() {
 
             <button
               onClick={() => handleStopAndResetTimer(activeTimer.id)}
-              className="px-3.5 py-2 border border-red-500/70 text-red-400 font-bold uppercase text-xs tracking-widest rounded hover:bg-red-500/20"
+              className="px-3 py-1.5 border border-red-500/70 text-red-400 font-bold uppercase text-xs tracking-widest rounded hover:bg-red-500/20"
             >
               STOP / RESET
             </button>
 
             <button
               onClick={() => handleOpenPickerForTimer(activeTimer.id)}
-              className="px-3.5 py-2 border border-[#ffcc00]/60 text-[#ffcc00] font-bold uppercase text-xs tracking-widest rounded hover:bg-[#ffcc00]/20"
+              className="px-3 py-1.5 border border-[#ffcc00]/60 text-[#ffcc00] font-bold uppercase text-xs tracking-widest rounded hover:bg-[#ffcc00]/20"
             >
               EDIT
             </button>
@@ -979,7 +983,7 @@ export function CTUTacticalOpsTerminal() {
                   label: activeTimer.label,
                 })
               }
-              className="w-full sm:w-auto px-3.5 py-2 border border-blue-500/50 text-blue-300 font-bold uppercase text-xs tracking-widest rounded hover:bg-blue-500/20 text-center"
+              className="w-full sm:w-auto px-3 py-1.5 border border-blue-500/50 text-blue-300 font-bold uppercase text-xs tracking-widest rounded hover:bg-blue-500/20 text-center"
             >
               SAMSUNG PHONE SYNC
             </button>
@@ -1031,7 +1035,7 @@ export function CTUTacticalOpsTerminal() {
 
                     <div className="flex items-center gap-2">
                       <div className="text-right">
-                        <div className="text-xs sm:text-sm font-black text-[#ffcc00] tracking-wider">
+                        <div className="text-xs sm:text-sm font-black text-[#ffcc00] tracking-wider font-mono tabular-nums">
                           {formatHMS(t.remainingSec)}
                         </div>
                         <div className="text-[8px] text-gray-400 uppercase">[{t.status}]</div>
@@ -1088,7 +1092,7 @@ export function CTUTacticalOpsTerminal() {
 
                     <div className="flex items-center gap-2">
                       <div className="text-right">
-                        <div className="text-xs sm:text-sm font-black text-sky-400 tracking-wider">
+                        <div className="text-xs sm:text-sm font-black text-sky-400 tracking-wider font-mono tabular-nums">
                           {a.timeStr}
                         </div>
                         {deltaSec !== null && a.enabled && (
