@@ -1,4 +1,4 @@
-// src/routes/index.tsx — FULL DROP-IN REPLACEMENT FILE (TACTICAL HUD, MEDIAN HARDWARE & MEDIA SESSION INTEGRATION)
+// src/routes/index.tsx — FULL DROP-IN REPLACEMENT FILE (CHRONOLOGICAL WORLDWIDE TICKER + TACTICAL OPS TERMINAL)
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { SamsungTimePicker, type SamsungTimePickerValues } from "@/components/samsung-time-picker";
@@ -9,7 +9,6 @@ import {
   cancelLocalAlert,
   updateLockscreenHUD,
   clearLockscreenHUD,
-  syncWithNativePhoneClock,
   getNotificationPermissionStatus,
   requestNotificationPermission,
 } from "@/lib/background-alerts";
@@ -25,7 +24,7 @@ export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
       { title: "CTU Tactical Ops Terminal // 24 Mission Clocks & Timers" },
-      { name: "description", content: "24 CTU Multi-Timer, Alarm, MediaSession & Surveillance Operations Terminal." },
+      { name: "description", content: "24 CTU Multi-Timer, Alarm, Chronological World Ticker & Surveillance Operations Terminal." },
       { property: "og:title", content: "CTU Tactical Ops Terminal // 24" },
       { property: "og:description", content: "Tactical mission timers, alarms, and surveillance HUD." },
       { property: "og:type", content: "website" },
@@ -55,6 +54,26 @@ export interface AlarmItem {
   enabled: boolean;
   zeroSound: ZeroSoundType;
 }
+
+// World Ticker Stations ordered chronologically from West to East (UTC-10 to UTC+12)
+const WORLD_STATIONS = [
+  { city: "HONOLULU", code: "HNL", tz: "Pacific/Honolulu", offset: "UTC-10" },
+  { city: "ANCHORAGE", code: "ANC", tz: "America/Anchorage", offset: "UTC-9" },
+  { city: "LOS ANGELES", code: "LAX", tz: "America/Los_Angeles", offset: "UTC-8" },
+  { city: "DENVER", code: "DEN", tz: "America/Denver", offset: "UTC-7" },
+  { city: "CHICAGO", code: "ORD", tz: "America/Chicago", offset: "UTC-6" },
+  { city: "WASHINGTON DC", code: "IAD", tz: "America/New_York", offset: "UTC-5" },
+  { city: "LONDON // CTU", code: "LON", tz: "Europe/London", offset: "UTC+0" },
+  { city: "PARIS", code: "PAR", tz: "Europe/Paris", offset: "UTC+1" },
+  { city: "CAIRO", code: "CAI", tz: "Africa/Cairo", offset: "UTC+2" },
+  { city: "MOSCOW", code: "SVO", tz: "Europe/Moscow", offset: "UTC+3" },
+  { city: "DUBAI", code: "DXB", tz: "Asia/Dubai", offset: "UTC+4" },
+  { city: "BANGKOK // FIELD", code: "BKK", tz: "Asia/Bangkok", offset: "UTC+7" },
+  { city: "SINGAPORE", code: "SIN", tz: "Asia/Singapore", offset: "UTC+8" },
+  { city: "TOKYO", code: "TYO", tz: "Asia/Tokyo", offset: "UTC+9" },
+  { city: "SYDNEY", code: "SYD", tz: "Australia/Sydney", offset: "UTC+10" },
+  { city: "AUCKLAND", code: "AKL", tz: "Pacific/Auckland", offset: "UTC+12" },
+];
 
 const INITIAL_TIMERS: TimerItem[] = [
   { id: "timer-1", label: "TAC SPRINT", durationSec: 1500, remainingSec: 1500, status: "IDLE", zeroSound: "theme" },
@@ -93,6 +112,7 @@ export function CTUTacticalOpsTerminal() {
   // Clocks
   const [bangkokTime, setBangkokTime] = useState<string>("00:00:00");
   const [zuluTime, setZuluTime] = useState<string>("00:00:00");
+  const [worldTimes, setWorldTimes] = useState<Record<string, string>>({});
   const [colonVisible, setColonVisible] = useState<boolean>(true);
 
   // Audio & Silent Clock Tribute
@@ -166,12 +186,29 @@ export function CTUTacticalOpsTerminal() {
         hour12: false,
       }).format(now);
       setZuluTime(zulu);
+
+      // Compute all worldwide stations in chronological order
+      const newWorldTimes: Record<string, string> = {};
+      WORLD_STATIONS.forEach((st) => {
+        try {
+          newWorldTimes[st.code] = new Intl.DateTimeFormat("en-GB", {
+            timeZone: st.tz,
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+            hour12: false,
+          }).format(now);
+        } catch {
+          newWorldTimes[st.code] = "--:--:--";
+        }
+      });
+      setWorldTimes(newWorldTimes);
     }, 1000);
 
     return () => clearInterval(clockInterval);
   }, []);
 
-  // Update MediaSession API for Android Lockscreen & Smartwatches
+  // MediaSession API lock-screen updates
   useEffect(() => {
     if (typeof navigator === "undefined" || !("mediaSession" in navigator)) return;
 
@@ -626,8 +663,54 @@ export function CTUTacticalOpsTerminal() {
       )}
 
       {/* Main Container */}
-      <main className="relative z-10 max-w-7xl mx-auto px-4 py-4 space-y-6">
-        {/* Real-time World Clocks (Bangkok & Zulu) */}
+      <main className="relative z-10 max-w-7xl mx-auto px-4 py-4 space-y-4">
+        {/* MEDIUM SPEED CHRONOLOGICAL WORLDWIDE TICKER (ABOVE LOCAL TIME) */}
+        <div className="border border-[#ffcc00]/40 bg-[#080c12] rounded-sm overflow-hidden py-1.5 shadow-[0_0_12px_rgba(255,204,0,0.08)]">
+          <div className="flex items-center px-3 pb-1 border-b border-[#ffcc00]/20 mb-1">
+            <span className="text-[10px] font-black tracking-widest text-[#ffcc00]/70 flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#ffcc00] animate-ping" />
+              GLOBAL SURVEILLANCE CHRONOMETRY // WEST TO EAST
+            </span>
+          </div>
+
+          <div className="overflow-hidden w-full whitespace-nowrap">
+            <div className="world-ticker-track">
+              {/* Copy 1 */}
+              <div className="flex items-center gap-6 pr-6">
+                {WORLD_STATIONS.map((st) => (
+                  <div key={`c1-${st.code}`} className="inline-flex items-center gap-2 text-xs font-mono">
+                    <span className="text-[#ffcc00]/50 font-bold tracking-wider">{st.code}</span>
+                    <span className="text-[#ffcc00] font-black tracking-widest tabular-nums">
+                      {worldTimes[st.code] || "00:00:00"}
+                    </span>
+                    <span className="text-[9px] px-1 py-0.2 bg-[#ffcc00]/10 text-[#ffcc00]/60 rounded">
+                      {st.offset}
+                    </span>
+                    <span className="text-[#ffcc00]/30 font-bold ml-1">/</span>
+                  </div>
+                ))}
+              </div>
+
+              {/* Seamless Copy 2 */}
+              <div className="flex items-center gap-6 pr-6">
+                {WORLD_STATIONS.map((st) => (
+                  <div key={`c2-${st.code}`} className="inline-flex items-center gap-2 text-xs font-mono">
+                    <span className="text-[#ffcc00]/50 font-bold tracking-wider">{st.code}</span>
+                    <span className="text-[#ffcc00] font-black tracking-widest tabular-nums">
+                      {worldTimes[st.code] || "00:00:00"}
+                    </span>
+                    <span className="text-[9px] px-1 py-0.2 bg-[#ffcc00]/10 text-[#ffcc00]/60 rounded">
+                      {st.offset}
+                    </span>
+                    <span className="text-[#ffcc00]/30 font-bold ml-1">/</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Real-time Primary Clocks (Bangkok & Zulu) */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="border border-[#ffcc00]/30 bg-[#0e141c]/80 p-4 rounded-sm flex items-center justify-between">
             <div>
