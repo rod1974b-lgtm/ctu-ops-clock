@@ -1,4 +1,4 @@
-// src/routes/index.tsx — FULL DROP-IN REPLACEMENT FILE (CHRONOLOGICAL WORLDWIDE TICKER + TACTICAL OPS TERMINAL)
+// src/routes/index.tsx — FULL DROP-IN REPLACEMENT FILE (24 REAL-TIME EPISODE BRIEFING + CHRONOMETRY)
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { SamsungTimePicker, type SamsungTimePickerValues } from "@/components/samsung-time-picker";
@@ -24,7 +24,7 @@ export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
       { title: "CTU Tactical Ops Terminal // 24 Mission Clocks & Timers" },
-      { name: "description", content: "24 CTU Multi-Timer, Alarm, Chronological World Ticker & Surveillance Operations Terminal." },
+      { name: "description", content: "24 CTU Multi-Timer, Alarm, Real-Time Episode Briefing & Surveillance Operations Terminal." },
       { property: "og:title", content: "CTU Tactical Ops Terminal // 24" },
       { property: "og:description", content: "Tactical mission timers, alarms, and surveillance HUD." },
       { property: "og:type", content: "website" },
@@ -109,11 +109,12 @@ export function CTUTacticalOpsTerminal() {
   const [alarms, setAlarms] = useState<AlarmItem[]>(INITIAL_ALARMS);
   const [focusedTimerId, setFocusedTimerId] = useState<string>("timer-1");
 
-  // Clocks
+  // Clocks & Briefing Window
   const [bangkokTime, setBangkokTime] = useState<string>("00:00:00");
   const [zuluTime, setZuluTime] = useState<string>("00:00:00");
   const [worldTimes, setWorldTimes] = useState<Record<string, string>>({});
   const [colonVisible, setColonVisible] = useState<boolean>(true);
+  const [episodeWindow, setEpisodeWindow] = useState<{ start: string; end: string }>({ start: "12:00", end: "13:00" });
 
   // Audio & Silent Clock Tribute
   const [audioUnlocked, setAudioUnlocked] = useState<boolean>(false);
@@ -168,6 +169,18 @@ export function CTUTacticalOpsTerminal() {
     const clockInterval = setInterval(() => {
       const now = new Date();
       setColonVisible((prev) => !prev);
+
+      const curHour = now.getHours();
+      const nextHour = (curHour + 1) % 24;
+      setEpisodeWindow({
+        start: `${curHour.toString().padStart(2, "0")}:00`,
+        end: `${nextHour.toString().padStart(2, "0")}:00`,
+      });
+
+      // Top-of-the-hour broadcast sync chime
+      if (now.getMinutes() === 0 && now.getSeconds() === 0) {
+        CTUAudio.playBroadcastCadence();
+      }
 
       const bkk = new Intl.DateTimeFormat("en-GB", {
         timeZone: "Asia/Bangkok",
@@ -639,6 +652,22 @@ export function CTUTacticalOpsTerminal() {
         </div>
       )}
 
+      {/* DYNAMIC 24 REAL-TIME EPISODE BRIEFING BANNER */}
+      <div className="relative z-10 bg-gradient-to-r from-[#0d131b] via-[#121c27] to-[#0d131b] border-b border-[#ffcc00]/40 px-4 py-2 text-center shadow-[inset_0_1px_0_rgba(255,204,0,0.15)]">
+        <div className="flex items-center justify-center gap-2 flex-wrap text-xs sm:text-sm font-black tracking-widest text-[#ffcc00]">
+          <span className="text-[#ffcc00]/70">THE FOLLOWING TAKES PLACE BETWEEN</span>
+          <span className="px-2 py-0.5 bg-[#ffcc00]/20 border border-[#ffcc00]/50 text-[#ffcc00] tabular-nums rounded">
+            {episodeWindow.start}
+          </span>
+          <span className="text-[#ffcc00]/70">AND</span>
+          <span className="px-2 py-0.5 bg-[#ffcc00]/20 border border-[#ffcc00]/50 text-[#ffcc00] tabular-nums rounded">
+            {episodeWindow.end}
+          </span>
+          <span className="text-[#ffcc00]/40 hidden sm:inline">//</span>
+          <span className="text-[#ff9900] animate-pulse">EVENTS OCCUR IN REAL TIME.</span>
+        </div>
+      </div>
+
       {/* Silent Clock Indicator */}
       {silentClock && (
         <div className="relative z-10 bg-red-950/40 border-b border-red-600/40 px-4 py-1.5 text-center text-xs tracking-wider text-red-400">
@@ -664,7 +693,7 @@ export function CTUTacticalOpsTerminal() {
 
       {/* Main Container */}
       <main className="relative z-10 max-w-7xl mx-auto px-4 py-4 space-y-4">
-        {/* MEDIUM SPEED CHRONOLOGICAL WORLDWIDE TICKER (ABOVE LOCAL TIME) */}
+        {/* MEDIUM SPEED CHRONOLOGICAL WORLDWIDE TICKER */}
         <div className="border border-[#ffcc00]/40 bg-[#080c12] rounded-sm overflow-hidden py-1.5 shadow-[0_0_12px_rgba(255,204,0,0.08)]">
           <div className="flex items-center px-3 pb-1 border-b border-[#ffcc00]/20 mb-1">
             <span className="text-[10px] font-black tracking-widest text-[#ffcc00]/70 flex items-center gap-1.5">
