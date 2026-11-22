@@ -35,11 +35,19 @@ export async function requestMedianOneSignalPermission(): Promise<boolean> {
   }
 
   try {
+    // Enable foreground notifications so alerts appear even when viewing the terminal
+    if (typeof median.onesignal?.enableForegroundNotifications === "function") {
+      median.onesignal.enableForegroundNotifications(true);
+    }
+
     // 1. OneSignal prompt with user response if available
     if (typeof median.onesignal?.promptForPushNotificationsWithUserResponse === "function") {
       return new Promise<boolean>((resolve) => {
         median.onesignal.promptForPushNotificationsWithUserResponse((response: any) => {
           const granted = response === true || response?.accepted === true;
+          if (granted) {
+            setMedianAlertsArmed(true);
+          }
           resolve(granted);
         });
       });
@@ -48,10 +56,7 @@ export async function requestMedianOneSignalPermission(): Promise<boolean> {
     // 2. Standard Median OneSignal registration trigger
     if (typeof median.onesignal?.register === "function") {
       median.onesignal.register();
-      // Record permission state locally
-      try {
-        localStorage.setItem("ctu_median_onesignal_armed", "true");
-      } catch {}
+      setMedianAlertsArmed(true);
       return true;
     }
 
@@ -89,6 +94,69 @@ export function setMedianAlertsArmed(armed: boolean): void {
       localStorage.setItem("ctu_median_onesignal_armed", "true");
     } else {
       localStorage.removeItem("ctu_median_onesignal_armed");
+    }
+  } catch {}
+}
+
+/**
+ * Commands Android hardware to keep screen illuminated indefinitely
+ */
+export function keepScreenOnMedian(keepAwake: boolean): void {
+  if (typeof window === "undefined") return;
+  const win = window as any;
+  const median = win.median || win.gonative;
+  if (!median?.screen) return;
+
+  try {
+    if (keepAwake) {
+      if (typeof median.screen.keepScreenOn === "function") {
+        median.screen.keepScreenOn();
+      }
+    } else {
+      if (typeof median.screen.keepScreenNormal === "function") {
+        median.screen.keepScreenNormal();
+      }
+    }
+  } catch (err) {
+    console.warn("[CTU/Median] Failed to toggle screen timeout:", err);
+  }
+}
+
+/**
+ * Starts Median Native Media Player background audio track
+ * Surfaces live countdown status directly to Android lock screen and notification media widget
+ */
+export async function playMedianBackgroundTrack(title: string, subtitle: string, audioUrl: string): Promise<boolean> {
+  if (typeof window === "undefined") return false;
+  const win = window as any;
+  const median = win.median || win.gonative;
+  if (!median?.backgroundMedia?.playTrack) return false;
+
+  try {
+    const track = {
+      url: audioUrl,
+      title: title,
+      album: "CTU Tactical Ops",
+      artist: subtitle,
+    };
+    const res = await median.backgroundMedia.playTrack(track);
+    return res?.success === true;
+  } catch (err) {
+    console.warn("[CTU/Median] Background media player error:", err);
+    return false;
+  }
+}
+
+/**
+ * Stops Median native background media player
+ */
+export function stopMedianBackgroundTrack(): void {
+  if (typeof window === "undefined") return;
+  const win = window as any;
+  const median = win.median || win.gonative;
+  try {
+    if (typeof median?.backgroundMedia?.stop === "function") {
+      median.backgroundMedia.stop();
     }
   } catch {}
 }
