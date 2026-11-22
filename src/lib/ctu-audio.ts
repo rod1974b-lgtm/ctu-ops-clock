@@ -8,6 +8,7 @@ export type AudioSettings = {
   window: number;
   phone: boolean;
   snooze: number;
+  silentClock: boolean;
 };
 
 export const defaultAudio: AudioSettings = {
@@ -19,16 +20,20 @@ export const defaultAudio: AudioSettings = {
   window: 10,
   phone: false,
   snooze: 5,
+  silentClock: false,
 };
 
-export type ZeroSoundType = "theme" | "voice" | "boom" | "alarm" | "ctu_beep" | "stinger";
+export type ZeroSoundType = "theme" | "cisco_ring" | "silent_clock" | "voice" | "boom" | "alarm" | "ctu_beep" | "stinger";
 
 /**
  * CTU Tactical Terminal Audio Engine.
  * Supports:
- * - Direct static helpers (unlockAudio, playChirp, playTick, startCountdownTakeoverAudio, triggerZeroSound, stopAllAudio)
+ * - Direct static helpers (unlockAudio, playChirp, playTick, playBroadcastCadence, playCiscoRing, startCountdownTakeoverAudio, triggerZeroSound, stopAllAudio)
  * - Countdown audio (/24 Alarm Countdown.mp3 / /countdown.mp3)
  * - At Zero theme playback (/24 At Zero theme.mp3)
+ * - Authentic 4-beep television broadcast cadence (3x 800Hz ticks + 1x 1000Hz sync chirp)
+ * - Cisco 7960 CTU desk phone ringtone synthesizer
+ * - Silent Clock tribute protocol
  * - Haunting alarm loop & synthetic pulse fallbacks
  * - Clean stopAll() stopping all audio elements and synthetic intervals
  */
@@ -45,11 +50,13 @@ export class CTUAudio {
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
   private alarmInterval: number | null = null;
+  private ciscoInterval: number | null = null;
   private countdownAudioElement: HTMLAudioElement | null = null;
   private zeroThemeAudioElement: HTMLAudioElement | null = null;
   private voiceAudioElement: HTMLAudioElement | null = null;
   private creditsAudioElement: HTMLAudioElement | null = null;
   private volume = defaultAudio.volume;
+  private silentClockActive = false;
 
   constructor() {
     this.initContext();
@@ -98,6 +105,14 @@ export class CTUAudio {
     }
   }
 
+  public setSilentClock(enabled: boolean): void {
+    this.silentClockActive = enabled;
+  }
+
+  public isSilentClock(): boolean {
+    return this.silentClockActive;
+  }
+
   /**
    * CTU Interface Chirp on button tap
    */
@@ -129,6 +144,7 @@ export class CTUAudio {
    * isCrimson = true  -> Crimson high urgency tick (2000Hz + 2400Hz)
    */
   public playTick(isCrimson = false, isUrgent = true): void {
+    if (this.silentClockActive) return;
     if (!this.ctx || !this.masterGain) return;
     try {
       const t = this.ctx.currentTime;
@@ -164,9 +180,106 @@ export class CTUAudio {
   }
 
   /**
+   * Iconic 24 broadcast 4-beep clock sequence:
+   * 3x uniform 800 Hz pulses + 1x high-pitch 1000 Hz sync beep
+   */
+  public playBroadcastCadence(): void {
+    if (this.silentClockActive) return;
+    if (!this.ctx || !this.masterGain) return;
+    try {
+      const t = this.ctx.currentTime;
+      const intervals = [0.0, 0.22, 0.44, 0.66];
+      intervals.forEach((offset, idx) => {
+        if (!this.ctx || !this.masterGain) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        const isLastBeep = idx === 3;
+        const freq = isLastBeep ? 1000 : 800;
+        const dur = isLastBeep ? 0.12 : 0.07;
+        const startTime = t + offset;
+
+        osc.type = isLastBeep ? "sine" : "triangle";
+        osc.frequency.setValueAtTime(freq, startTime);
+
+        gain.gain.setValueAtTime(isLastBeep ? 0.6 : 0.4, startTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, startTime + dur);
+
+        osc.connect(gain);
+        gain.connect(this.masterGain);
+
+        osc.start(startTime);
+        osc.stop(startTime + dur + 0.01);
+      });
+    } catch {}
+  }
+
+  /**
+   * Synthesizes the authentic CTU Cisco 7960 VoIP Desk Phone Ringtone
+   * Distinctive dual alternating tones (440Hz / 480Hz modulated with high chirp)
+   */
+  public playCiscoRing(): void {
+    if (this.silentClockActive) return;
+    if (!this.ctx || !this.masterGain) return;
+    try {
+      const t = this.ctx.currentTime;
+      // Pair 1
+      const osc1 = this.ctx.createOscillator();
+      const osc2 = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc1.type = "sine";
+      osc1.frequency.setValueAtTime(1336, t);
+      osc1.frequency.setValueAtTime(1477, t + 0.15);
+
+      osc2.type = "sine";
+      osc2.frequency.setValueAtTime(941, t);
+      osc2.frequency.setValueAtTime(852, t + 0.15);
+
+      gain.gain.setValueAtTime(0.5, t);
+      gain.gain.setValueAtTime(0.5, t + 0.3);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.38);
+
+      osc1.connect(gain);
+      osc2.connect(gain);
+      gain.connect(this.masterGain);
+
+      osc1.start(t);
+      osc1.stop(t + 0.4);
+      osc2.start(t);
+      osc2.stop(t + 0.4);
+    } catch {}
+  }
+
+  public startCiscoRingLoop(): void {
+    this.stopCiscoRingLoop();
+    this.playCiscoRing();
+    this.ciscoInterval = window.setInterval(() => {
+      this.playCiscoRing();
+    }, 2200);
+  }
+
+  public stopCiscoRingLoop(): void {
+    if (this.ciscoInterval !== null) {
+      clearInterval(this.ciscoInterval);
+      this.ciscoInterval = null;
+    }
+  }
+
+  /**
    * Play Zero Payload based on user selection
    */
   public playZeroPayload(type: ZeroSoundType = "theme"): void {
+    if (this.silentClockActive || type === "silent_clock") {
+      // Silent Clock tribute mode: full silence, stop ongoing loops
+      this.stopAll();
+      return;
+    }
+
+    if (type === "cisco_ring") {
+      this.startCiscoRingLoop();
+      return;
+    }
+
     if (type === "theme" || type === "voice") {
       this.playZeroTheme();
       return;
@@ -204,19 +317,7 @@ export class CTUAudio {
         osc.start(t);
         osc.stop(t + 1.5);
       } else if (type === "ctu_beep") {
-        for (let i = 0; i < 4; i++) {
-          const osc = this.ctx.createOscillator();
-          const gain = this.ctx.createGain();
-          const start = t + i * 0.16;
-          osc.type = "sine";
-          osc.frequency.setValueAtTime(1400, start);
-          gain.gain.setValueAtTime(0.5, start);
-          gain.gain.exponentialRampToValueAtTime(0.001, start + 0.08);
-          osc.connect(gain);
-          gain.connect(this.masterGain);
-          osc.start(start);
-          osc.stop(start + 0.09);
-        }
+        this.playBroadcastCadence();
       } else {
         this.startAlarmLoop();
       }
@@ -229,6 +330,7 @@ export class CTUAudio {
    * Start T-10 Countdown audio track
    */
   public startCountdownAudio(): void {
+    if (this.silentClockActive) return;
     if (typeof window === "undefined") return;
 
     if (!this.countdownAudioElement) {
@@ -241,7 +343,6 @@ export class CTUAudio {
     try {
       this.countdownAudioElement.currentTime = 0;
       this.countdownAudioElement.play().catch(() => {
-        // Fallback to synthetic ticks if MP3 fails to load or autoplay policy blocks
         this.playTick(true, true);
       });
     } catch {
@@ -262,6 +363,7 @@ export class CTUAudio {
    * Play At Zero theme (/24 At Zero theme.mp3)
    */
   public playZeroTheme(): void {
+    if (this.silentClockActive) return;
     if (typeof window === "undefined") return;
 
     if (!this.zeroThemeAudioElement) {
@@ -291,9 +393,6 @@ export class CTUAudio {
     }
   }
 
-  /**
-   * Route compatibility for credits audio
-   */
   public startCreditsAudio(): void {
     this.playZeroTheme();
   }
@@ -302,10 +401,8 @@ export class CTUAudio {
     this.stopZeroTheme();
   }
 
-  /**
-   * Synthetic Pulsing Alarm Loop fallback
-   */
   public startAlarmLoop(): void {
+    if (this.silentClockActive) return;
     this.stopAlarmLoop();
     this.playAlarmPulse();
     this.alarmInterval = window.setInterval(() => {
@@ -321,6 +418,7 @@ export class CTUAudio {
   }
 
   private playAlarmPulse(): void {
+    if (this.silentClockActive) return;
     if (!this.ctx || !this.masterGain) return;
     try {
       const t = this.ctx.currentTime;
@@ -346,6 +444,7 @@ export class CTUAudio {
     this.stopCountdownAudio();
     this.stopZeroTheme();
     this.stopAlarmLoop();
+    this.stopCiscoRingLoop();
     if (this.voiceAudioElement) {
       try {
         this.voiceAudioElement.pause();
@@ -407,6 +506,14 @@ export class CTUAudio {
 
   public static playTick(isCrimson = false, isUrgent = true): void {
     CTUAudio.shared.playTick(isCrimson, isUrgent);
+  }
+
+  public static playBroadcastCadence(): void {
+    CTUAudio.shared.playBroadcastCadence();
+  }
+
+  public static playCiscoRing(): void {
+    CTUAudio.shared.playCiscoRing();
   }
 
   public static stopAllAudio(): void {
