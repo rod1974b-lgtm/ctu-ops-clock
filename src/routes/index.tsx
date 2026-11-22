@@ -1,4 +1,4 @@
-// src/routes/index.tsx — FULL DROP-IN REPLACEMENT FILE (MEDIAN APK & ONESIGNAL OS ALERTS)
+// src/routes/index.tsx — FULL DROP-IN REPLACEMENT FILE (BUILT-IN DRAGGABLE TACTICAL PIP HUD)
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { SamsungTimePicker, type SamsungTimePickerValues } from "@/components/samsung-time-picker";
@@ -129,9 +129,18 @@ export function CTUTacticalOpsTerminal() {
   const [clearanceDone, setClearanceDone] = useState<boolean>(false);
   const [audioUnlocked, setAudioUnlocked] = useState<boolean>(false);
 
-  // In-App Floating Tactical Mini-HUD (Mobile PiP Fallback)
-  const [floatingHudActive, setFloatingHudActive] = useState<boolean>(false);
-  const [floatingHudMode, setFloatingHudMode] = useState<"TIMERS" | "ALARMS">("TIMERS");
+  // BUILT-IN DRAGGABLE & MINIMIZABLE FLOATING TACTICAL PIP HUD
+  const [floatingPipOpen, setFloatingPipOpen] = useState<boolean>(false);
+  const [floatingPipMode, setFloatingPipMode] = useState<"TIMERS" | "ALARMS">("TIMERS");
+  const [floatingPipMinimized, setFloatingPipMinimized] = useState<boolean>(false);
+  const [pipPosition, setPipPosition] = useState<{ x: number; y: number } | null>(null);
+  const isDraggingRef = useRef<boolean>(false);
+  const dragStartRef = useRef<{ clientX: number; clientY: number; posX: number; posY: number }>({
+    clientX: 0,
+    clientY: 0,
+    posX: 0,
+    posY: 0,
+  });
 
   // Samsung Picker Modal State
   const [pickerOpen, setPickerOpen] = useState<boolean>(false);
@@ -149,12 +158,6 @@ export function CTUTacticalOpsTerminal() {
   // Ringing Banner State
   const [ringingAlert, setRingingAlert] = useState<{ id: string; label: string; sound: ZeroSoundType } | null>(null);
 
-  // PiP Native Tactical HUD Canvas & Video State
-  const [pipActive, setPipActive] = useState<boolean>(false);
-  const [pipMode, setPipMode] = useState<"TIMERS" | "ALARMS">("TIMERS");
-  const pipCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const pipVideoRef = useRef<HTMLVideoElement | null>(null);
-
   // Wake Lock
   const [wakeLockActive, setWakeLockActive] = useState<boolean>(false);
   const wakeLockSentinel = useRef<WakeLockSentinel | null>(null);
@@ -170,7 +173,6 @@ export function CTUTacticalOpsTerminal() {
     setIsClientHydrated(true);
     initBackgroundAlerts().catch(() => {});
 
-    // Detect if running inside Median APK
     const detectedMedian = isMedianApp();
     setInMedian(detectedMedian);
     if (detectedMedian) {
@@ -214,207 +216,73 @@ export function CTUTacticalOpsTerminal() {
     return () => clearInterval(clockInterval);
   }, []);
 
-  // Tactical Offscreen Canvas PiP HUD Renderer
-  const renderPipFrame = useCallback(
-    (mode: "TIMERS" | "ALARMS") => {
-      const canvas = pipCanvasRef.current;
-      if (!canvas) return;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-
-      const width = canvas.width;
-      const height = canvas.height;
-
-      ctx.fillStyle = "#070a0e";
-      ctx.fillRect(0, 0, width, height);
-
-      ctx.lineWidth = 6;
-      ctx.strokeStyle = takeoverOpen || ringingAlert ? "#ff1a1a" : "#ffcc00";
-      ctx.strokeRect(3, 3, width - 6, height - 6);
-
-      ctx.fillStyle = takeoverOpen || ringingAlert ? "#ff1a1a" : "#ffcc00";
-      ctx.font = "bold 18px 'Courier New', monospace";
-      ctx.fillText(
-        `CTU // ${mode === "TIMERS" ? "ACTIVE TIMERS HUD" : "ARMED ALARMS HUD"}`,
-        18,
-        32
-      );
-
-      ctx.fillStyle = "#9ca3af";
-      ctx.font = "bold 15px 'Courier New', monospace";
-      ctx.fillText(`BKK ${bangkokTime}`, width - 145, 32);
-
-      ctx.strokeStyle = "rgba(255, 204, 0, 0.4)";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(14, 42);
-      ctx.lineTo(width - 14, 42);
-      ctx.stroke();
-
-      if (mode === "TIMERS") {
-        const currentTimers = [...timersRef.current]
-          .sort((a, b) => {
-            const statusPriority: Record<string, number> = {
-              RUNNING: 1,
-              PAUSED: 2,
-              IDLE: 3,
-              EXPIRED: 4,
-            };
-            const priorityA = statusPriority[a.status] ?? 99;
-            const priorityB = statusPriority[b.status] ?? 99;
-            if (priorityA !== priorityB) {
-              return priorityA - priorityB;
-            }
-            return a.remainingSec - b.remainingSec;
-          })
-          .slice(0, 6);
-
-        let startY = 82;
-
-        currentTimers.forEach((timer, idx) => {
-          const isUrgent = timer.status === "RUNNING" && timer.remainingSec <= 10;
-          const isRunning = timer.status === "RUNNING";
-
-          ctx.fillStyle = isUrgent ? "#ff3333" : isRunning ? "#ffcc00" : "#6b7280";
-          ctx.font = "bold 18px 'Courier New', monospace";
-          const label = `${idx + 1}. ${timer.label.slice(0, 12).padEnd(12, " ")}`;
-          ctx.fillText(label, 18, startY);
-
-          ctx.font = "bold 24px 'Courier New', monospace";
-          const timeText = formatHMS(timer.remainingSec);
-          ctx.fillText(timeText, 250, startY);
-
-          ctx.font = "bold 15px 'Courier New', monospace";
-          const statusText = `[${timer.status}]`;
-          ctx.fillText(statusText, 450, startY);
-
-          startY += 48;
-        });
-      } else {
-        const currentAlarms = [...alarmsRef.current]
-          .map((alarm) => {
-            const nextMs = getNextAlarmEpochMs(alarm.timeStr, alarm.days);
-            const deltaSec = nextMs ? Math.max(0, Math.floor((nextMs - Date.now()) / 1000)) : Infinity;
-            return { ...alarm, nextMs, deltaSec };
-          })
-          .sort((a, b) => {
-            if (a.enabled && !b.enabled) return -1;
-            if (!a.enabled && b.enabled) return 1;
-            if (a.enabled && b.enabled) {
-              return (a.nextMs ?? Infinity) - (b.nextMs ?? Infinity);
-            }
-            return a.timeStr.localeCompare(b.timeStr);
-          })
-          .slice(0, 6);
-
-        let startY = 82;
-
-        currentAlarms.forEach((alarm, idx) => {
-          const isEnabled = alarm.enabled;
-          const deltaSec = alarm.deltaSec === Infinity ? 0 : alarm.deltaSec;
-          const isUrgent = isEnabled && deltaSec <= 10 && deltaSec > 0;
-
-          ctx.fillStyle = isUrgent ? "#ff3333" : isEnabled ? "#38bdf8" : "#4b5563";
-          ctx.font = "bold 18px 'Courier New', monospace";
-          const label = `${idx + 1}. ${alarm.label.slice(0, 12).padEnd(12, " ")}`;
-          ctx.fillText(label, 18, startY);
-
-          ctx.font = "bold 24px 'Courier New', monospace";
-          ctx.fillText(alarm.timeStr, 250, startY);
-
-          ctx.font = "bold 15px 'Courier New', monospace";
-          const statusText = isEnabled ? `IN ${formatHMS(deltaSec)}` : "[OFF]";
-          ctx.fillText(statusText, 420, startY);
-
-          startY += 48;
-        });
-      }
-    },
-    [bangkokTime, takeoverOpen, ringingAlert]
-  );
-
-  // Continuous PiP frame update
-  useEffect(() => {
-    if (!pipActive) return;
-    const interval = setInterval(() => {
-      renderPipFrame(pipMode);
-    }, 500);
-    return () => clearInterval(interval);
-  }, [pipActive, pipMode, renderPipFrame]);
-
-  // Open PiP with Android Chrome Gesture Preservation
-  const openPipHud = async (targetMode: "TIMERS" | "ALARMS") => {
-    setPipMode(targetMode);
-    setFloatingHudMode(targetMode);
+  // Open the Built-in Floating Tactical PiP HUD
+  const openFloatingPip = (mode: "TIMERS" | "ALARMS") => {
+    setFloatingPipMode(mode);
+    setFloatingPipOpen(true);
+    setFloatingPipMinimized(false);
 
     CTUAudio.unlockAudio()
       .then(() => setAudioUnlocked(true))
       .catch(() => {});
-
-    if (typeof navigator !== "undefined" && /SamsungBrowser/i.test(navigator.userAgent)) {
-      alert(
-        "Samsung Internet restricts dynamic Picture-in-Picture streams.\n\nFor floating background PiP on Samsung devices, please open this app in Google Chrome."
-      );
-      setFloatingHudActive(true);
-      return;
-    }
-
-    const isSupported =
-      typeof document !== "undefined" &&
-      "pictureInPictureEnabled" in document &&
-      document.pictureInPictureEnabled;
-
-    if (!isSupported) {
-      setFloatingHudActive(true);
-      return;
-    }
-
-    try {
-      if (!pipCanvasRef.current) {
-        const canvas = document.createElement("canvas");
-        canvas.width = 640;
-        canvas.height = 360;
-        pipCanvasRef.current = canvas;
-      }
-
-      renderPipFrame(targetMode);
-
-      if (!pipVideoRef.current) {
-        const video = document.createElement("video");
-        video.muted = true;
-        video.playsInline = true;
-        video.autoplay = true;
-        video.style.position = "fixed";
-        video.style.bottom = "0";
-        video.style.right = "0";
-        video.style.width = "160px";
-        video.style.height = "90px";
-        video.style.opacity = "0.05";
-        video.style.pointerEvents = "none";
-        video.style.zIndex = "1";
-        document.body.appendChild(video);
-        pipVideoRef.current = video;
-      }
-
-      const stream = pipCanvasRef.current.captureStream(25);
-      pipVideoRef.current.srcObject = stream;
-
-      await pipVideoRef.current.play();
-      await pipVideoRef.current.requestPictureInPicture();
-      setPipActive(true);
-
-      pipVideoRef.current.addEventListener(
-        "leavepictureinpicture",
-        () => {
-          setPipActive(false);
-        },
-        { once: true }
-      );
-    } catch (err) {
-      console.warn("[CTU] Native PiP restricted or blocked by OS. Engaging In-App Tactical HUD:", err);
-      setFloatingHudActive(true);
-    }
   };
+
+  // Dragging handlers for Touch and Mouse
+  const handleDragStart = (clientX: number, clientY: number) => {
+    isDraggingRef.current = true;
+    const currentX = pipPosition?.x ?? (typeof window !== "undefined" ? Math.max(10, window.innerWidth - 370) : 10);
+    const currentY = pipPosition?.y ?? (typeof window !== "undefined" ? Math.max(80, window.innerHeight - 380) : 80);
+
+    dragStartRef.current = {
+      clientX,
+      clientY,
+      posX: currentX,
+      posY: currentY,
+    };
+  };
+
+  const handleDragMove = useCallback((clientX: number, clientY: number) => {
+    if (!isDraggingRef.current) return;
+    const deltaX = clientX - dragStartRef.current.clientX;
+    const deltaY = clientY - dragStartRef.current.clientY;
+
+    const newX = Math.max(5, Math.min(window.innerWidth - 80, dragStartRef.current.posX + deltaX));
+    const newY = Math.max(50, Math.min(window.innerHeight - 80, dragStartRef.current.posY + deltaY));
+
+    setPipPosition({ x: newX, y: newY });
+  }, []);
+
+  const handleDragEnd = () => {
+    isDraggingRef.current = false;
+  };
+
+  useEffect(() => {
+    const onTouchMove = (e: TouchEvent) => {
+      if (isDraggingRef.current && e.touches[0]) {
+        handleDragMove(e.touches[0].clientX, e.touches[0].clientY);
+      }
+    };
+    const onMouseMove = (e: MouseEvent) => {
+      if (isDraggingRef.current) {
+        handleDragMove(e.clientX, e.clientY);
+      }
+    };
+    const onEnd = () => {
+      isDraggingRef.current = false;
+    };
+
+    window.addEventListener("touchmove", onTouchMove, { passive: false });
+    window.addEventListener("touchend", onEnd);
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onEnd);
+
+    return () => {
+      window.removeEventListener("touchmove", onTouchMove);
+      window.removeEventListener("touchend", onEnd);
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onEnd);
+    };
+  }, [handleDragMove]);
 
   // Main countdown engine tick (timers & alarms)
   useEffect(() => {
@@ -484,7 +352,6 @@ export function CTUTacticalOpsTerminal() {
   // Request Notification Permissions from Phone / Browser OR Median OneSignal Bridge
   const handleRequestAlertPermission = async () => {
     if (inMedian) {
-      // In Median APK: Trigger OneSignal Native Android System Popup
       const granted = await requestMedianOneSignalPermission();
       if (granted) {
         setMedianArmed(true);
@@ -495,7 +362,6 @@ export function CTUTacticalOpsTerminal() {
         );
       }
     } else {
-      // In Standard Browser (Chrome, etc.): Call Web Notification API
       const res = await requestNotificationPermission();
       setNotifPermission(res);
       if (res === "denied") {
@@ -515,7 +381,6 @@ export function CTUTacticalOpsTerminal() {
     } catch {}
 
     if (inMedian) {
-      // Median native test alert & hardware vibration
       await sendMedianTestAlert(
         "CTU TACTICAL OPS // TEST ALERT",
         "Median APK notification channel armed. Ticking countdowns verified."
@@ -525,7 +390,6 @@ export function CTUTacticalOpsTerminal() {
       return;
     }
 
-    // Standard Browser path
     if (typeof navigator !== "undefined" && "vibrate" in navigator) {
       try {
         navigator.vibrate([200, 100, 200, 100, 400]);
@@ -801,6 +665,30 @@ export function CTUTacticalOpsTerminal() {
     zeroSound: "theme",
   };
 
+  // Chronologically sorted items for PiP HUD
+  const sortedPipTimers = [...timers]
+    .sort((a, b) => {
+      const priority: Record<string, number> = { RUNNING: 1, PAUSED: 2, IDLE: 3, EXPIRED: 4 };
+      if (priority[a.status] !== priority[b.status]) {
+        return (priority[a.status] || 99) - (priority[b.status] || 99);
+      }
+      return a.remainingSec - b.remainingSec;
+    })
+    .slice(0, 4);
+
+  const sortedPipAlarms = [...alarms]
+    .map((a) => {
+      const nextMs = getNextAlarmEpochMs(a.timeStr, a.days);
+      const deltaSec = nextMs ? Math.max(0, Math.floor((nextMs - Date.now()) / 1000)) : Infinity;
+      return { ...a, nextMs, deltaSec };
+    })
+    .sort((a, b) => {
+      if (a.enabled && !b.enabled) return -1;
+      if (!a.enabled && b.enabled) return 1;
+      return (a.nextMs ?? Infinity) - (b.nextMs ?? Infinity);
+    })
+    .slice(0, 4);
+
   return (
     <div className="min-h-screen bg-[#070a0e] text-[#ffcc00] font-mono select-none flex flex-col p-2 sm:p-4 pb-20 md:pb-4">
       {/* Top Tactical Status Header Bar */}
@@ -882,27 +770,27 @@ export function CTUTacticalOpsTerminal() {
             TEST ALERT
           </button>
 
-          {/* PiP Controls */}
+          {/* Built-In Floating PiP Controls */}
           <button
-            onClick={() => openPipHud("TIMERS")}
+            onClick={() => openFloatingPip("TIMERS")}
             className={`px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded border transition-colors ${
-              (pipActive && pipMode === "TIMERS") || (floatingHudActive && floatingHudMode === "TIMERS")
+              floatingPipOpen && floatingPipMode === "TIMERS"
                 ? "bg-[#ffcc00] text-black border-[#ffcc00] shadow-[0_0_8px_#ffcc00]"
                 : "border-[#ffcc00]/40 hover:bg-[#ffcc00]/20 text-[#ffcc00]"
             }`}
-            title="Launch Picture-in-Picture display to all active timers"
+            title="Launch Draggable Floating PiP HUD for active timers"
           >
             PIP TIMERS
           </button>
 
           <button
-            onClick={() => openPipHud("ALARMS")}
+            onClick={() => openFloatingPip("ALARMS")}
             className={`px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded border transition-colors ${
-              (pipActive && pipMode === "ALARMS") || (floatingHudActive && floatingHudMode === "ALARMS")
+              floatingPipOpen && floatingPipMode === "ALARMS"
                 ? "bg-sky-400 text-black border-sky-400 shadow-[0_0_8px_#38bdf8]"
                 : "border-sky-400/40 hover:bg-sky-400/20 text-sky-400"
             }`}
-            title="Launch Picture-in-Picture display to all active alarms"
+            title="Launch Draggable Floating PiP HUD for armed alarms"
           >
             PIP ALARMS
           </button>
@@ -944,36 +832,7 @@ export function CTUTacticalOpsTerminal() {
         </div>
       )}
 
-      {/* In-App Floating Tactical Mini-HUD (Mobile PiP Fallback) */}
-      {floatingHudActive && (
-        <div className="mb-3 border-2 border-[#ffcc00] bg-[#0c111c] rounded p-2 shadow-[0_0_15px_rgba(255,204,0,0.3)] flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-[#ffcc00] animate-ping" />
-            <div className="text-xs font-bold text-[#ffcc00]">
-              FLOATING HUD // {floatingHudMode}:{" "}
-              {floatingHudMode === "TIMERS"
-                ? formatHMS(activeTimer.remainingSec)
-                : `${alarms.filter((a) => a.enabled).length} ARMED`}
-            </div>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => setFloatingHudMode((m) => (m === "TIMERS" ? "ALARMS" : "TIMERS"))}
-              className="px-2 py-0.5 text-[10px] border border-[#ffcc00]/40 rounded hover:bg-[#ffcc00]/20"
-            >
-              SWITCH
-            </button>
-            <button
-              onClick={() => setFloatingHudActive(false)}
-              className="px-2 py-0.5 text-[10px] border border-red-500/50 text-red-400 rounded hover:bg-red-500/20"
-            >
-              ✕
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Synchronized Twin Clocks (STABLE SINGLE-LINE TABULAR NUMS) */}
+      {/* Synchronized Twin Clocks */}
       <section className="grid grid-cols-2 gap-2 mb-3">
         <div className="border border-[#ffcc00]/40 bg-[#090d16] p-2 rounded overflow-hidden">
           <div className="text-[9px] text-gray-400 tracking-wider truncate mb-0.5">LOCAL TIME // BANGKOK</div>
@@ -986,7 +845,7 @@ export function CTUTacticalOpsTerminal() {
         </div>
       </section>
 
-      {/* Main Content Area: Responsive Mobile-Tabbed Layout */}
+      {/* Main Content Area */}
       <div className="flex-1 flex flex-col gap-3">
         {/* View 1: Primary Mission Focus Showcase */}
         <section
@@ -1238,6 +1097,203 @@ export function CTUTacticalOpsTerminal() {
         />
       )}
 
+      {/* BUILT-IN DRAGGABLE & MINIMIZABLE FLOATING TACTICAL PIP HUD */}
+      {floatingPipOpen && (
+        <aside
+          style={{
+            position: "fixed",
+            left: pipPosition ? `${pipPosition.x}px` : "auto",
+            right: pipPosition ? "auto" : "12px",
+            top: pipPosition ? `${pipPosition.y}px` : "auto",
+            bottom: pipPosition ? "auto" : "75px",
+            zIndex: 9999,
+            touchAction: "none",
+          }}
+          className="select-none"
+          aria-label="Floating Tactical PiP HUD"
+        >
+          {floatingPipMinimized ? (
+            /* Minimized Floating Pill */
+            <div
+              onClick={() => setFloatingPipMinimized(false)}
+              onMouseDown={(e) => handleDragStart(e.clientX, e.clientY)}
+              onTouchStart={(e) => {
+                if (e.touches[0]) handleDragStart(e.touches[0].clientX, e.touches[0].clientY);
+              }}
+              className="cursor-pointer border-2 border-[#ffcc00] bg-[#070a0e]/95 backdrop-blur-md px-3 py-2 rounded-full shadow-[0_0_18px_rgba(255,204,0,0.45)] flex items-center gap-2 hover:bg-[#ffcc00]/20 transition"
+              title="Drag to move. Tap to expand PiP HUD."
+            >
+              <span className="w-2.5 h-2.5 rounded-full bg-[#ffcc00] animate-ping" />
+              <span className="text-xs font-black tracking-widest text-[#ffcc00] font-mono tabular-nums">
+                {floatingPipMode === "TIMERS" ? formatHMS(activeTimer.remainingSec) : `${alarms.filter((a) => a.enabled).length} ARMED`}
+              </span>
+              <span className="text-[10px] text-gray-400 border-l border-gray-700 pl-1.5 uppercase font-bold">
+                {floatingPipMode}
+              </span>
+            </div>
+          ) : (
+            /* Full Expanded Draggable Tactical HUD Window */
+            <div
+              className={`w-[320px] sm:w-[360px] max-w-[92vw] rounded-lg border-2 bg-[#070a0e]/95 backdrop-blur-md shadow-[0_0_25px_rgba(255,204,0,0.35)] overflow-hidden flex flex-col ${
+                ringingAlert ? "border-red-500 shadow-[0_0_25px_rgba(239,68,68,0.6)]" : "border-[#ffcc00]"
+              }`}
+            >
+              {/* Header / Draggable Handle */}
+              <div
+                onMouseDown={(e) => handleDragStart(e.clientX, e.clientY)}
+                onTouchStart={(e) => {
+                  if (e.touches[0]) handleDragStart(e.touches[0].clientX, e.touches[0].clientY);
+                }}
+                className="cursor-move bg-[#0b1019] border-b border-[#ffcc00]/40 px-3 py-2 flex items-center justify-between"
+                title="Drag to reposition on screen"
+              >
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`w-2 h-2 rounded-full ${
+                      ringingAlert ? "bg-red-500 animate-ping" : "bg-emerald-400 animate-pulse"
+                    }`}
+                  />
+                  <span className="text-[11px] font-black uppercase tracking-wider text-[#ffcc00]">
+                    CTU PIP // {floatingPipMode}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() =>
+                      setFloatingPipMode((m) => (m === "TIMERS" ? "ALARMS" : "TIMERS"))
+                    }
+                    className="text-[9px] font-bold px-1.5 py-0.5 rounded border border-[#ffcc00]/40 text-[#ffcc00] hover:bg-[#ffcc00]/20 uppercase"
+                    title="Switch between Timers and Alarms view"
+                  >
+                    SWITCH
+                  </button>
+                  <button
+                    onClick={() => setFloatingPipMinimized(true)}
+                    className="text-xs font-black px-1.5 py-0.2 rounded border border-gray-700 text-gray-300 hover:text-white"
+                    title="Minimize to floating pill"
+                  >
+                    —
+                  </button>
+                  <button
+                    onClick={() => setFloatingPipOpen(false)}
+                    className="text-xs font-black px-1.5 py-0.2 rounded border border-red-500/60 text-red-400 hover:bg-red-500/20"
+                    title="Close PiP HUD"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+
+              {/* Main PiP Countdown Spotlight */}
+              <div className="p-3 text-center border-b border-[#ffcc00]/20 bg-black/40">
+                <div className="text-[10px] uppercase tracking-wider text-gray-400 mb-0.5">
+                  {floatingPipMode === "TIMERS"
+                    ? `FOCUS: ${activeTimer.label} [${activeTimer.status}]`
+                    : "NEXT ACTIVE ALARM"}
+                </div>
+                <div className="text-3xl font-black text-[#ffcc00] font-mono tabular-nums tracking-wider">
+                  {floatingPipMode === "TIMERS"
+                    ? formatHMS(activeTimer.remainingSec)
+                    : sortedPipAlarms[0]?.nextMs
+                    ? `IN ${formatHMS(sortedPipAlarms[0].deltaSec)}`
+                    : "NONE ARMED"}
+                </div>
+              </div>
+
+              {/* Chronological Queue Rows */}
+              <div className="p-2 space-y-1 max-h-[140px] overflow-y-auto text-[10px]">
+                {floatingPipMode === "TIMERS"
+                  ? sortedPipTimers.map((t, idx) => (
+                      <div
+                        key={t.id}
+                        className={`flex items-center justify-between p-1 rounded border ${
+                          t.status === "RUNNING"
+                            ? "border-emerald-500/50 bg-emerald-950/20 text-emerald-300"
+                            : "border-gray-800 bg-[#0c121e] text-gray-300"
+                        }`}
+                      >
+                        <span className="font-bold truncate w-28">
+                          {idx + 1}. {t.label}
+                        </span>
+                        <span className="font-mono tabular-nums font-black text-[#ffcc00]">
+                          {formatHMS(t.remainingSec)}
+                        </span>
+                        <span className="text-[9px] uppercase font-bold">[{t.status}]</span>
+                      </div>
+                    ))
+                  : sortedPipAlarms.map((a, idx) => (
+                      <div
+                        key={a.id}
+                        className={`flex items-center justify-between p-1 rounded border ${
+                          a.enabled
+                            ? "border-sky-500/50 bg-sky-950/20 text-sky-300"
+                            : "border-gray-800 bg-[#0c121e] opacity-60 text-gray-400"
+                        }`}
+                      >
+                        <span className="font-bold truncate w-28">
+                          {idx + 1}. {a.label}
+                        </span>
+                        <span className="font-mono tabular-nums font-black text-sky-400">
+                          {a.timeStr}
+                        </span>
+                        <span className="text-[9px] uppercase font-bold">
+                          {a.enabled ? `IN ${formatHMS(a.deltaSec)}` : "[OFF]"}
+                        </span>
+                      </div>
+                    ))}
+              </div>
+
+              {/* Floating Quick Action Controls */}
+              <div className="p-2 bg-[#0a0f18] border-t border-[#ffcc00]/20 flex items-center justify-between gap-1.5">
+                {floatingPipMode === "TIMERS" ? (
+                  <>
+                    {activeTimer.status !== "RUNNING" ? (
+                      <button
+                        onClick={() => handleExecuteTimer(activeTimer.id)}
+                        className="flex-1 py-1.5 bg-[#ffcc00] text-black font-black uppercase text-[10px] tracking-wider rounded hover:bg-[#ffd633]"
+                      >
+                        EXECUTE
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handlePauseTimer(activeTimer.id)}
+                        className="flex-1 py-1.5 bg-amber-600 text-black font-black uppercase text-[10px] tracking-wider rounded hover:bg-amber-500"
+                      >
+                        HOLD / PAUSE
+                      </button>
+                    )}
+
+                    <button
+                      onClick={() => handleStopAndResetTimer(activeTimer.id)}
+                      className="px-2 py-1.5 border border-red-500/60 text-red-400 font-bold uppercase text-[10px] tracking-wider rounded hover:bg-red-500/20"
+                    >
+                      RESET
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    onClick={() => setMobileTab("ALARMS")}
+                    className="flex-1 py-1.5 border border-sky-400 text-sky-300 font-bold uppercase text-[10px] tracking-wider rounded hover:bg-sky-400/20"
+                  >
+                    MANAGE ALARMS
+                  </button>
+                )}
+
+                {ringingAlert && (
+                  <button
+                    onClick={silenceActiveRinging}
+                    className="px-2.5 py-1.5 bg-red-600 text-white font-black uppercase text-[10px] tracking-wider rounded animate-pulse"
+                  >
+                    SILENCE
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        </aside>
+      )}
+
       {/* CTU OPERATIONAL CLEARANCE & PERMISSIONS POPUP */}
       {clearanceOpen && (
         <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
@@ -1261,7 +1317,7 @@ export function CTUTacticalOpsTerminal() {
               <p className="text-[10px] text-gray-300 mt-1 uppercase tracking-wider">
                 {inMedian
                   ? "Median APK hardware authorization for audio playback & OneSignal Android system alerts."
-                  : "First-launch hardware authorization for audio playback, phone lockscreen alerts & Samsung PiP exceptions."}
+                  : "First-launch hardware authorization for audio playback, phone lockscreen alerts & tactical PiP."}
               </p>
             </div>
 
@@ -1329,17 +1385,17 @@ export function CTUTacticalOpsTerminal() {
                 </button>
               </div>
 
-              {/* Protocol 3: Picture-in-Picture & Samsung Exception */}
+              {/* Protocol 3: Picture-in-Picture (PiP) */}
               <div className="border border-sky-400/40 bg-[#081224] p-3 rounded space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="font-bold text-sky-400 flex items-center gap-2">
-                    <span>3. PICTURE-IN-PICTURE (PIP) EXCEPTION</span>
-                    <span className="text-[9px] px-1.5 py-0.2 rounded font-black bg-sky-500/20 text-sky-300 border border-sky-400/40">
-                      {inMedian ? "MEDIAN APK" : "GOOGLE CHROME"}
+                    <span>3. FLOATING TACTICAL PIP HUD</span>
+                    <span className="text-[9px] px-1.5 py-0.2 rounded font-black bg-emerald-500/20 text-emerald-300 border border-emerald-400/40">
+                      ACTIVE &amp; BUILT-IN
                     </span>
                   </div>
                   <button
-                    onClick={() => openPipHud("TIMERS")}
+                    onClick={() => openFloatingPip("TIMERS")}
                     className="px-2.5 py-1 bg-sky-400 text-black font-black uppercase text-[10px] tracking-wider rounded hover:bg-sky-300"
                   >
                     TEST PIP
@@ -1348,19 +1404,10 @@ export function CTUTacticalOpsTerminal() {
 
                 <div className="text-[10px] text-gray-300 bg-black/40 p-2 rounded border border-sky-400/20 space-y-1">
                   <div className="font-bold text-sky-300 uppercase tracking-wide">
-                    ⚠️ Samsung OneUI / Android PiP Settings Exception:
+                    ✓ Built-In Floating PiP Engine Enabled:
                   </div>
                   <div className="text-gray-300 leading-relaxed">
-                    Android manages floating PiP in OS Special Access. If the PiP window does not float:
-                  </div>
-                  <ol className="list-decimal list-inside space-y-0.5 text-gray-400 pl-1">
-                    <li>Open phone <strong>Settings</strong> → <strong>Apps</strong>.</li>
-                    <li>Tap the <strong>three dots menu (⋮)</strong> top right → <strong>Special app access</strong>.</li>
-                    <li>Select <strong>Picture-in-picture</strong>.</li>
-                    <li>Set <strong>CTU Ops</strong> to <strong>Allowed</strong>.</li>
-                  </ol>
-                  <div className="text-[9px] text-amber-300/90 pt-1">
-                    ✓ Note: Floating In-App Tactical HUD fallback is permanently enabled if OS restricts native PiP.
+                    Operates natively inside the Median APK without requiring any special Android permissions or phone settings. Touch-draggable, minimizable, and hovers above all screens.
                   </div>
                 </div>
               </div>
